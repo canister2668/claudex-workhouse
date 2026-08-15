@@ -46,6 +46,11 @@ setInterval(()=>{},1000);
 }
 
 
+// Every case spawns dist-server/grok-worker.js as a real process and allows it
+// 15s, so the default 5s case budget cannot cover even one run. On a cold CI
+// runner the spawn outlived the case and the assertions then read an args
+// file the worker had not written yet, surfacing as ENOENT rather than as the
+// timeout it was.
 describe("Grok worker CLI contract",()=>{
   it("keeps read-only sessions tool-restricted",()=>{
     const{result,args,state}=runWorker({});
@@ -97,4 +102,4 @@ describe("Grok worker CLI contract",()=>{
   it("preserves a concrete provider failure when the result omits its message",()=>{const{state}=runWorker({events:[{type:"result",subtype:"error_during_execution",is_error:true}],stderr:"API error (status 429 Too Many Requests): free usage exhausted\n"});expect(state).toMatchObject({status:"failed",error:"API error (status 429 Too Many Requests): free usage exhausted"});});
 
   it("keeps an actual Workhouse stop distinct from headless approval failure",async()=>{await expect(runStoppedWorker()).resolves.toMatchObject({status:"stopped",error:null});});
-});
+},30_000);
