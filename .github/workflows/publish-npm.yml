@@ -1,0 +1,96 @@
+# Publishes an already-released tarball to npm.
+#
+# The release workflow publishes to npm as its last step, but a release is
+# immutable once published: if that step fails, or the registry token arrives
+# later, the release cannot be re-run to retry it. This workflow does the same
+# work against a release that already exists.
+#
+# It never builds anything. It takes the tarball GitHub is already serving and
+# refuses to publish unless those bytes match the digest bound into the signed
+# release manifest, so the registry receives exactly what the release did.
+name: publish npm
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Released version to publish, for example 1.0.0
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: publish-npm
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    environment: release
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+      - name: Require a registry token
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          set -eu
+          if [ -z "${NPM_TOKEN:-}" ]; then
+            printf '%s\n' 'No NPM_TOKEN is configured for this repository.' >&2
+            exit 1
+          fi
+      - name: Download the published tarball and its signed manifest
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          set -eu
+          case "$VERSION" in
+            [0-9]*.[0-9]*.[0-9]*) ;;
+            *) printf '%s\n' 'The version must be a released stable version.' >&2; exit 1 ;;
+          esac
+          base="https://github.com/${GITHUB_REPOSITORY}/releases/download/v${VERSION}"
+          mkdir -p npm-publish
+          for asset in "claudex-workhouse-$VERSION.tgz" release-manifest.json release-manifest.json.sig; do
+            curl \
+              --fail --silent --show-error --location \
+              --proto '=https' --proto-redir '=https' \
+              "$base/$asset" \
+              --output "npm-publish/$asset"
+          done
+      - name: Verify the tarball against the signed release manifest
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          set -eu
+          expected="$(node -e '
+            const fs = require("node:fs");
+            const manifest = JSON.parse(fs.readFileSync("npm-publish/release-manifest.json", "utf8"));
+            const record = manifest.nodePackage;
+            if (!record) { console.error("The signed manifest binds no Node package."); process.exit(1); }
+            if (manifest.version !== process.env.VERSION) { console.error("The manifest describes another release."); process.exit(1); }
+            if (record.filename !== `claudex-workhouse-${process.env.VERSION}.tgz`) { console.error("The manifest binds another filename."); process.exit(1); }
+            process.stdout.write(record.sha256);
+          ')"
+          actual="$(sha256sum "npm-publish/claudex-workhouse-$VERSION.tgz" | cut -d" " -f1)"
+          if [ "$expected" != "$actual" ]; then
+            printf '%s\n' "The published tarball does not match the signed manifest." >&2
+            exit 1
+          fi
+      - name: Publish to npm with provenance
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          set -eu
+          # The path must be explicitly relative: npm reads a bare `a/b` argument
+          # as a GitHub shorthand and tries to clone it over SSH.
+          npm publish "./npm-publish/claudex-workhouse-$VERSION.tgz" --provenance --access public

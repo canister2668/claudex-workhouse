@@ -1083,4 +1083,8 @@ jobs:
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
           VERSION: ${{ needs.preflight.outputs.version }}
-        run: npm publish "npm-publish/claudex-workhouse-$VERSION.tgz" --provenance --access public
+        run: |
+          set -eu
+          # The path must be explicitly relative: npm reads a bare `a/b` argument
+          # as a GitHub shorthand and tries to clone it over SSH.
+          npm publish "./npm-publish/claudex-workhouse-$VERSION.tgz" --provenance --access public

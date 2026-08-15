@@ -7,6 +7,7 @@ const windowsTestWorkflow=fs.readFileSync(path.resolve("..",".github","workflows
 const windowsLaunchTest=fs.readFileSync(path.resolve("scripts","test-windows-server-package.ps1"),"utf8");
 const windowsPackager=fs.readFileSync(path.resolve("scripts","package-windows-server.mjs"),"utf8");
 const windowsLauncher=fs.readFileSync(path.resolve("..","launcher","windows","src","main.cpp"),"utf8");
+const npmWorkflow=fs.readFileSync(path.resolve("..",".github","workflows","publish-npm.yml"),"utf8");
 
 describe("release workflow Windows exclusion",()=>{
   it("builds no Windows target, because those targets are in development",()=>{
@@ -90,6 +91,21 @@ describe("npm distribution contract",()=>{
     expect(workflow).toContain("The published tarball does not match the signed manifest.");
     expect(workflow).toContain("The signed manifest binds no Node package.");
     expect(workflow).not.toMatch(/npm publish[^\n]*release-assets/);
+    // npm reads a bare `a/b` argument as a GitHub shorthand and clones it over
+    // SSH, which is how the first publish attempt failed.
+    for(const value of[workflow,npmWorkflow])expect(value).toMatch(/npm publish "\.\//);
+  });
+
+  it("can publish to npm for a release that is already immutable",()=>{
+    // A release cannot be re-run once published, so a failed or deferred npm
+    // step needs a path that does not involve rebuilding the release.
+    expect(npmWorkflow).toContain("workflow_dispatch:");
+    expect(npmWorkflow).toContain("releases/download/v${VERSION}");
+    expect(npmWorkflow).toContain("The published tarball does not match the signed manifest.");
+    expect(npmWorkflow).toContain("The signed manifest binds no Node package.");
+    // It publishes what the release published; it must not build anything.
+    expect(npmWorkflow).not.toContain("pnpm run build");
+    expect(npmWorkflow).not.toContain("pack-node-package");
   });
 });
 
