@@ -8,7 +8,7 @@ test("the desktop file heading keeps mode switches together on one row",async({p
     class SilentEventSource{constructor(public url:string){}addEventListener(){}close(){}}
     Object.defineProperty(globalThis,"EventSource",{value:SilentEventSource,configurable:true});
   });
-  const now=new Date().toISOString(),entry={id:"file-app",name:"claudex-workhouse-arca-intro-final-20260814-extremely-long-file-name.review.html",type:"file",size:29,modifiedAt:now,sensitive:false,relativePath:"src/App.ts"};
+  const now=new Date().toISOString(),entry={id:"file-app",name:"workspace-viewer-heading-extremely-long-file-name-for-overflow-check.review.html",type:"file",size:29,modifiedAt:now,sensitive:false,relativePath:"src/App.ts"};
   await page.route("**/api/**",async route=>{
     const pathname=new URL(route.request().url()).pathname,json=(value:unknown)=>route.fulfill({status:200,contentType:"application/json",body:JSON.stringify(value)});
     if(pathname==="/api/bootstrap/owner-claim/status")return json({required:false});

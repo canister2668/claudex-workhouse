@@ -18,7 +18,11 @@ const viewports=[
   {name:"compact-over-1025",width:1025,height:600,immersive:false}
 ] as const;
 
-test("scroll chrome stays stable across responsive boundaries",async({page})=>{
+test("scroll chrome stays stable across responsive boundaries",async({page},testInfo)=>{
+  // The immersive bottom chrome only turns on for a coarse pointer, so this
+  // describes a layout the pointer-fine desktop project never renders.
+  test.skip(!(testInfo.project.use.hasTouch??false),"the immersive bottom chrome requires a touch context");
+
   test.setTimeout(150_000);
   await page.addInitScript(()=>{
     localStorage.setItem("claudex-ui-locale","ko");
@@ -53,7 +57,7 @@ test("scroll chrome stays stable across responsive boundaries",async({page})=>{
   for(const viewport of viewports)await test.step(viewport.name,async()=>{
     await page.setViewportSize({width:viewport.width,height:viewport.height});
     await page.goto(`/?task=matrix-task&viewport=${viewport.name}`);
-    const shell=page.locator(".shell"),conversation=page.locator(".conversation"),heading=page.locator(".task-heading"),drawer=page.locator(".bottom-chrome-drawer"),actions=page.locator(".mobile-session-actions"),composer=page.locator(".composer"),badge=page.locator(".work-status-badge"),nav=page.locator(".primary-nav"),rail=page.locator(".session-side-rail");
+    const shell=page.locator(".shell"),conversation=page.locator(".conversation"),heading=page.locator(".task-heading"),drawer=page.locator(".bottom-chrome-drawer"),composer=page.locator(".composer"),badge=page.locator(".work-status-badge"),nav=page.locator(".primary-nav"),rail=page.locator(".session-side-rail");
     if("rail" in viewport){
       if(viewport.rail)await expect(rail).toBeVisible();
       else await expect(rail).toBeHidden();
@@ -113,23 +117,24 @@ test("scroll chrome stays stable across responsive boundaries",async({page})=>{
       const toggle=page.locator(".mobile-controls-toggle");
       await expect(toggle).toBeVisible();
       await toggle.click();
-      await expect(actions).toHaveClass(/mobile-controls-collapsed/);
-      await expect(page.locator(".chat-settings-bar")).toHaveClass(/mobile-controls-collapsed/);
+      // The labelled action row this once collapsed was replaced by a popover
+      // menu, so the toggle now opens and closes a sheet instead of adding a
+      // class to a row that no longer exists.
+      const sessionMenu=page.locator(".session-actions-sheet");
+      await expect(sessionMenu).toBeVisible();
       await page.waitForTimeout(300);
-      await expect(actions).toHaveClass(/mobile-controls-collapsed/);
-      await expect(page.locator(".chat-settings-bar")).toHaveClass(/mobile-controls-collapsed/);
+      await expect(sessionMenu).toBeVisible();
       await toggle.click();
-      await expect(actions).not.toHaveClass(/mobile-controls-collapsed/);
-      await expect(page.locator(".chat-settings-bar")).not.toHaveClass(/mobile-controls-collapsed/);
+      await expect(sessionMenu).not.toBeVisible();
       await page.waitForTimeout(300);
     }
 
+    // The action row that used to sit above the composer is now a popover
+    // trigger inside it, so the drawer stacks composer → nav at every width.
     if(viewport.width<=760){
-      const [actionsBox,composerBox,navBox]=await Promise.all([actions.boundingBox(),composer.boundingBox(),nav.boundingBox()]);
-      expect(actionsBox!.y+actionsBox!.height).toBeLessThanOrEqual(composerBox!.y+1);
+      const [composerBox,navBox]=await Promise.all([composer.boundingBox(),nav.boundingBox()]);
       expect(composerBox!.y+composerBox!.height).toBeLessThanOrEqual(navBox!.y+1);
     }else{
-      await expect(actions).toBeHidden();
       await expect(composer).toBeVisible();
     }
 

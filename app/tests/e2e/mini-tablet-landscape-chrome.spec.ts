@@ -1,6 +1,10 @@
 import{expect,test}from"@playwright/test";
 
-test("mini-tablet landscape hides bottom chrome completely and restores it at the end",async({page})=>{
+test("mini-tablet landscape hides bottom chrome completely and restores it at the end",async({page},testInfo)=>{
+  // The immersive bottom chrome only turns on for a coarse pointer, so this
+  // describes a layout the pointer-fine desktop project never renders.
+  test.skip(!(testInfo.project.use.hasTouch??false),"the immersive bottom chrome requires a touch context");
+
   await page.addInitScript(()=>{
     localStorage.setItem("claudex-ui-locale","ko");
     class SilentEventSource{onerror:null|(()=>void)=null;constructor(public url:string){}addEventListener(){}close(){}}
@@ -33,7 +37,7 @@ test("mini-tablet landscape hides bottom chrome completely and restores it at th
   });
 
   await page.goto("/?task=landscape-task");
-  const shell=page.locator(".shell"),detailMain=page.locator(".detail-main"),conversation=page.locator(".conversation"),drawer=page.locator(".bottom-chrome-drawer"),actions=page.locator(".mobile-session-actions"),composer=page.locator(".composer"),nav=page.locator(".primary-nav");
+  const shell=page.locator(".shell"),detailMain=page.locator(".detail-main"),conversation=page.locator(".conversation"),drawer=page.locator(".bottom-chrome-drawer"),composer=page.locator(".composer"),nav=page.locator(".primary-nav");
   await expect(shell).toHaveClass(/chrome-drawer-enabled/);
   await expect.poll(()=>conversation.evaluate(element=>element.scrollHeight-element.clientHeight)).toBeGreaterThan(600);
   const [drawerHeight,headingHeight]=await Promise.all([drawer.evaluate(element=>element.getBoundingClientRect().height),page.locator(".task-heading").evaluate(element=>element.getBoundingClientRect().height)]);
@@ -56,23 +60,23 @@ test("mini-tablet landscape hides bottom chrome completely and restores it at th
   await conversation.evaluate(element=>element.scrollTo({top:element.scrollHeight-element.clientHeight-100}));
   await expect.poll(()=>drawer.evaluate(element=>Number(getComputedStyle(element).opacity))).toBeGreaterThan(0);
   await expect.poll(()=>drawer.evaluate(element=>Number(getComputedStyle(element).opacity))).toBeLessThan(1);
-  const [partialActionsBox,partialComposerBox]=await Promise.all([actions.boundingBox(),composer.boundingBox()]);
-  expect(partialActionsBox!.y+partialActionsBox!.height).toBeLessThanOrEqual(partialComposerBox!.y+1);
 
   await conversation.evaluate(element=>element.scrollTo({top:element.scrollHeight}));
   await expect.poll(()=>conversation.evaluate(element=>element.scrollHeight-element.clientHeight-element.scrollTop)).toBeLessThanOrEqual(1);
   await expect(drawer).not.toHaveAttribute("inert");
   await expect(drawer).toHaveCSS("opacity","1");
-  const [detailBox,actionsBox,composerBox,navBox]=await Promise.all([detailMain.boundingBox(),actions.boundingBox(),composer.boundingBox(),nav.boundingBox()]);
-  expect(actionsBox!.y).toBeGreaterThanOrEqual(detailBox!.y-1);
-  expect(actionsBox!.y+actionsBox!.height).toBeLessThanOrEqual(composerBox!.y+1);
+  // The action row between the detail and the composer was replaced by a
+  // popover trigger inside the composer, so the drawer now stacks
+  // detail → composer → nav.
+  const [detailBox,composerBox,navBox]=await Promise.all([detailMain.boundingBox(),composer.boundingBox(),nav.boundingBox()]);
+  expect(composerBox!.y).toBeGreaterThanOrEqual(detailBox!.y-1);
   expect(composerBox!.y+composerBox!.height).toBeLessThanOrEqual(navBox!.y+1);
 
   for(let attempt=0;attempt<4;attempt++){
     await conversation.evaluate(element=>{element.dispatchEvent(new PointerEvent("pointerdown",{bubbles:true}));element.scrollTop=Math.max(80,element.scrollHeight/2);element.dispatchEvent(new Event("scroll"));element.scrollTop=element.scrollHeight;element.dispatchEvent(new Event("scroll"));});
     await expect.poll(()=>conversation.evaluate(element=>element.scrollHeight-element.clientHeight-element.scrollTop)).toBeLessThanOrEqual(1);
     await expect(drawer).toHaveCSS("opacity","1");
-    const [raceActionsBox,raceComposerBox]=await Promise.all([actions.boundingBox(),composer.boundingBox()]);
-    expect(raceActionsBox!.y+raceActionsBox!.height).toBeLessThanOrEqual(raceComposerBox!.y+1);
+    const [raceComposerBox,raceNavBox]=await Promise.all([composer.boundingBox(),nav.boundingBox()]);
+    expect(raceComposerBox!.y+raceComposerBox!.height).toBeLessThanOrEqual(raceNavBox!.y+1);
   }
 });
