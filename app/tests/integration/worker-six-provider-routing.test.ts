@@ -6,7 +6,16 @@ import { RemoteTaskManager, providerSessions } from "../../src/server/desktop-wo
 import { WORKER_PROVIDERS } from "../../src/server/desktop-worker/provider-adapters.js";
 
 const roots: string[] = [];
-afterEach(() => { vi.unstubAllEnvs(); while (roots.length) fs.rmSync(roots.pop()!, { recursive: true, force: true }); });
+// A start that the capability matrix admits really does launch the fixture
+// runtime, and that child keeps writing its state files under `data/` for a
+// moment after the awaited command has already answered. A plain recursive
+// remove walks into a directory that reappears underneath it and fails with
+// ENOTEMPTY — which once stalled a release on a test that had actually passed.
+// `maxRetries` is the same remedy the product code uses for this race.
+afterEach(() => {
+  vi.unstubAllEnvs();
+  while (roots.length) fs.rmSync(roots.pop()!, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
+});
 
 const executable = (file: string) => { fs.mkdirSync(path.dirname(file), { recursive: true }); fs.writeFileSync(file, "#!/bin/sh\nexit 0\n", { mode: 0o755 }); return file; };
 
