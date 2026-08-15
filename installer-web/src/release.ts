@@ -295,13 +295,17 @@ export function validateReleaseManifest(
     "linux-x64",
     "linux-arm64"
   ]);
-  const windowsWorker = workerAsset(workersInput["windows-x64"], "workers.windows-x64", {
+  // The Windows Worker is in development and a release may omit it entirely.
+  // When the manifest carries one it is validated exactly as before.
+  const windowsWorker = workersInput["windows-x64"] === undefined
+    ? undefined
+    : workerAsset(workersInput["windows-x64"], "workers.windows-x64", {
     platform: "windows",
     architecture: "x64",
     format: "zip",
     suffix: ".zip",
     launcher: true
-  });
+      });
   const linuxX64 = workerAsset(workersInput["linux-x64"], "workers.linux-x64", {
     platform: "linux",
     architecture: "x64",
@@ -317,14 +321,14 @@ export function validateReleaseManifest(
     launcher: false
   });
   const workerDirectories = new Set(
-    [windowsWorker, linuxX64, linuxArm64].map((worker) => new URL(".", worker.url).href)
+    [windowsWorker, linuxX64, linuxArm64].filter((worker) => worker !== undefined).map((worker) => new URL(".", worker.url).href)
   );
   if (workerDirectories.size !== 1) {
     throw new Error("Worker 자산은 하나의 불변 릴리스 디렉터리를 사용해야 합니다.");
   }
   if(windowsServer&&new URL(".",windowsServer.url).href!==[...workerDirectories][0])throw new Error("Windows server와 Worker 자산은 하나의 불변 릴리스 디렉터리를 사용해야 합니다.");
   if(windowsPortable&&new URL(".",windowsPortable.url).href!==[...workerDirectories][0])throw new Error("Windows portable과 Worker 자산은 하나의 불변 릴리스 디렉터리를 사용해야 합니다.");
-  for(const worker of[windowsWorker,linuxX64,linuxArm64]){
+  for(const worker of[windowsWorker,linuxX64,linuxArm64].filter(item=>item!==undefined)){
     if(schemaVersion===3&&worker.minimumUpdaterProtocolVersion===undefined)throw new Error("schemaVersion 3 Worker에는 minimumUpdaterProtocolVersion이 필요합니다.");
     if(schemaVersion!==3&&worker.minimumUpdaterProtocolVersion!==undefined)throw new Error("Worker minimumUpdaterProtocolVersion은 schemaVersion 3에서만 허용됩니다.");
   }
@@ -367,7 +371,7 @@ export function validateReleaseManifest(
     ...(windowsServer?{windowsServer}:{}),
     ...(windowsPortable?{windowsPortable}:{}),
     workers: Object.freeze({
-      "windows-x64": windowsWorker,
+      ...(windowsWorker?{"windows-x64":windowsWorker}:{}),
       "linux-x64": linuxX64,
       "linux-arm64": linuxArm64
     }),
@@ -517,7 +521,9 @@ function assertReleasePolicy(
   }
   const workerOrigins = allowedOrigins(config.allowedWorkerOrigins, "Worker origin");
   for (const key of ["windows-x64", "linux-x64", "linux-arm64"] as const) {
-    if (!workerOrigins.has(new URL(manifest.workers[key].url).origin)) {
+    const workerAssetForKey = manifest.workers[key];
+    if (workerAssetForKey === undefined) continue;
+    if (!workerOrigins.has(new URL(workerAssetForKey.url).origin)) {
       throw new Error(`${key} Worker 다운로드 origin이 신뢰 목록에 없습니다.`);
     }
   }
@@ -584,7 +590,10 @@ export async function verifyReleaseBytes(
     allowedImageRepositories: config.allowedImageRepositories,
     allowedWorkerOrigins: config.allowedWorkerOrigins
   });
-  const immutableBase = new URL(".", manifest.workers["windows-x64"].url);
+  // Any Worker in the manifest shares one immutable release directory, so the
+  // base no longer depends on the Windows entry being present.
+  const immutableWorker = manifest.workers["windows-x64"] ?? manifest.workers["linux-x64"];
+  const immutableBase = new URL(".", immutableWorker.url);
 
   return Object.freeze({
     manifest,

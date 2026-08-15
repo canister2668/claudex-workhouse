@@ -187,6 +187,10 @@ function workerPanel(): string {
     return `<section class="panel blocked"><h2>Windows Worker 패키지</h2><p>릴리스 서명이 검증되기 전에는 다운로드할 수 없습니다.</p><button disabled>다운로드 비활성화</button></section>`;
   }
   const worker = state.release.manifest.workers["windows-x64"];
+  // Windows targets are in development, so a release may carry no Worker asset.
+  if (!worker) {
+    return `<section class="panel blocked"><h2>Windows Worker 패키지</h2><p>이 릴리스에는 Windows Worker가 포함되어 있지 않습니다.</p><button disabled>다운로드 비활성화</button></section>`;
+  }
   const script = createWindowsWorkerDownload(state.release);
   return `<section class="panel">
     <h2>Windows PC를 Worker로 연결</h2>
@@ -394,6 +398,7 @@ async function downloadWorker(): Promise<void> {
   state.notice = "";
   render();
   const asset = state.release.manifest.workers["windows-x64"];
+  if (!asset) throw new Error("이 릴리스에는 Windows Worker 자산이 없습니다.");
   try {
     const script = createWindowsWorkerDownload(state.release);
     download(script.fileName, script.content, "text/x-powershell;charset=utf-8");

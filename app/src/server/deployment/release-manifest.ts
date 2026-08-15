@@ -132,7 +132,9 @@ const releaseManifestSchema = z.object({
   windowsServer:windowsServerArtifactSchema.optional(),
   windowsPortable:windowsPortableArtifactSchema.optional(),
   workers: z.object({
-    "windows-x64": workerArtifactSchema,
+    // Optional: Windows targets are in development and a release ships none
+    // of them, so a manifest may carry no Windows worker at all.
+    "windows-x64": workerArtifactSchema.optional(),
     "linux-x64": workerArtifactSchema,
     "linux-arm64": workerArtifactSchema
   }).strict(),
@@ -150,18 +152,21 @@ const releaseManifestSchema = z.object({
     algorithm: z.literal("rsa-sha256")
   }).strict()
 }).strict().superRefine((manifest, context) => {
-  if((manifest.schemaVersion>=2)!==Boolean(manifest.windowsServer)){
-    context.addIssue({code:z.ZodIssueCode.custom,path:["windowsServer"],message:manifest.schemaVersion>=2?"is required for schemaVersion 2 and newer":"is supported only by schemaVersion 2 and newer"});
+  // A Windows record stays forbidden below the schema version that introduced
+  // it, but is no longer required at or above it: Windows targets are in
+  // development and a release ships none of them.
+  if(manifest.schemaVersion<2&&manifest.windowsServer){
+    context.addIssue({code:z.ZodIssueCode.custom,path:["windowsServer"],message:"is supported only by schemaVersion 2 and newer"});
   }
-  if((manifest.schemaVersion===3)!==Boolean(manifest.windowsPortable)){
-    context.addIssue({code:z.ZodIssueCode.custom,path:["windowsPortable"],message:manifest.schemaVersion===3?"is required for schemaVersion 3":"is supported only by schemaVersion 3"});
+  if(manifest.schemaVersion!==3&&manifest.windowsPortable){
+    context.addIssue({code:z.ZodIssueCode.custom,path:["windowsPortable"],message:"is supported only by schemaVersion 3"});
   }
   if(manifest.schemaVersion===3){
     if(manifest.server.minimumUpdaterProtocolVersion===undefined)context.addIssue({code:z.ZodIssueCode.custom,path:["server","minimumUpdaterProtocolVersion"],message:"is required for schemaVersion 3"});
-    for(const key of WORKER_KEYS)if(manifest.workers[key].minimumUpdaterProtocolVersion===undefined)context.addIssue({code:z.ZodIssueCode.custom,path:["workers",key,"minimumUpdaterProtocolVersion"],message:"is required for schemaVersion 3"});
+    for(const key of WORKER_KEYS)if(manifest.workers[key]&&manifest.workers[key].minimumUpdaterProtocolVersion===undefined)context.addIssue({code:z.ZodIssueCode.custom,path:["workers",key,"minimumUpdaterProtocolVersion"],message:"is required for schemaVersion 3"});
   }else{
     if(manifest.server.minimumUpdaterProtocolVersion!==undefined)context.addIssue({code:z.ZodIssueCode.custom,path:["server","minimumUpdaterProtocolVersion"],message:"is supported only by schemaVersion 3"});
-    for(const key of WORKER_KEYS)if(manifest.workers[key].minimumUpdaterProtocolVersion!==undefined)context.addIssue({code:z.ZodIssueCode.custom,path:["workers",key,"minimumUpdaterProtocolVersion"],message:"is supported only by schemaVersion 3"});
+    for(const key of WORKER_KEYS)if(manifest.workers[key]?.minimumUpdaterProtocolVersion!==undefined)context.addIssue({code:z.ZodIssueCode.custom,path:["workers",key,"minimumUpdaterProtocolVersion"],message:"is supported only by schemaVersion 3"});
   }
   if (Date.parse(manifest.publishedAt) >= Date.parse(manifest.expiresAt)) {
     context.addIssue({
@@ -201,6 +206,7 @@ const releaseManifestSchema = z.object({
   };
   for (const key of WORKER_KEYS) {
     const worker = manifest.workers[key];
+    if (!worker) continue;
     const binding = expected[key];
     if (
       worker.platform !== binding.platform ||
@@ -244,7 +250,10 @@ const releaseManifestSchema = z.object({
     }
   }
   const workerDirectories = new Set(
-    WORKER_KEYS.map((key) => new URL(".", manifest.workers[key].url).href)
+    WORKER_KEYS.flatMap((key) => {
+      const worker = manifest.workers[key];
+      return worker ? [new URL(".", worker.url).href] : [];
+    })
   );
   if(manifest.windowsServer){
     const server=manifest.windowsServer;
@@ -430,7 +439,9 @@ function assertPolicy(manifest: ReleaseManifest, manifestUrl: string, signatureU
     throw new ReleaseManifestError("IMAGE_REPOSITORY_REJECTED", "Server image repository is not trusted by release policy.");
   }
   for (const key of WORKER_KEYS) {
-    if (!workerOrigins.has(new URL(manifest.workers[key].url).origin)) {
+    const worker = manifest.workers[key];
+    if (!worker) continue;
+    if (!workerOrigins.has(new URL(worker.url).origin)) {
       throw new ReleaseManifestError("WORKER_ORIGIN_REJECTED", `Worker artifact origin is not trusted for ${key}.`);
     }
   }
@@ -548,7 +559,9 @@ export function verifyReleaseManifest(input: VerifyReleaseManifestInput): Verifi
 }
 
 export function toTrustedReleaseMetadata(release: VerifiedRelease): TrustedReleaseMetadata {
-  const immutableBase = new URL(".", release.manifest.workers["windows-x64"].url);
+  // Any worker URL fixes the immutable per-release asset directory. The
+  // Windows worker is optional, so fall back to a worker that always ships.
+  const immutableBase = new URL(".", (release.manifest.workers["windows-x64"] ?? release.manifest.workers["linux-x64"]).url);
   return frozen({
     schemaVersion: 1,
     version: release.manifest.version,
@@ -579,6 +592,9 @@ export function toTrustedWorkerPackageMetadata(
     throw new ReleaseManifestError("WORKER_UNSUPPORTED", `No public Worker package is supported for ${platform}/${architecture}.`);
   }
   const worker = release.manifest.workers[key];
+  if (!worker) {
+    throw new ReleaseManifestError("WORKER_UNSUPPORTED", `This release ships no Worker package for ${platform}/${architecture}.`);
+  }
   const immutableBase = new URL(".", worker.url);
   return frozen({
     schemaVersion: 1,

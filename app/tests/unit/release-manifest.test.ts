@@ -254,7 +254,9 @@ describe("public release manifest trust", () => {
     const value=manifest({schemaVersion:2,windowsServer:windowsServer()});
     expect(value.windowsServer).toMatchObject({platform:"windows",format:"exe",authenticode:{status:"unsigned"}});
     expect(verify(value).manifest.windowsServer?.sha256).toBe("c".repeat(64));
-    expect(()=>parseReleaseManifest({...value,windowsServer:undefined})).toThrowError(expect.objectContaining({code:"MANIFEST_INVALID"}));
+    // A schema v2 manifest may carry no Windows server: those targets are in
+    // development and a release ships none of them.
+    expect(parseReleaseManifest({...value,windowsServer:undefined}).windowsServer).toBeUndefined();
     expect(()=>parseReleaseManifest({...manifest(),windowsServer:windowsServer()})).toThrowError(expect.objectContaining({code:"MANIFEST_INVALID"}));
   });
   it("rejects Windows server origin, filename, and Authenticode binding changes",()=>{
@@ -273,7 +275,8 @@ describe("public release manifest trust", () => {
       workers:Object.fromEntries(Object.entries(base.workers).map(([key,worker])=>[key,{...worker,minimumUpdaterProtocolVersion:1}]))
     });
     expect(verify(value).manifest.windowsPortable?.sha256).toBe("d".repeat(64));
-    expect(()=>parseReleaseManifest({...value,windowsPortable:undefined})).toThrowError(expect.objectContaining({code:"MANIFEST_INVALID"}));
+    // Likewise the portable ZIP: absent is valid, present below v3 is not.
+    expect(parseReleaseManifest({...value,windowsPortable:undefined}).windowsPortable).toBeUndefined();
     expect(()=>parseReleaseManifest({...value,server:{...value.server,minimumUpdaterProtocolVersion:undefined}})).toThrowError(expect.objectContaining({code:"MANIFEST_INVALID"}));
     const workers={...value.workers,"linux-x64":{...value.workers["linux-x64"],minimumUpdaterProtocolVersion:undefined}};
     expect(()=>parseReleaseManifest({...value,workers})).toThrowError(expect.objectContaining({code:"MANIFEST_INVALID"}));

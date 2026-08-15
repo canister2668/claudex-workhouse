@@ -89,7 +89,7 @@ export interface ReleaseManifest {
   readonly windowsServer?:WindowsServerAsset;
   readonly windowsPortable?:WindowsPortableAsset;
   readonly workers: {
-    readonly "windows-x64": WorkerAsset;
+    readonly "windows-x64"?: WorkerAsset;
     readonly "linux-x64": WorkerAsset;
     readonly "linux-arm64": WorkerAsset;
   };

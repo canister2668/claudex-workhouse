@@ -77,6 +77,8 @@ export function saveCompatibleProviderSettings(dataRoot:string,provider:Compatib
 }
 
 export function ollamaTagsUrl(baseUrl:string){return`${baseUrl.replace(/\/$/,"")}/api/tags`;}
+/** The catalog omits each cloud model's rolling alias, so an unlisted base name is confirmed one at a time here. */
+export function ollamaShowUrl(baseUrl:string){return`${baseUrl.replace(/\/$/,"")}/api/show`;}
 export function deepseekModelsUrl(baseUrl:string){const url=new URL(baseUrl),parts=url.pathname.replace(/\/$/,"").split("/");if(parts.at(-1)==="anthropic")parts.pop();url.pathname=`${parts.join("/")}/models`.replace(/\/+/g,"/");url.search="";url.hash="";return url.toString();}
 /** Undocumented but live: returns the account's session (5h) and weekly limit utilization. */
 export function ollamaUsageUrl(baseUrl:string){return`${baseUrl.replace(/\/$/,"")}/api/usage`;}

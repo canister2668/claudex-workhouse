@@ -9,6 +9,10 @@
 >
 > Windows에서 지금 쓰려면 **Linux 호스트나 NAS에 메인 서버를 설치하고 브라우저로
 > 접속**하세요 — [설치 시작](index.md). PWA가 지원되는 Windows 사용 방식입니다.
+>
+> **공개 릴리스에는 Windows 자산이 하나도 들어 있지 않습니다.** 아래에서 말하는
+> EXE·포터블 ZIP·Windows Worker ZIP은 릴리스에서 내려받을 수 없고, 직접 소스에서
+> 빌드해야 합니다(`windows-test-build` workflow를 수동 실행).
 
 ## 지원 위치
 

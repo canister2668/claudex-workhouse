@@ -290,22 +290,18 @@ function compareNames(left: string, right: string): number {
   return left === right ? 0 : left < right ? -1 : 1;
 }
 
+// Windows targets are in development and a release ships none of them, so the
+// inventory lists only what is published. Restoring them here is part of
+// releasing Windows again.
 export function expectedReleaseAssetNames(version: string): readonly string[] {
   stableVersionParts(version);
   return [
     "SHA256SUMS",
     `claudex-workhouse-installer-site-${version}.tar.gz`,
-    "claudex-workhouse-server-windows-x64-portable.zip",
-    "claudex-workhouse-server-windows-x64-portable.zip.sha256",
-    "claudex-workhouse-server-windows-x64.exe",
-    "claudex-workhouse-server-windows-x64.exe.sha256",
-    "claudex-workhouse-server-windows-x64.exe.spdx.json",
     "claudex-workhouse-worker-linux-arm64.tar.gz",
     "claudex-workhouse-worker-linux-arm64.tar.gz.spdx.json",
     "claudex-workhouse-worker-linux-x64.tar.gz",
     "claudex-workhouse-worker-linux-x64.tar.gz.spdx.json",
-    "claudex-workhouse-worker-windows-x64.zip",
-    "claudex-workhouse-worker-windows-x64.zip.spdx.json",
     "release-manifest.json",
     "release-manifest.json.sig"
   ].sort(compareNames);

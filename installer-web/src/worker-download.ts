@@ -28,6 +28,9 @@ export function createWindowsWorkerDownload(
   release: VerifiedRelease
 ): WindowsWorkerDownload {
   const worker = release.manifest.workers["windows-x64"];
+  // The Windows Worker is in development; a release that omits it cannot
+  // produce this download.
+  if (!worker) throw new Error("이 릴리스에는 Windows Worker 자산이 없습니다.");
   const key = release.verifiedKey;
   const fileName = `download-claudex-workhouse-worker-${release.manifest.version}.ps1`;
   const launchCommand =

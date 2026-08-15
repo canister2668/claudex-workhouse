@@ -14,7 +14,7 @@ import {resolveTranscriptFile} from "../claude-transcript.js";
 import {streamFile} from "../stream-events.js";
 import {ProviderTaskSnapshotCache} from "../provider-task-snapshot.js";
 import {ensureTaskTempDirectory} from "../workspace-temp.js";
-import {compatibleProviderConfig,compatibleProviderEnvironment,deepseekModelsUrl,ollamaTagsUrl,type CompatibleProviderId} from "../compatible-provider-config.js";
+import {compatibleProviderConfig,compatibleProviderEnvironment,deepseekModelsUrl,ollamaTagsUrl,ollamaShowUrl,type CompatibleProviderId} from "../compatible-provider-config.js";
 import {RuntimeModelCatalog,type RuntimeModelCatalogSnapshot} from "../runtime-model-catalog.js";
 import {ClaudeProvider} from "./claude.js";
 import{workspaceInstructionFollowUpMetadata}from"../workspace-instructions.js";
@@ -98,7 +98,27 @@ export class AnthropicCompatibleProvider implements AgentProvider{
   }
   private processMatches(task:DeckTask){if(!task.pid||!task.pgid||!task.commandMarker||!task.processStart)return false;try{const stat=fs.readFileSync(`/proc/${task.pid}/stat`,"utf8").split(" "),cmd=fs.readFileSync(`/proc/${task.pid}/cmdline`,"utf8").replaceAll("\0"," ");return stat[21]===task.processStart&&Number(stat[4])===task.pgid&&cmd.includes("claude-worker.js")&&cmd.includes(task.commandMarker);}catch{return false;}}
   async stopTask(task:DeckTask){task=await this.refresh(task);if(!this.processMatches(task))throw Object.assign(new Error("Worker process identity no longer matches the recorded task."),{statusCode:409});process.kill(-task.pgid!,"SIGTERM");for(let i=0;i<20;i++){await new Promise(resolve=>setTimeout(resolve,250));if(!this.processMatches(task))return this.db.upsertTask({...task,status:"stopped",updatedAt:now()});}if(this.processMatches(task))process.kill(-task.pgid!,"SIGKILL");return this.db.upsertTask({...task,status:"stopped",updatedAt:now()});}
-  private async loadModels():Promise<CompatibleModel[]>{const config=compatibleProviderConfig(this.id,this.config.dataRoot);if(!config.apiKey)throw new Error(`${config.label} API key is required.`);const url=this.id==="deepseek"?deepseekModelsUrl(config.baseUrl):ollamaTagsUrl(config.baseUrl),response=await fetch(url,{headers:{Authorization:`Bearer ${config.apiKey}`},signal:AbortSignal.timeout(5000)});if(!response.ok)throw new Error(`${config.label} model catalog returned HTTP ${response.status}.`);const value=await response.json() as any,rows=this.id==="deepseek"?value?.data:value?.models;return(Array.isArray(rows)?rows:[]).map((item:any)=>String(item?.id??item?.name??item?.model??"").trim()).filter(Boolean).map((id:string)=>({id,displayName:id.replaceAll("-"," ").replace(/\b\w/g,value=>value.toUpperCase()),source:"runtime" as const}));}
+  /**
+   * The Ollama catalog answers with each cloud model's pinned tags but omits its
+   * rolling alias, so a model the account can actually run is missing from the
+   * grid. Every base name the catalog itself mentions but does not list on its
+   * own is confirmed against /api/show and kept when the account may run it. The
+   * names come from the response rather than from a list held here, so a model
+   * added later needs no change. A probe that fails is dropped, never fatal.
+   */
+  private async ollamaRollingAliases(config:{baseUrl:string;apiKey:string},listed:string[]):Promise<string[]>{
+    const present=new Set(listed),candidates=[...new Set(listed.map(name=>name.split(":")[0]).filter(name=>name&&!present.has(name)))];
+    if(!candidates.length)return[];
+    const url=ollamaShowUrl(config.baseUrl);
+    const results=await Promise.all(candidates.map(async model=>{
+      try{
+        const response=await fetch(url,{method:"POST",headers:{Authorization:`Bearer ${config.apiKey}`,"Content-Type":"application/json"},body:JSON.stringify({model}),signal:AbortSignal.timeout(5000)});
+        return response.ok?model:null;
+      }catch{return null;}
+    }));
+    return results.filter((model):model is string=>Boolean(model));
+  }
+  private async loadModels():Promise<CompatibleModel[]>{const config=compatibleProviderConfig(this.id,this.config.dataRoot);if(!config.apiKey)throw new Error(`${config.label} API key is required.`);const url=this.id==="deepseek"?deepseekModelsUrl(config.baseUrl):ollamaTagsUrl(config.baseUrl),response=await fetch(url,{headers:{Authorization:`Bearer ${config.apiKey}`},signal:AbortSignal.timeout(5000)});if(!response.ok)throw new Error(`${config.label} model catalog returned HTTP ${response.status}.`);const value=await response.json() as any,rows=this.id==="deepseek"?value?.data:value?.models;const listed=(Array.isArray(rows)?rows:[]).map((item:any)=>String(item?.id??item?.name??item?.model??"").trim()).filter(Boolean);const ids=this.id==="ollama"?[...listed,...await this.ollamaRollingAliases({baseUrl:config.baseUrl,apiKey:config.apiKey},listed)]:listed;return ids.map((id:string)=>({id,displayName:id.replaceAll("-"," ").replace(/\b\w/g,value=>value.toUpperCase()),source:"runtime" as const}));}
   getModelCatalog(force=false):Promise<RuntimeModelCatalogSnapshot<CompatibleModel>>{return this.modelCatalog.get(force);}
   async getModels(force=false):Promise<CompatibleModel[]>{return(await this.getModelCatalog(force)).models;}
   async healthCheck(){

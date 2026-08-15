@@ -164,6 +164,39 @@ describe("release manifest publishing script",()=>{
     expect(verified.manifestSha256).toBe(result.manifestSha256);
   });
 
+  it("omits every Windows record when a release supplies no Windows artifact",()=>{
+    // The shipping release path: Windows targets are in development, so the
+    // workflow sets none of their variables and the manifest carries none of
+    // their records rather than failing on a missing required artifact.
+    const value=fixture();
+    const {
+      CLAUDEX_WORKHOUSE_WINDOWS_X64_PACKAGE:_worker,
+      CLAUDEX_WORKHOUSE_WINDOWS_SERVER_EXE:_exe,
+      CLAUDEX_WORKHOUSE_WINDOWS_SERVER_PORTABLE:_portable,
+      ...environment
+    }=value.environment;
+    const result=createReleaseManifest(environment);
+    expect(result.manifest.workers["windows-x64"]).toBeUndefined();
+    expect(Object.keys(result.manifest.workers).sort()).toEqual(["linux-arm64","linux-x64"]);
+    expect(result.manifest.windowsServer).toBeUndefined();
+    expect(result.manifest.windowsPortable).toBeUndefined();
+    expect(JSON.stringify(result.manifest).toLowerCase()).not.toContain("windows");
+    const verified=verifyReleaseManifest({
+      manifestBytes:fs.readFileSync(result.manifestFile),
+      signatureBytes:fs.readFileSync(result.signatureFile),
+      manifestUrl:"https://github.com/canister2668/claudex-workhouse/releases/download/v1.0.0/release-manifest.json",
+      signatureUrl:"https://github.com/canister2668/claudex-workhouse/releases/download/v1.0.0/release-manifest.json.sig",
+      keyRing:JSON.parse(fs.readFileSync(value.ringFile,"utf8")),
+      policy:{
+        allowedManifestOrigins:["https://github.com/"],
+        allowedWorkerOrigins:["https://github.com/"],
+        allowedImageRepositories:["ghcr.io/canister2668/claudex-workhouse"]
+      },
+      now:new Date("2026-07-27T12:01:00.000Z")
+    });
+    expect(verified.manifestSha256).toBe(result.manifestSha256);
+  });
+
   it("refuses a private key that does not match the pinned key ring",()=>{
     const value=fixture();
     const replacement=crypto.generateKeyPairSync("rsa",{

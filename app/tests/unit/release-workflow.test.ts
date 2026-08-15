@@ -8,37 +8,20 @@ const windowsLaunchTest=fs.readFileSync(path.resolve("scripts","test-windows-ser
 const windowsPackager=fs.readFileSync(path.resolve("scripts","package-windows-server.mjs"),"utf8");
 const windowsLauncher=fs.readFileSync(path.resolve("..","launcher","windows","src","main.cpp"),"utf8");
 
-describe("unsigned Windows server release workflow contract",()=>{
-  it("builds, verifies, scans, attests, checksums, and supplies the EXE and portable ZIP",()=>{
+describe("release workflow Windows exclusion",()=>{
+  it("builds no Windows target, because those targets are in development",()=>{
+    // A release ships no Windows asset. The Windows contract that still holds
+    // is the manual test build below; restoring a Windows release job means
+    // restoring its contract test here too.
     for(const value of[
       "windows-server:",
-      "runs-on: windows-2022",
-      "node-version: 24",
-      "npm_config_node_linker: hoisted",
-      "cmake --build out/windows-launcher --config Release",
-      "Get-AuthenticodeSignature",
-      "SignatureStatus]::NotSigned",
-      "Compress-Archive",
-      "claudex-workhouse-server-windows-x64-portable.zip",
-      "claudex-workhouse-server-windows-x64-portable.zip.sha256",
-      "claudex-workhouse-server-windows-x64.exe.sha256",
-      "test-windows-server-package.ps1",
-      "Get-FileHash -LiteralPath $file -Algorithm SHA256",
-      "Start-MpScan",
-      "Get-MpComputerStatus",
-      "Get-MpThreatDetection",
-      "Get-MpThreat",
-      "AntivirusSignatureLastUpdated",
-      "path: packages/claudex-workhouse-server-windows-x64-folder",
-      "subject-path: packages/claudex-workhouse-server-windows-x64.exe",
-      "CLAUDEX_WORKHOUSE_WINDOWS_SERVER_EXE:",
-      "CLAUDEX_WORKHOUSE_WINDOWS_SERVER_PORTABLE:",
-      "CLAUDEX_WORKHOUSE_RELEASE_VERSION=${{ needs.preflight.outputs.version }}",
-      "Create unified release checksums",
-      "SHA256SUMS",
-    ])expect(workflow).toContain(value);
-    expect(workflow).toMatch(/prepare-release:\n\s+needs: \[preflight, image, workers, windows-server\]/);
-    expect(workflow).not.toContain("WINDOWS_SIGNING_CERTIFICATE_PFX_BASE64");
+      "windows-2022",
+      "claudex-workhouse-windows-x64.exe",
+      "claudex-workhouse-windows-portable.zip",
+      "claudex-workhouse-worker-windows-x64.zip",
+      "CLAUDEX_WORKHOUSE_WINDOWS_SERVER_EXE_URL"
+    ])expect(workflow).not.toContain(value);
+    expect(workflow.toLowerCase()).not.toContain("windows");
   });
 });
 

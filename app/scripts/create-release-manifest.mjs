@@ -86,7 +86,11 @@ function verifyPortableExecutable(file){
     if(peOffset<64||peOffset>16*1024*1024||fs.readSync(fd,signature,0,4,peOffset)!==4||!signature.equals(Buffer.from([0x50,0x45,0,0])))throw new Error("Windows server artifact has an invalid PE signature.");
   }finally{fs.closeSync(fd);}
 }
+// Windows targets are built but not released while their acceptance run is
+// outstanding, so a release simply omits them. Supplying the variable puts
+// the record back with every check it already had.
 function windowsServerRecord(environment,baseUrl){
+  if(!environment.CLAUDEX_WORKHOUSE_WINDOWS_SERVER_EXE?.trim())return null;
   const artifact=regularFile(required(environment,"CLAUDEX_WORKHOUSE_WINDOWS_SERVER_EXE"),"CLAUDEX_WORKHOUSE_WINDOWS_SERVER_EXE");
   if(path.basename(artifact.path)!==WINDOWS_SERVER_FILENAME)throw new Error(`CLAUDEX_WORKHOUSE_WINDOWS_SERVER_EXE must use the official filename ${WINDOWS_SERVER_FILENAME}.`);
   verifyPortableExecutable(artifact.path);
@@ -94,6 +98,7 @@ function windowsServerRecord(environment,baseUrl){
 }
 
 function windowsPortableRecord(environment,baseUrl,version){
+  if(!environment.CLAUDEX_WORKHOUSE_WINDOWS_SERVER_PORTABLE?.trim())return null;
   const artifact=regularFile(required(environment,"CLAUDEX_WORKHOUSE_WINDOWS_SERVER_PORTABLE"),"CLAUDEX_WORKHOUSE_WINDOWS_SERVER_PORTABLE");
   if(path.basename(artifact.path)!==WINDOWS_PORTABLE_FILENAME)throw new Error(`CLAUDEX_WORKHOUSE_WINDOWS_SERVER_PORTABLE must use the official filename ${WINDOWS_PORTABLE_FILENAME}.`);
   const expected={format:"zip",filename:WINDOWS_PORTABLE_FILENAME};
@@ -338,6 +343,7 @@ function verifyWorkerArchive(artifact,expected,version){
 function workerRecord(environment,key,baseUrl,version){
   const expected=EXPECTED_WORKERS[key];
   const variable=`CLAUDEX_WORKHOUSE_${key.replaceAll("-","_").toUpperCase()}_PACKAGE`;
+  if(!environment[variable]?.trim())return null;
   const artifact=regularFile(required(environment,variable),variable);
   if(path.basename(artifact.path)!==expected.filename){
     throw new Error(`${variable} must use the official filename ${expected.filename}.`);
@@ -433,10 +439,12 @@ export function createReleaseManifest(environment=process.env){
       platforms:["linux/amd64","linux/arm64"],
       minimumUpdaterProtocolVersion:UPDATER_PROTOCOL_VERSION
     },
-    windowsServer:windowsServerRecord(environment,assetBaseUrl),
-    windowsPortable:windowsPortableRecord(environment,assetBaseUrl,version),
+    ...(windowsServerRecord(environment,assetBaseUrl)?{windowsServer:windowsServerRecord(environment,assetBaseUrl)}:{}),
+    ...(windowsPortableRecord(environment,assetBaseUrl,version)?{windowsPortable:windowsPortableRecord(environment,assetBaseUrl,version)}:{}),
     workers:Object.fromEntries(
-      Object.keys(EXPECTED_WORKERS).map(key=>[key,{...workerRecord(environment,key,assetBaseUrl,version),minimumUpdaterProtocolVersion:UPDATER_PROTOCOL_VERSION}])
+      Object.keys(EXPECTED_WORKERS).map(key=>[key,workerRecord(environment,key,assetBaseUrl,version)])
+        .filter(([,record])=>record)
+        .map(([key,record])=>[key,{...record,minimumUpdaterProtocolVersion:UPDATER_PROTOCOL_VERSION}])
     ),
     requirements:{
       docker:environment.CLAUDEX_WORKHOUSE_MIN_DOCKER?.trim()||">=24.0.0",
