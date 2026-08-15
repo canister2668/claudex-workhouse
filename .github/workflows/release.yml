@@ -824,6 +824,8 @@ jobs:
             release-manifest.json.sig \
             "claudex-workhouse-installer-site-${{ needs.preflight.outputs.version }}.tar.gz" \
             "claudex-workhouse-${{ needs.preflight.outputs.version }}.tgz" \
+            "claudex-workhouse-linux-nas-quickstart-${{ needs.preflight.outputs.version }}.tar.gz" \
+            "claudex-workhouse-linux-nas-quickstart-${{ needs.preflight.outputs.version }}.tar.gz.sha256" \
             claudex-workhouse-worker-linux-x64.tar.gz \
             claudex-workhouse-worker-linux-x64.tar.gz.spdx.json \
             claudex-workhouse-worker-linux-arm64.tar.gz \

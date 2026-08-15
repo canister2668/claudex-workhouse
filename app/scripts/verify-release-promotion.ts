@@ -297,6 +297,10 @@ export function expectedReleaseAssetNames(version: string): readonly string[] {
   stableVersionParts(version);
   return [
     "SHA256SUMS",
+    // The Linux and NAS quick-start bundle is built and attested by the release,
+    // so it is published rather than discarded.
+    `claudex-workhouse-linux-nas-quickstart-${version}.tar.gz`,
+    `claudex-workhouse-linux-nas-quickstart-${version}.tar.gz.sha256`,
     `claudex-workhouse-installer-site-${version}.tar.gz`,
     // The npm tarball ships as a release asset too, so the bytes the registry
     // serves can be checked against the signed manifest.

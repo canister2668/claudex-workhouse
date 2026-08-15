@@ -149,12 +149,32 @@ describe("release promotion guard", () => {
     for (const name of expectedReleaseAssetNames("1.1.0")) {
       fs.writeFileSync(path.join(directory, name), name);
     }
-    // Nine: the Windows EXE, portable ZIP, their checksums and SBOM, and the
+    // Eleven: the Windows EXE, portable ZIP, their checksums and SBOM, and the
     // Windows Worker left the published set while those targets are in
-    // development, and the npm tarball joined it.
-    expect(createReleaseAssetInventory(directory, "1.1.0")).toHaveLength(9);
+    // development; the npm tarball and the quick-start bundle joined it.
+    expect(createReleaseAssetInventory(directory, "1.1.0")).toHaveLength(11);
     fs.writeFileSync(path.join(directory, "unexpected.exe"), "x");
     expect(() => createReleaseAssetInventory(directory, "1.1.0")).toThrow(/exactly/);
+  });
+
+  it("expects exactly the assets the release workflow writes", () => {
+    // The guard compares the directory against this list exactly, so an asset
+    // the workflow produces but the list omits fails the release at the very
+    // last gate — after the image is built and the workers are packed. That is
+    // how the quick-start bundle stalled a release once. Read the workflow and
+    // require the two to agree.
+    const workflow = fs.readFileSync(path.resolve("..", ".github", "workflows", "release.yml"), "utf8");
+    const version = "1.1.0";
+    const expected = new Set(expectedReleaseAssetNames(version));
+    const written = new Set<string>();
+    for (const [, name] of workflow.matchAll(/release-assets\/([A-Za-z0-9._${}() -]+?)["'\s]/g)) {
+      const resolved = name.replaceAll("${{ needs.preflight.outputs.version }}", version).trim();
+      // Files the workflow names through a step output cannot be resolved here.
+      if (resolved.includes("${{") || !resolved.includes(".")) continue;
+      written.add(resolved);
+    }
+    expect(written.size).toBeGreaterThan(0);
+    expect([...written].filter(name => !expected.has(name))).toEqual([]);
   });
 
   it("peels annotated remote tags to the release commit", async () => {
