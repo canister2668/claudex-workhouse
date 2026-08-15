@@ -17,6 +17,12 @@ jobs:
     runs-on: ubuntu-24.04
     environment: release
     timeout-minutes: 10
+    # Reading repos/*/immutable-releases needs the administration scope. Without
+    # it the gate returned 403 and reported the setting as disabled, which is
+    # indistinguishable from a repository that genuinely has it turned off.
+    permissions:
+      contents: read
+      administration: read
     outputs:
       version: ${{ steps.release.outputs.version }}
       published-at: ${{ steps.release.outputs.published_at }}
