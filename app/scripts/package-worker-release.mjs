@@ -110,7 +110,11 @@ function bundle(entry, output, version, bundledPackages) {
   const requireBridge =
     'import { createRequire as __claudexCreateRequire } from "node:module"; const require = __claudexCreateRequire(import.meta.url);';
   const metafile = `${output}.metadata.json`;
-  run("pnpm", [
+  // pnpm is a .cmd shim on Windows and CreateProcess cannot launch it by the
+  // bare name, so spawnSync reports ENOENT. Name the shim rather than turning
+  // on `shell`, which this helper deliberately leaves off.
+  const pnpmCommand = process.platform === "win32" ? "pnpm.cmd" : "pnpm";
+  run(pnpmCommand, [
     "exec",
     "esbuild",
     entry,
