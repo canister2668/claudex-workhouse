@@ -558,78 +558,11 @@ jobs:
           esac
           printf 'inventory_base64=%s\n' "$inventory_base64" >> "$GITHUB_OUTPUT"
           printf 'manifest_sha256=%s\n' "$manifest_sha256" >> "$GITHUB_OUTPUT"
-      - name: Create and verify draft release
-        env:
-          GH_TOKEN: ${{ github.token }}
-          RELEASE_TAG: ${{ github.ref_name }}
-          CLAUDEX_WORKHOUSE_PROMOTION_PHASE: prepare
-          CLAUDEX_WORKHOUSE_STABLE_MANIFEST_URL: ${{ needs.preflight.outputs.public-manifest-url }}
-          CLAUDEX_WORKHOUSE_STABLE_SIGNATURE_URL: ${{ needs.preflight.outputs.public-signature-url }}
-          CLAUDEX_WORKHOUSE_RELEASE_KEY_RING_FILE: ${{ github.workspace }}/deploy/release-key-ring.json
-          CLAUDEX_WORKHOUSE_RELEASE_WORKER_ORIGIN: ${{ needs.preflight.outputs.installer-connect-origin }}
-          CLAUDEX_WORKHOUSE_RELEASE_IMAGE_REPOSITORY: ${{ needs.preflight.outputs.image-repository }}
-          CLAUDEX_WORKHOUSE_EXPECTED_PREVIOUS_PRESENT: ${{ steps.channel.outputs.previous_present }}
-          CLAUDEX_WORKHOUSE_EXPECTED_PREVIOUS_VERSION: ${{ steps.channel.outputs.previous_version }}
-          CLAUDEX_WORKHOUSE_EXPECTED_PREVIOUS_SEQUENCE: ${{ steps.channel.outputs.previous_sequence }}
-          CLAUDEX_WORKHOUSE_EXPECTED_PREVIOUS_MANIFEST_SHA256: ${{ steps.channel.outputs.previous_manifest_sha256 }}
-          CLAUDEX_WORKHOUSE_NEXT_RELEASE_VERSION: ${{ needs.preflight.outputs.version }}
-          CLAUDEX_WORKHOUSE_NEXT_RELEASE_SEQUENCE: ${{ steps.channel.outputs.next_sequence }}
-          CLAUDEX_WORKHOUSE_NEXT_MANIFEST_SHA256: ${{ steps.release-state.outputs.manifest_sha256 }}
-          CLAUDEX_WORKHOUSE_EXPECTED_ASSET_INVENTORY_BASE64: ${{ steps.release-state.outputs.inventory_base64 }}
-        run: |
-          set -eu
-          pnpm --silent --dir app release:promotion-guard guard >/dev/null
-          if existing="$(gh release view "$RELEASE_TAG" \
-            --repo "$GITHUB_REPOSITORY" \
-            --json isDraft \
-            --jq .isDraft 2>/dev/null)"; then
-            if [ "$existing" != true ]; then
-              printf '%s\n' "Published immutable release $RELEASE_TAG already exists." >&2
-              exit 1
-            fi
-          else
-            pnpm --silent --dir app release:promotion-guard guard >/dev/null
-            gh release create "$RELEASE_TAG" \
-              --repo "$GITHUB_REPOSITORY" \
-              --verify-tag \
-              --draft \
-              --latest=false \
-              --title "Claudex Workhouse $RELEASE_TAG" \
-              --generate-notes
-          fi
-          gh release upload "$RELEASE_TAG" release-assets/* \
-            --repo "$GITHUB_REPOSITORY" \
-            --clobber
-          pnpm --silent --dir app release:promotion-guard assets >/dev/null
-          verify_directory="$(mktemp -d)"
-          trap 'rm -rf -- "$verify_directory"' EXIT HUP INT TERM
-          gh release download "$RELEASE_TAG" \
-            --repo "$GITHUB_REPOSITORY" \
-            --dir "$verify_directory"
-          env CLAUDEX_WORKHOUSE_RELEASE_VERIFY_DIRECTORY="$verify_directory" \
-            CLAUDEX_WORKHOUSE_RELEASE_KEY_RING_FILE="$GITHUB_WORKSPACE/deploy/release-key-ring.json" \
-            CLAUDEX_WORKHOUSE_EXPECTED_IMAGE_DIGEST="${{ needs.image.outputs.digest }}" \
-            CLAUDEX_WORKHOUSE_EXPECTED_IMAGE_REPOSITORY="${{ needs.preflight.outputs.image-repository }}" \
-            CLAUDEX_WORKHOUSE_EXPECTED_VERSION="${{ needs.preflight.outputs.version }}" \
-            CLAUDEX_WORKHOUSE_EXPECTED_ASSET_BASE_URL="${{ needs.preflight.outputs.asset-base-url }}" \
-            pnpm --dir app release:verify-directory
-      - name: Name this attempt's Pages artifacts
-        id: pages-artifacts
-        run: |
-          printf 'stage=installer-stage-%s-%s\n' "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" >> "$GITHUB_OUTPUT"
-          printf 'promote=installer-promote-%s-%s\n' "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" >> "$GITHUB_OUTPUT"
-      - name: Upload staged installer site with the previous stable pointer
-        uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
-        with:
-          name: ${{ steps.pages-artifacts.outputs.stage }}
-          path: public-installer-stage
-          retention-days: 14
-      - name: Upload installer site with the new stable pointer
-        uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
-        with:
-          name: ${{ steps.pages-artifacts.outputs.promote }}
-          path: public-installer-promote
-          retention-days: 14
+      # The image guard runs before the draft is touched. It is cheap and
+      # decisive, and the upload below clobbers the assets of whatever draft
+      # already exists — so a run that is going to be refused here must be
+      # refused before it overwrites a good draft with assets no inventory
+      # describes.
       - name: Promote the immutable image version only when absent or identical
         env:
           GH_TOKEN: ${{ github.token }}
@@ -710,6 +643,78 @@ jobs:
           node-version: 22
           cache: pnpm
           cache-dependency-path: app/pnpm-lock.yaml
+      - name: Create and verify draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.ref_name }}
+          CLAUDEX_WORKHOUSE_PROMOTION_PHASE: prepare
+          CLAUDEX_WORKHOUSE_STABLE_MANIFEST_URL: ${{ needs.preflight.outputs.public-manifest-url }}
+          CLAUDEX_WORKHOUSE_STABLE_SIGNATURE_URL: ${{ needs.preflight.outputs.public-signature-url }}
+          CLAUDEX_WORKHOUSE_RELEASE_KEY_RING_FILE: ${{ github.workspace }}/deploy/release-key-ring.json
+          CLAUDEX_WORKHOUSE_RELEASE_WORKER_ORIGIN: ${{ needs.preflight.outputs.installer-connect-origin }}
+          CLAUDEX_WORKHOUSE_RELEASE_IMAGE_REPOSITORY: ${{ needs.preflight.outputs.image-repository }}
+          CLAUDEX_WORKHOUSE_EXPECTED_PREVIOUS_PRESENT: ${{ steps.channel.outputs.previous_present }}
+          CLAUDEX_WORKHOUSE_EXPECTED_PREVIOUS_VERSION: ${{ steps.channel.outputs.previous_version }}
+          CLAUDEX_WORKHOUSE_EXPECTED_PREVIOUS_SEQUENCE: ${{ steps.channel.outputs.previous_sequence }}
+          CLAUDEX_WORKHOUSE_EXPECTED_PREVIOUS_MANIFEST_SHA256: ${{ steps.channel.outputs.previous_manifest_sha256 }}
+          CLAUDEX_WORKHOUSE_NEXT_RELEASE_VERSION: ${{ needs.preflight.outputs.version }}
+          CLAUDEX_WORKHOUSE_NEXT_RELEASE_SEQUENCE: ${{ steps.channel.outputs.next_sequence }}
+          CLAUDEX_WORKHOUSE_NEXT_MANIFEST_SHA256: ${{ steps.release-state.outputs.manifest_sha256 }}
+          CLAUDEX_WORKHOUSE_EXPECTED_ASSET_INVENTORY_BASE64: ${{ steps.release-state.outputs.inventory_base64 }}
+        run: |
+          set -eu
+          pnpm --silent --dir app release:promotion-guard guard >/dev/null
+          if existing="$(gh release view "$RELEASE_TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --json isDraft \
+            --jq .isDraft 2>/dev/null)"; then
+            if [ "$existing" != true ]; then
+              printf '%s\n' "Published immutable release $RELEASE_TAG already exists." >&2
+              exit 1
+            fi
+          else
+            pnpm --silent --dir app release:promotion-guard guard >/dev/null
+            gh release create "$RELEASE_TAG" \
+              --repo "$GITHUB_REPOSITORY" \
+              --verify-tag \
+              --draft \
+              --latest=false \
+              --title "Claudex Workhouse $RELEASE_TAG" \
+              --generate-notes
+          fi
+          gh release upload "$RELEASE_TAG" release-assets/* \
+            --repo "$GITHUB_REPOSITORY" \
+            --clobber
+          pnpm --silent --dir app release:promotion-guard assets >/dev/null
+          verify_directory="$(mktemp -d)"
+          trap 'rm -rf -- "$verify_directory"' EXIT HUP INT TERM
+          gh release download "$RELEASE_TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --dir "$verify_directory"
+          env CLAUDEX_WORKHOUSE_RELEASE_VERIFY_DIRECTORY="$verify_directory" \
+            CLAUDEX_WORKHOUSE_RELEASE_KEY_RING_FILE="$GITHUB_WORKSPACE/deploy/release-key-ring.json" \
+            CLAUDEX_WORKHOUSE_EXPECTED_IMAGE_DIGEST="${{ needs.image.outputs.digest }}" \
+            CLAUDEX_WORKHOUSE_EXPECTED_IMAGE_REPOSITORY="${{ needs.preflight.outputs.image-repository }}" \
+            CLAUDEX_WORKHOUSE_EXPECTED_VERSION="${{ needs.preflight.outputs.version }}" \
+            CLAUDEX_WORKHOUSE_EXPECTED_ASSET_BASE_URL="${{ needs.preflight.outputs.asset-base-url }}" \
+            pnpm --dir app release:verify-directory
+      - name: Name this attempt's Pages artifacts
+        id: pages-artifacts
+        run: |
+          printf 'stage=installer-stage-%s-%s\n' "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" >> "$GITHUB_OUTPUT"
+          printf 'promote=installer-promote-%s-%s\n' "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" >> "$GITHUB_OUTPUT"
+      - name: Upload staged installer site with the previous stable pointer
+        uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        with:
+          name: ${{ steps.pages-artifacts.outputs.stage }}
+          path: public-installer-stage
+          retention-days: 14
+      - name: Upload installer site with the new stable pointer
+        uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        with:
+          name: ${{ steps.pages-artifacts.outputs.promote }}
+          path: public-installer-promote
+          retention-days: 14
       - name: Install locked verification dependencies
         run: pnpm install --frozen-lockfile
         working-directory: app

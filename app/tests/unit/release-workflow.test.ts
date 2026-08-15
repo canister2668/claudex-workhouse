@@ -39,6 +39,24 @@ describe("release job permission contract",()=>{
   });
 });
 
+describe("release draft ordering contract",()=>{
+  it("refuses a doomed run before it overwrites the draft it shares",()=>{
+    // The asset upload clobbers whatever draft already exists, so a cheap guard
+    // that runs after it can only fail a release by corrupting the draft a
+    // previous attempt left in good order. That happened once: a run refused at
+    // the image guard had already replaced every asset, and the publish step
+    // then found bytes no inventory described.
+    const promote=workflow.indexOf("- name: Promote the immutable image version only when absent or identical");
+    const draft=workflow.indexOf("- name: Create and verify draft release");
+    expect(promote).toBeGreaterThan(-1);
+    expect(draft).toBeGreaterThan(-1);
+    expect(promote).toBeLessThan(draft);
+    // The upload stays clobbering on purpose, so a retried run replaces every
+    // asset rather than leaving one behind from an older attempt.
+    expect(workflow).toContain("--clobber");
+  });
+});
+
 describe("npm distribution contract",()=>{
   it("publishes the release's own tarball, after promotion, only against the signed digest",()=>{
     for(const value of[
