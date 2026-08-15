@@ -46,11 +46,25 @@ describe("release draft ordering contract",()=>{
     // previous attempt left in good order. That happened once: a run refused at
     // the image guard had already replaced every asset, and the publish step
     // then found bytes no inventory described.
-    const promote=workflow.indexOf("- name: Promote the immutable image version only when absent or identical");
-    const draft=workflow.indexOf("- name: Create and verify draft release");
-    expect(promote).toBeGreaterThan(-1);
-    expect(draft).toBeGreaterThan(-1);
+    // Both steps must sit in prepare-release. Comparing raw offsets alone would
+    // pass even if a step had slid into another job entirely, which is exactly
+    // what one careless edit did.
+    const jobs=new Map<string,string>();
+    let current="";
+    for(const line of workflow.split("\n")){
+      const header=/^  ([a-z][a-z-]*):$/.exec(line);
+      if(header){current=header[1];jobs.set(current,"");continue;}
+      if(current)jobs.set(current,`${jobs.get(current)}${line}\n`);
+    }
+    const prepare=jobs.get("prepare-release")??"";
+    const promote=prepare.indexOf("- name: Promote the immutable image version only when absent or identical");
+    const draft=prepare.indexOf("- name: Create and verify draft release");
+    expect(promote,"the image guard must live in prepare-release").toBeGreaterThan(-1);
+    expect(draft,"the draft is created in prepare-release").toBeGreaterThan(-1);
     expect(promote).toBeLessThan(draft);
+    for(const step of["- name: Name this attempt's Pages artifacts","- name: Upload staged installer site with the previous stable pointer"]){
+      expect(prepare,`${step} belongs to prepare-release`).toContain(step);
+    }
     // The upload stays clobbering on purpose, so a retried run replaces every
     // asset rather than leaving one behind from an older attempt.
     expect(workflow).toContain("--clobber");
