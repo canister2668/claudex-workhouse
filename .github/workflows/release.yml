@@ -134,13 +134,19 @@ jobs:
       - name: Type and Svelte checks
         run: pnpm run check
         working-directory: app
-      - name: Unit and integration tests
-        run: pnpm test
-        working-directory: app
+      # Build before test. Several worker contract tests spawn
+      # dist-server/<provider>-worker.js as a real child process, so on a fresh
+      # checkout they fail on a missing file in tens of milliseconds rather than
+      # on anything they were written to check. A maintainer's tree always has a
+      # previous dist-server lying around, which is why check/test/build passes
+      # there and not here.
       - name: Production build
         env:
           CLAUDEX_WORKHOUSE_COMMIT_SHA: ${{ github.sha }}
         run: pnpm run build
+        working-directory: app
+      - name: Unit and integration tests
+        run: pnpm test
         working-directory: app
       - name: Install Chromium for browser release checks
         run: pnpm exec playwright install --with-deps chromium
