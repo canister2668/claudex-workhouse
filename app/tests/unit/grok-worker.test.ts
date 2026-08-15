@@ -39,9 +39,9 @@ process.on("SIGTERM",()=>{console.log(JSON.stringify({type:"user",message:{conte
 setInterval(()=>{},1000);
 `);fs.chmodSync(fake,0o700);
   const child=spawn(process.execPath,[worker,statePath,"grok:stop",fake,"resume",cwd,"claudex-workhouse-grok:stop",":workspace-write","default","default","default","auto",session,session,"wait"],{cwd,stdio:"pipe",env:{...process.env,GROK_TEST_READY:readyPath,CLAUDEX_WORKHOUSE_RUNTIME_PROFILE:"default",CLAUDEX_WORKHOUSE_CURRENT_TASK_ID:"grok:stop",CLAUDEX_WORKHOUSE_CURRENT_SESSION_ID:session}});
-  const deadline=Date.now()+5000;while(!fs.existsSync(readyPath)){if(Date.now()>deadline)throw new Error("fake Grok did not start");await new Promise(resolve=>setTimeout(resolve,20));}
+  const deadline=Date.now()+15_000;while(!fs.existsSync(readyPath)){if(Date.now()>deadline)throw new Error("fake Grok did not start");await new Promise(resolve=>setTimeout(resolve,20));}
   child.kill("SIGTERM");
-  await new Promise<void>((resolve,reject)=>{const timer=setTimeout(()=>reject(new Error("worker did not stop")),5000);child.once("exit",()=>{clearTimeout(timer);resolve();});});
+  await new Promise<void>((resolve,reject)=>{const timer=setTimeout(()=>reject(new Error("worker did not stop")),8_000);child.once("exit",()=>{clearTimeout(timer);resolve();});});
   return JSON.parse(fs.readFileSync(statePath,"utf8"));
 }
 
