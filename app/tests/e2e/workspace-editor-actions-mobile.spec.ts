@@ -1,6 +1,11 @@
 import {expect,test} from "@playwright/test";
 
-test("workspace editor cancel and save actions stay aligned",async({page})=>{
+test("workspace editor cancel and save actions stay aligned",async({page},testInfo)=>{
+  // The assertions below describe the stacked layout that only exists under
+  // the 700px breakpoint: actions sit beneath the file name and span its full
+  // width. Above it the heading is deliberately side by side, so the spec was
+  // failing on desktop and tablet for describing a layout those widths never had.
+  test.skip((testInfo.project.use.viewport?.width??0)>700,"the stacked editor heading only exists on mobile widths");
   await page.addInitScript(()=>{
     localStorage.setItem("claudex-ui-locale","ko");
     class SilentEventSource{constructor(public url:string){}addEventListener(){}close(){}}
