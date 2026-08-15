@@ -1,0 +1,233 @@
+<!doctype html>
+<html lang="ko" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<title>플로팅 아바타 패널 시안</title>
+<style>
+:root{
+  --bg:#0f1411;--surface:#161c18;--surface-2:#1f2721;--line:#2c362e;--line-strong:#3d4a3f;
+  --text:#e9efe9;--muted:#97a49a;--accent:#5ad38a;--cyan:#62c9d8;--red:#f27777;--amber:#efbd58;
+  --provider-antigravity:#a78bfa;--provider-deepseek:#7ba9ff;--provider-ollama:#c7ced4;
+  --char-claude-accent:#e4b45e;--char-codex-accent:#d998a9;
+  --radius-control:9px;--shadow:0 1px 2px rgba(0,0,0,.25);--shadow-lg:0 14px 38px rgba(0,0,0,.5);
+  font-family:Inter,ui-sans-serif,system-ui,"Noto Sans KR",sans-serif;
+  color:var(--text);background:var(--bg);
+}
+*{box-sizing:border-box}
+body{margin:0;padding:26px 30px 40px}
+h1{font-size:1.05rem;margin:0 0 4px}
+.sub{color:var(--muted);font-size:.76rem;margin:0 0 22px}
+.grid{display:grid;grid-template-columns:repeat(3,minmax(280px,1fr));gap:26px}
+section{background:#12180f00;border:1px solid var(--line);border-radius:14px;padding:14px 15px 18px}
+section>h2{font-size:.82rem;margin:0 0 3px;display:flex;align-items:center;gap:7px}
+section>h2 b{font-size:.62rem;font-weight:700;padding:2px 7px;border-radius:999px;background:var(--surface-2);color:var(--muted)}
+section>p{font-size:.68rem;color:var(--muted);margin:0 0 14px;line-height:1.5}
+.stack{display:flex;flex-direction:column;gap:8px;align-items:flex-end}
+
+/* ---------- 공통: 현재 실제 트레이 카드 ---------- */
+.item{width:250px}
+.panel{display:flex;flex-direction:row;gap:6px;align-items:center;min-height:66px;padding:6px;
+  background:var(--surface);border:1px solid var(--line);border-radius:13px;box-shadow:var(--shadow);overflow:hidden;position:relative}
+.panel img{width:52px;height:52px;flex:none;border-radius:var(--radius-control);object-fit:contain}
+.texts{flex:1;min-width:0}
+.line{margin:0;font-size:.8rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.status{margin:3px 0 0;font-size:.72rem;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.gear{position:absolute;top:5px;right:5px;width:17px;height:17px;border-radius:50%;background:var(--surface-2);color:var(--muted);
+  font-size:.6rem;display:grid;place-items:center}
+
+/* provider tokens */
+.p-codex{--brand:var(--char-codex-accent)}
+.p-claude{--brand:var(--char-claude-accent)}
+.p-antigravity{--brand:var(--provider-antigravity)}
+.p-deepseek{--brand:var(--provider-deepseek)}
+.p-ollama{--brand:var(--provider-ollama)}
+
+/* ---------- A. 좌측 액센트 바 ---------- */
+.v-a .panel{border-left:4px solid var(--brand);padding-left:8px}
+.v-a .line{color:var(--text)}
+.v-a .name{font-size:.6rem;font-weight:700;letter-spacing:.03em;color:var(--brand);margin:0 0 2px;text-transform:uppercase}
+
+/* ---------- B. 상태 링 ---------- */
+.v-b .panel img{box-shadow:0 0 0 2px transparent}
+.v-b .s-running img{box-shadow:0 0 0 2px var(--brand),0 0 0 6px color-mix(in srgb,var(--brand) 22%,transparent)}
+.v-b .s-completed img{box-shadow:0 0 0 2px var(--cyan)}
+.v-b .s-failed img{box-shadow:0 0 0 2px var(--red)}
+.v-b .s-idle img{box-shadow:0 0 0 2px var(--line-strong);filter:saturate(.4) opacity(.65)}
+.badge{position:absolute;left:44px;top:6px;width:17px;height:17px;border-radius:50%;display:grid;place-items:center;
+  font-size:.58rem;font-weight:700;border:2px solid var(--surface);color:#0b2416}
+.badge.ok{background:var(--cyan)}
+.badge.no{background:var(--red);color:#2a0d0d}
+
+/* ---------- C. 접힘 = 원형 칩 ---------- */
+.chiprow{display:flex;gap:7px;justify-content:flex-end;align-items:center}
+.chip{width:44px;height:44px;border-radius:50%;padding:2px;background:var(--surface);border:1px solid var(--line);
+  box-shadow:var(--shadow);position:relative;flex:none}
+.chip img{width:38px;height:38px;border-radius:50%;object-fit:contain;display:block}
+.chip.s-running{box-shadow:0 0 0 2px var(--brand),var(--shadow)}
+.chip.s-completed{box-shadow:0 0 0 2px var(--cyan),var(--shadow)}
+.chip.s-failed{box-shadow:0 0 0 2px var(--red),var(--shadow)}
+.chip.s-idle img{filter:saturate(.25) opacity(.5)}
+.dot{position:absolute;right:-1px;bottom:-1px;width:11px;height:11px;border-radius:50%;border:2px solid var(--bg)}
+.dot.run{background:var(--brand)}.dot.ok{background:var(--cyan)}.dot.no{background:var(--red)}.dot.idle{background:var(--line-strong)}
+.caption{font-size:.6rem;color:var(--muted);text-align:right;margin:8px 0 0}
+
+/* ---------- D. 말풍선 ---------- */
+.v-d .bubblerow{display:flex;gap:8px;align-items:flex-start;justify-content:flex-end;width:250px}
+.v-d .bubble{position:relative;background:var(--surface);border:1px solid var(--line);border-radius:13px;
+  padding:8px 11px;box-shadow:var(--shadow);flex:1;min-width:0}
+.v-d .bubble::before{content:"";position:absolute;right:-6px;top:15px;width:10px;height:10px;background:var(--surface);
+  border-right:1px solid var(--line);border-top:1px solid var(--line);transform:rotate(45deg)}
+.v-d .ava{width:46px;height:46px;border-radius:50%;object-fit:contain;background:var(--surface);
+  border:1px solid var(--line);flex:none;order:2;box-shadow:0 0 0 2px var(--brand)}
+.v-d .bubble .line{white-space:normal}
+
+/* ---------- E. 진행 스트립 ---------- */
+.v-e .panel{border-left:4px solid var(--brand);padding-left:8px}
+.v-e .panel::after{content:"";position:absolute;left:0;right:0;bottom:0;height:2px;background:
+  linear-gradient(90deg,transparent,var(--brand) 40%,var(--brand) 60%,transparent);opacity:.9}
+.v-e .s-idle.panel::after{background:var(--line);opacity:.6}
+.phase{display:inline-block;font-size:.58rem;font-weight:700;padding:1px 6px;border-radius:999px;margin-right:5px;
+  background:color-mix(in srgb,var(--brand) 18%,transparent);color:var(--brand)}
+
+/* ---------- 조합 ---------- */
+.wide{grid-column:1 / -1}
+.combo{display:flex;gap:34px;align-items:flex-start;flex-wrap:wrap}
+.combo>div{flex:none}
+.label{font-size:.63rem;color:var(--muted);margin:0 0 8px;text-align:right}
+.v-x .panel{border-left:4px solid var(--brand);padding-left:8px}
+.v-x .name{font-size:.58rem;font-weight:700;letter-spacing:.04em;color:var(--brand);margin:0 0 2px;text-transform:uppercase}
+.v-x .s-running img{box-shadow:0 0 0 2px var(--brand),0 0 0 6px color-mix(in srgb,var(--brand) 20%,transparent)}
+.v-x .s-completed img{box-shadow:0 0 0 2px var(--cyan)}
+.v-x .panel::after{content:"";position:absolute;left:0;right:0;bottom:0;height:2px;
+  background:linear-gradient(90deg,transparent,var(--brand) 45%,transparent);opacity:.85}
+.phonebg{width:290px;padding:12px;border:1px solid var(--line-strong);border-radius:18px;background:
+  linear-gradient(180deg,#0d1210,#0f1411)}
+.topbar{height:34px;border-radius:9px;background:var(--surface);opacity:.55;margin-bottom:10px}
+</style>
+</head>
+<body>
+<h1>플로팅 아바타 패널 — 디자인 시안</h1>
+<p class="sub">실제 테마 토큰(styles.css)과 실제 이모티콘 에셋 사용 · 모바일 폭(250px 카드) 기준</p>
+
+<div class="grid">
+
+<section>
+  <h2>현재 <b>as-is</b></h2>
+  <p>5개 전부 동일한 카드. 프로바이더는 그림으로만 구분되고, 상태는 텍스트로만 전달됨.</p>
+  <div class="stack">
+    <div class="item"><div class="panel"><span class="gear">⚙</span><img src="../app/public/emoticons/Gpt-Codex/Gpt-Codex_neutral.webp"><div class="texts"><p class="line">테스트를 고치는 중이에요</p><p class="status">running</p></div></div></div>
+    <div class="item"><div class="panel"><span class="gear">⚙</span><img src="../app/public/emoticons/normal/neutral.webp"><div class="texts"><p class="line">리뷰를 마쳤습니다</p><p class="status">completed</p></div></div></div>
+    <div class="item"><div class="panel"><span class="gear">⚙</span><img src="../app/public/emoticons/DeepSeek/neutral.webp"><div class="texts"><p class="line">인덱스를 다시 만드는 중</p><p class="status">running</p></div></div></div>
+  </div>
+</section>
+
+<section class="v-a">
+  <h2>A. 좌측 액센트 바</h2>
+  <p>기존 프로바이더 토큰으로 4px 레일 + 이름 라벨. 겹치거나 작아져도 누구인지 즉시 읽힘.</p>
+  <div class="stack">
+    <div class="item p-codex"><div class="panel"><span class="gear">⚙</span><img src="../app/public/emoticons/Gpt-Codex/Gpt-Codex_neutral.webp"><div class="texts"><p class="name">Codex</p><p class="line">테스트를 고치는 중이에요</p><p class="status">running · 2m 14s</p></div></div></div>
+    <div class="item p-claude"><div class="panel"><span class="gear">⚙</span><img src="../app/public/emoticons/normal/neutral.webp"><div class="texts"><p class="name">Claude</p><p class="line">리뷰를 마쳤습니다</p><p class="status">completed · 방금</p></div></div></div>
+    <div class="item p-antigravity"><div class="panel"><span class="gear">⚙</span><img src="../app/public/emoticons/Antigravity/neutral.webp"><div class="texts"><p class="name">Gemini</p><p class="line">스펙을 읽고 있어요</p><p class="status">reasoning · 41s</p></div></div></div>
+    <div class="item p-deepseek"><div class="panel"><span class="gear">⚙</span><img src="../app/public/emoticons/DeepSeek/neutral.webp"><div class="texts"><p class="name">DeepSeek</p><p class="line">인덱스를 다시 만드는 중</p><p class="status">running · 5m 02s</p></div></div></div>
+    <div class="item p-ollama"><div class="panel"><span class="gear">⚙</span><img src="../app/public/emoticons/Ollama/neutral.webp"><div class="texts"><p class="name">Ollama</p><p class="line">대기 중</p><p class="status">queued</p></div></div></div>
+  </div>
+</section>
+
+<section class="v-b">
+  <h2>B. 상태 링 + 뱃지</h2>
+  <p>아바타 둘레 링으로 상태 표현. running은 맥동, completed ✓, failed ✕, 유휴는 탈채도.</p>
+  <div class="stack">
+    <div class="item p-codex"><div class="panel s-running"><span class="gear">⚙</span><img src="../app/public/emoticons/Gpt-Codex/Gpt-Codex_neutral.webp"><div class="texts"><p class="line">테스트를 고치는 중이에요</p><p class="status">running · 2m 14s</p></div></div></div>
+    <div class="item p-claude"><div class="panel s-completed"><span class="gear">⚙</span><span class="badge ok">✓</span><img src="../app/public/emoticons/normal/neutral.webp"><div class="texts"><p class="line">리뷰를 마쳤습니다</p><p class="status">completed · 방금</p></div></div></div>
+    <div class="item p-antigravity"><div class="panel s-failed"><span class="gear">⚙</span><span class="badge no">!</span><img src="../app/public/emoticons/Antigravity/neutral.webp"><div class="texts"><p class="line">빌드가 실패했어요</p><p class="status">failed · 1m 전</p></div></div></div>
+    <div class="item p-ollama"><div class="panel s-idle"><span class="gear">⚙</span><img src="../app/public/emoticons/Ollama/neutral.webp"><div class="texts"><p class="line">대기 중</p><p class="status">idle</p></div></div></div>
+  </div>
+</section>
+
+<section>
+  <h2>C. 접힘 = 원형 칩</h2>
+  <p>지금은 접히면 width:0으로 증발. 대신 44px 칩으로 남기면 5개 생존 현황이 상시 한 줄. 탭하면 그 자리에서 펼쳐짐.</p>
+  <div class="chiprow">
+    <span class="chip p-codex s-running"><img src="../app/public/emoticons/Gpt-Codex/Gpt-Codex_neutral.webp"><i class="dot run"></i></span>
+    <span class="chip p-claude s-completed"><img src="../app/public/emoticons/normal/neutral.webp"><i class="dot ok"></i></span>
+    <span class="chip p-antigravity s-failed"><img src="../app/public/emoticons/Antigravity/neutral.webp"><i class="dot no"></i></span>
+    <span class="chip p-deepseek s-running"><img src="../app/public/emoticons/DeepSeek/neutral.webp"><i class="dot run"></i></span>
+    <span class="chip p-ollama s-idle"><img src="../app/public/emoticons/Ollama/neutral.webp"><i class="dot idle"></i></span>
+  </div>
+  <p class="caption">▲ 전부 접힌 상태 (44px × 5 = 한 줄)</p>
+  <div class="chiprow" style="margin-top:14px">
+    <span class="chip p-claude s-completed"><img src="../app/public/emoticons/normal/neutral.webp"><i class="dot ok"></i></span>
+    <div class="item p-codex v-a" style="width:200px"><div class="panel s-running" style="border-left:4px solid var(--brand);padding-left:8px"><img src="../app/public/emoticons/Gpt-Codex/Gpt-Codex_neutral.webp"><div class="texts"><p class="name">Codex</p><p class="line">테스트를 고치는 중</p><p class="status">running · 2m 14s</p></div></div></div>
+  </div>
+  <p class="caption">▲ 하나만 탭해서 펼친 상태</p>
+</section>
+
+<section class="v-d">
+  <h2>D. 말풍선</h2>
+  <p>캐릭터가 말한다는 컨셉에 맞춤. 아바타는 원형으로 분리, 텍스트만 꼬리 달린 버블. A(레일)와는 배타적.</p>
+  <div class="stack">
+    <div class="bubblerow p-codex"><div class="bubble"><p class="line">테스트 3개를 고쳤어요. 나머지도 볼까요?</p><p class="status">Codex · running · 2m 14s</p></div><img class="ava" src="../app/public/emoticons/Gpt-Codex/Gpt-Codex_neutral.webp"></div>
+    <div class="bubblerow p-claude"><div class="bubble"><p class="line">리뷰를 마쳤습니다</p><p class="status">Claude · completed</p></div><img class="ava" src="../app/public/emoticons/normal/neutral.webp"></div>
+    <div class="bubblerow p-deepseek"><div class="bubble"><p class="line">인덱스를 다시 만드는 중</p><p class="status">DeepSeek · running · 5m</p></div><img class="ava" src="../app/public/emoticons/DeepSeek/neutral.webp"></div>
+  </div>
+</section>
+
+<section class="v-e">
+  <h2>E. 진행 스트립 + 단계 칩</h2>
+  <p>liveActivity.phase가 이미 있음. 하단 2px 스트립이 흐르고, 단계 이름을 칩으로.</p>
+  <div class="stack">
+    <div class="item p-codex"><div class="panel"><span class="gear">⚙</span><img src="../app/public/emoticons/Gpt-Codex/Gpt-Codex_neutral.webp"><div class="texts"><p class="line"><span class="phase">acting</span>파일 3개 수정</p><p class="status">running · 2m 14s</p></div></div></div>
+    <div class="item p-antigravity"><div class="panel"><span class="gear">⚙</span><img src="../app/public/emoticons/Antigravity/neutral.webp"><div class="texts"><p class="line"><span class="phase">reasoning</span>스펙 검토 중</p><p class="status">running · 41s</p></div></div></div>
+    <div class="item p-ollama"><div class="panel s-idle"><span class="gear">⚙</span><img src="../app/public/emoticons/Ollama/neutral.webp"><div class="texts"><p class="line">대기 중</p><p class="status">idle</p></div></div></div>
+  </div>
+</section>
+
+<section class="wide v-x">
+  <h2>추천 조합 <b>A + B + C + E</b></h2>
+  <p>레일로 정체성, 링으로 상태, 접힘은 칩, 하단 스트립으로 라이브감. 오른쪽은 LIFO 정렬(새로 뜬 것이 맨 위, 기존은 아래로 밀림)까지 적용한 실제 화면 느낌.</p>
+  <div class="combo">
+    <div>
+      <p class="label">펼침 2 + 접힘 3 (혼합)</p>
+      <div class="stack">
+        <div class="item p-codex"><div class="panel s-running"><span class="gear">⚙</span><img src="../app/public/emoticons/Gpt-Codex/Gpt-Codex_neutral.webp"><div class="texts"><p class="name">Codex</p><p class="line">테스트를 고치는 중이에요</p><p class="status">running · 2m 14s</p></div></div></div>
+        <div class="item p-claude"><div class="panel s-completed"><span class="gear">⚙</span><span class="badge ok">✓</span><img src="../app/public/emoticons/normal/neutral.webp"><div class="texts"><p class="name">Claude</p><p class="line">리뷰를 마쳤습니다</p><p class="status">completed · 방금</p></div></div></div>
+        <div class="chiprow">
+          <span class="chip p-antigravity s-idle"><img src="../app/public/emoticons/Antigravity/neutral.webp"><i class="dot idle"></i></span>
+          <span class="chip p-deepseek s-running"><img src="../app/public/emoticons/DeepSeek/neutral.webp"><i class="dot run"></i></span>
+          <span class="chip p-ollama s-idle"><img src="../app/public/emoticons/Ollama/neutral.webp"><i class="dot idle"></i></span>
+        </div>
+      </div>
+    </div>
+    <div>
+      <p class="label">t = 0</p>
+      <div class="phonebg"><div class="topbar"></div>
+        <div class="stack">
+          <div class="item p-deepseek"><div class="panel s-running"><span class="gear">⚙</span><img src="../app/public/emoticons/DeepSeek/neutral.webp"><div class="texts"><p class="name">DeepSeek</p><p class="line">인덱스를 다시 만드는 중</p><p class="status">running · 5m 02s</p></div></div></div>
+          <div class="chiprow">
+            <span class="chip p-codex s-idle"><img src="../app/public/emoticons/Gpt-Codex/Gpt-Codex_neutral.webp"><i class="dot idle"></i></span>
+            <span class="chip p-claude s-idle"><img src="../app/public/emoticons/normal/neutral.webp"><i class="dot idle"></i></span>
+            <span class="chip p-antigravity s-idle"><img src="../app/public/emoticons/Antigravity/neutral.webp"><i class="dot idle"></i></span>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div>
+      <p class="label">t = 1 — Ollama 새로 시작 (맨 위로 삽입, DeepSeek은 아래로 밀림)</p>
+      <div class="phonebg"><div class="topbar"></div>
+        <div class="stack">
+          <div class="item p-ollama"><div class="panel s-running"><span class="gear">⚙</span><img src="../app/public/emoticons/Ollama/neutral.webp"><div class="texts"><p class="name">Ollama ★</p><p class="line">모델을 불러오는 중</p><p class="status">running · 3s</p></div></div></div>
+          <div class="item p-deepseek"><div class="panel s-running"><span class="gear">⚙</span><img src="../app/public/emoticons/DeepSeek/neutral.webp"><div class="texts"><p class="name">DeepSeek</p><p class="line">인덱스를 다시 만드는 중</p><p class="status">running · 5m 08s</p></div></div></div>
+          <div class="chiprow">
+            <span class="chip p-codex s-idle"><img src="../app/public/emoticons/Gpt-Codex/Gpt-Codex_neutral.webp"><i class="dot idle"></i></span>
+            <span class="chip p-claude s-idle"><img src="../app/public/emoticons/normal/neutral.webp"><i class="dot idle"></i></span>
+            <span class="chip p-antigravity s-idle"><img src="../app/public/emoticons/Antigravity/neutral.webp"><i class="dot idle"></i></span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+</div>
+</body>
+</html>

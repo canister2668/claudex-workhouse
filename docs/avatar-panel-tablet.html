@@ -1,0 +1,230 @@
+<!doctype html>
+<html lang="ko" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<title>플로팅 아바타 — 태블릿 밀도 시안</title>
+<style>
+:root{
+  --bg:#0f1411;--surface:#161c18;--surface-2:#1f2721;--line:#2c362e;--line-strong:#3d4a3f;
+  --text:#e9efe9;--muted:#97a49a;--accent:#5ad38a;--cyan:#62c9d8;--red:#f27777;
+  --provider-antigravity:#a78bfa;--provider-deepseek:#7ba9ff;--provider-ollama:#c7ced4;
+  --char-claude-accent:#e4b45e;--char-codex-accent:#d998a9;
+  --radius-control:9px;--shadow:0 1px 2px rgba(0,0,0,.25);
+  font-family:Inter,ui-sans-serif,system-ui,"Noto Sans KR",sans-serif;color:var(--text);background:var(--bg);
+}
+*{box-sizing:border-box}
+body{margin:0;padding:24px 28px 36px}
+h1{font-size:1.05rem;margin:0 0 4px}
+.sub{color:var(--muted);font-size:.75rem;margin:0 0 24px}
+h2{font-size:.86rem;margin:26px 0 3px}
+.note{font-size:.68rem;color:var(--muted);margin:0 0 14px;line-height:1.55}
+.row{display:flex;gap:26px;align-items:flex-start;flex-wrap:wrap}
+.cell>.cap{font-size:.65rem;color:var(--muted);margin:0 0 7px;line-height:1.4}
+.cell>.cap b{color:var(--text)}
+.bad{color:var(--red)} .good{color:var(--accent)}
+
+/* device frames, scaled down */
+.wrap{position:relative;overflow:hidden;border:1px solid var(--line-strong);border-radius:12px;background:#0c110e}
+.frame{transform-origin:top left;position:absolute;top:0;left:0}
+.screen{position:relative;width:100%;height:100%;background:linear-gradient(180deg,#0d1210,#0f1411);overflow:hidden}
+.topbar{position:absolute;top:0;left:0;right:0;height:68px;background:var(--surface);opacity:.5}
+.dock{position:absolute;top:15px;right:14px;display:flex;gap:5px;z-index:5}
+.dock span{width:38px;height:38px;border-radius:50%;overflow:hidden;border:1px solid var(--line);background:var(--surface);display:block}
+.dock img{width:100%;height:100%;object-fit:cover}
+.tray{position:absolute;top:84px;right:12px;display:flex;flex-direction:column;gap:8px;align-items:flex-end}
+.cutline{position:absolute;left:0;right:0;border-top:2px dashed var(--red);opacity:.85}
+.cutlabel{position:absolute;right:6px;font-size:11px;color:var(--red);background:#0f1411;padding:0 5px}
+
+/* provider tokens */
+.p-codex{--brand:var(--char-codex-accent)}
+.p-claude{--brand:var(--char-claude-accent)}
+.p-antigravity{--brand:var(--provider-antigravity)}
+.p-deepseek{--brand:var(--provider-deepseek)}
+.p-ollama{--brand:var(--provider-ollama)}
+
+/* ===== card: FULL (현재 ≥600px 규칙 — 세로형) ===== */
+.card{position:relative;background:var(--surface);border:1px solid var(--line);border-left:4px solid var(--brand);
+  border-radius:13px;box-shadow:var(--shadow);overflow:hidden;display:flex}
+.card::after{content:"";position:absolute;left:0;right:0;bottom:0;height:2px;
+  background:linear-gradient(90deg,transparent,var(--brand) 45%,transparent);opacity:.85}
+.name{font-size:11px;font-weight:700;letter-spacing:.04em;color:var(--brand);margin:0 0 2px;text-transform:uppercase}
+.line{margin:0;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.status{margin:3px 0 0;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.card img{object-fit:contain;flex:none;border-radius:var(--radius-control)}
+.s-running img{box-shadow:0 0 0 2px var(--brand),0 0 0 6px color-mix(in srgb,var(--brand) 20%,transparent)}
+.s-completed img{box-shadow:0 0 0 2px var(--cyan)}
+.s-failed img{box-shadow:0 0 0 2px var(--red)}
+.s-idle img{box-shadow:0 0 0 2px var(--line-strong);filter:saturate(.35) opacity(.6)}
+.phase{display:inline-block;font-weight:700;padding:1px 6px;border-radius:999px;margin-right:5px;
+  background:color-mix(in srgb,var(--brand) 18%,transparent);color:var(--brand)}
+
+.full .card{width:220px;min-height:204px;flex-direction:column;align-items:center;text-align:center;padding:10px 12px;gap:7px}
+.full .card img{width:132px;height:132px}
+.full .line{font-size:14px;white-space:normal}
+.full .status{font-size:12px}
+.full .phase{font-size:10px}
+
+/* ===== card: MEDIUM (제안 — 태블릿 가로형) ===== */
+.medium .card{width:300px;min-height:88px;flex-direction:row;align-items:center;padding:8px;gap:10px;text-align:left}
+.medium .card img{width:72px;height:72px}
+.medium .line{font-size:14px}
+.medium .status{font-size:12px}
+.medium .phase{font-size:10px}
+
+/* ===== card: COMPACT (현재 모바일 규칙) ===== */
+.compact .card{width:250px;min-height:66px;flex-direction:row;align-items:center;padding:6px;gap:6px;text-align:left}
+.compact .card img{width:52px;height:52px}
+.compact .line{font-size:12.8px}
+.compact .status{font-size:11.5px}
+.compact .phase{font-size:9px}
+
+.legend{display:flex;gap:18px;flex-wrap:wrap;margin:6px 0 0;font-size:.66rem;color:var(--muted)}
+table{border-collapse:collapse;font-size:.7rem;margin:10px 0 0}
+th,td{border:1px solid var(--line);padding:5px 10px;text-align:left}
+th{color:var(--muted);font-weight:600;background:var(--surface)}
+</style>
+</head>
+<body>
+<h1>플로팅 아바타 — 태블릿 밀도 시안 <span style="font-size:.72rem;color:var(--muted);font-weight:400">(A 레일 + B 상태링 + E 진행스트립 적용)</span></h1>
+<p class="sub">기기 프레임은 실제 뷰포트 픽셀로 조립한 뒤 축소 표시 · 빨간 점선 = 화면 하단(잘리는 지점)</p>
+
+<h2>1. 태블릿 세로 768 × 1024 — 지금 규칙(≥600px 세로 카드)이 그대로 적용됨</h2>
+<p class="note">카드 높이 204px × 5 + gap = <b class="bad">1052px</b>. 상단바 68px 제외하면 956px뿐이라 <b class="bad">Ollama가 통째로 잘리고 DeepSeek도 반쯤 잘립니다.</b> overflow:visible + pointer-events:none이라 스크롤도 불가.</p>
+<div class="row">
+  <div class="cell">
+    <p class="cap"><b>as-is</b> · 5개 전부 활성</p>
+    <div class="wrap" style="width:346px;height:461px">
+      <div class="frame full" style="width:768px;height:1024px;transform:scale(.45)">
+        <div class="screen">
+          <div class="topbar"></div>
+          <div class="dock">
+            <span><img src="../app/public/emoticons/Gpt-Codex/Gpt-Codex_neutral.webp"></span>
+            <span><img src="../app/public/emoticons/normal/neutral.webp"></span>
+            <span><img src="../app/public/emoticons/Antigravity/neutral.webp"></span>
+            <span><img src="../app/public/emoticons/DeepSeek/neutral.webp"></span>
+            <span><img src="../app/public/emoticons/Ollama/neutral.webp"></span>
+          </div>
+          <div class="tray">
+            <div class="card p-codex s-running"><img src="../app/public/emoticons/Gpt-Codex/Gpt-Codex_neutral.webp"><div><p class="name">Codex</p><p class="line"><span class="phase">acting</span>테스트를 고치는 중</p><p class="status">running · 2m 14s</p></div></div>
+            <div class="card p-claude s-completed"><img src="../app/public/emoticons/normal/neutral.webp"><div><p class="name">Claude</p><p class="line">리뷰를 마쳤습니다</p><p class="status">completed · 방금</p></div></div>
+            <div class="card p-antigravity s-running"><img src="../app/public/emoticons/Antigravity/neutral.webp"><div><p class="name">Gemini</p><p class="line"><span class="phase">reasoning</span>스펙 검토 중</p><p class="status">running · 41s</p></div></div>
+            <div class="card p-deepseek s-running"><img src="../app/public/emoticons/DeepSeek/neutral.webp"><div><p class="name">DeepSeek</p><p class="line">인덱스 재생성</p><p class="status">running · 5m 02s</p></div></div>
+            <div class="card p-ollama s-idle"><img src="../app/public/emoticons/Ollama/neutral.webp"><div><p class="name">Ollama</p><p class="line">대기 중</p><p class="status">queued</p></div></div>
+          </div>
+          <div class="cutline" style="top:1022px"></div>
+          <div class="cutlabel" style="top:1000px">화면 끝 — 여기부터 잘림</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="cell">
+    <p class="cap"><b class="good">제안 — medium 밀도</b> · 가로형 카드 300×88</p>
+    <div class="wrap" style="width:346px;height:461px">
+      <div class="frame medium" style="width:768px;height:1024px;transform:scale(.45)">
+        <div class="screen">
+          <div class="topbar"></div>
+          <div class="dock">
+            <span><img src="../app/public/emoticons/Gpt-Codex/Gpt-Codex_neutral.webp"></span>
+            <span><img src="../app/public/emoticons/normal/neutral.webp"></span>
+            <span><img src="../app/public/emoticons/Antigravity/neutral.webp"></span>
+            <span><img src="../app/public/emoticons/DeepSeek/neutral.webp"></span>
+            <span><img src="../app/public/emoticons/Ollama/neutral.webp"></span>
+          </div>
+          <div class="tray">
+            <div class="card p-ollama s-running"><img src="../app/public/emoticons/Ollama/neutral.webp"><div><p class="name">Ollama ★</p><p class="line">모델을 불러오는 중</p><p class="status">running · 3s</p></div></div>
+            <div class="card p-codex s-running"><img src="../app/public/emoticons/Gpt-Codex/Gpt-Codex_neutral.webp"><div><p class="name">Codex</p><p class="line"><span class="phase">acting</span>테스트를 고치는 중</p><p class="status">running · 2m 14s</p></div></div>
+            <div class="card p-claude s-completed"><img src="../app/public/emoticons/normal/neutral.webp"><div><p class="name">Claude</p><p class="line">리뷰를 마쳤습니다</p><p class="status">completed · 방금</p></div></div>
+            <div class="card p-antigravity s-running"><img src="../app/public/emoticons/Antigravity/neutral.webp"><div><p class="name">Gemini</p><p class="line"><span class="phase">reasoning</span>스펙 검토 중</p><p class="status">running · 41s</p></div></div>
+            <div class="card p-deepseek s-running"><img src="../app/public/emoticons/DeepSeek/neutral.webp"><div><p class="name">DeepSeek</p><p class="line">인덱스 재생성</p><p class="status">running · 5m 02s</p></div></div>
+          </div>
+          <div class="cutline" style="top:1022px"></div>
+          <div class="cutlabel" style="top:1000px">화면 끝 — 여유 470px</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<h2>2. 태블릿 가로 1024 × 768 — 세로 여백이 700px뿐</h2>
+<p class="note">현재 규칙이면 <b class="bad">3장에서 이미 넘칩니다.</b> medium 밀도는 5장 = 472px로 전부 들어가고, 대화 영역도 안 가립니다.</p>
+<div class="row">
+  <div class="cell">
+    <p class="cap"><b>as-is</b> · 세로 카드</p>
+    <div class="wrap" style="width:461px;height:346px">
+      <div class="frame full" style="width:1024px;height:768px;transform:scale(.45)">
+        <div class="screen">
+          <div class="topbar"></div>
+          <div class="dock">
+            <span><img src="../app/public/emoticons/Gpt-Codex/Gpt-Codex_neutral.webp"></span>
+            <span><img src="../app/public/emoticons/normal/neutral.webp"></span>
+            <span><img src="../app/public/emoticons/Antigravity/neutral.webp"></span>
+            <span><img src="../app/public/emoticons/DeepSeek/neutral.webp"></span>
+            <span><img src="../app/public/emoticons/Ollama/neutral.webp"></span>
+          </div>
+          <div class="tray">
+            <div class="card p-codex s-running"><img src="../app/public/emoticons/Gpt-Codex/Gpt-Codex_neutral.webp"><div><p class="name">Codex</p><p class="line"><span class="phase">acting</span>테스트를 고치는 중</p><p class="status">running · 2m 14s</p></div></div>
+            <div class="card p-claude s-completed"><img src="../app/public/emoticons/normal/neutral.webp"><div><p class="name">Claude</p><p class="line">리뷰를 마쳤습니다</p><p class="status">completed · 방금</p></div></div>
+            <div class="card p-antigravity s-running"><img src="../app/public/emoticons/Antigravity/neutral.webp"><div><p class="name">Gemini</p><p class="line"><span class="phase">reasoning</span>스펙 검토 중</p><p class="status">running · 41s</p></div></div>
+            <div class="card p-deepseek s-running"><img src="../app/public/emoticons/DeepSeek/neutral.webp"><div><p class="name">DeepSeek</p><p class="line">인덱스 재생성</p><p class="status">running · 5m</p></div></div>
+          </div>
+          <div class="cutline" style="top:766px"></div>
+          <div class="cutlabel" style="top:744px">화면 끝</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="cell">
+    <p class="cap"><b class="good">제안 — medium 밀도</b></p>
+    <div class="wrap" style="width:461px;height:346px">
+      <div class="frame medium" style="width:1024px;height:768px;transform:scale(.45)">
+        <div class="screen">
+          <div class="topbar"></div>
+          <div class="dock">
+            <span><img src="../app/public/emoticons/Gpt-Codex/Gpt-Codex_neutral.webp"></span>
+            <span><img src="../app/public/emoticons/normal/neutral.webp"></span>
+            <span><img src="../app/public/emoticons/Antigravity/neutral.webp"></span>
+            <span><img src="../app/public/emoticons/DeepSeek/neutral.webp"></span>
+            <span><img src="../app/public/emoticons/Ollama/neutral.webp"></span>
+          </div>
+          <div class="tray">
+            <div class="card p-ollama s-running"><img src="../app/public/emoticons/Ollama/neutral.webp"><div><p class="name">Ollama ★</p><p class="line">모델을 불러오는 중</p><p class="status">running · 3s</p></div></div>
+            <div class="card p-codex s-running"><img src="../app/public/emoticons/Gpt-Codex/Gpt-Codex_neutral.webp"><div><p class="name">Codex</p><p class="line"><span class="phase">acting</span>테스트를 고치는 중</p><p class="status">running · 2m 14s</p></div></div>
+            <div class="card p-claude s-completed"><img src="../app/public/emoticons/normal/neutral.webp"><div><p class="name">Claude</p><p class="line">리뷰를 마쳤습니다</p><p class="status">completed · 방금</p></div></div>
+            <div class="card p-antigravity s-running"><img src="../app/public/emoticons/Antigravity/neutral.webp"><div><p class="name">Gemini</p><p class="line"><span class="phase">reasoning</span>스펙 검토 중</p><p class="status">running · 41s</p></div></div>
+            <div class="card p-deepseek s-running"><img src="../app/public/emoticons/DeepSeek/neutral.webp"><div><p class="name">DeepSeek</p><p class="line">인덱스 재생성</p><p class="status">running · 5m</p></div></div>
+          </div>
+          <div class="cutline" style="top:766px"></div>
+          <div class="cutlabel" style="top:744px">화면 끝 — 여유 226px</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<h2>3. 밀도 3단계 — 카드 원형 비교 (실제 크기)</h2>
+<p class="note">같은 카드가 밀도만 바뀝니다. 마크업은 동일하고 CSS 변수만 교체되므로 컴포넌트 분기가 필요 없습니다.</p>
+<div class="row" style="align-items:flex-end">
+  <div class="cell compact">
+    <p class="cap"><b>compact</b> · &lt;600px (폰)<br>250 × 66</p>
+    <div class="card p-codex s-running"><img src="../app/public/emoticons/Gpt-Codex/Gpt-Codex_neutral.webp"><div><p class="name">Codex</p><p class="line"><span class="phase">acting</span>테스트를 고치는 중</p><p class="status">running · 2m 14s</p></div></div>
+  </div>
+  <div class="cell medium">
+    <p class="cap"><b class="good">medium</b> · 600–1099px (태블릿) <span style="color:var(--accent)">← 신설</span><br>300 × 88</p>
+    <div class="card p-codex s-running"><img src="../app/public/emoticons/Gpt-Codex/Gpt-Codex_neutral.webp"><div><p class="name">Codex</p><p class="line"><span class="phase">acting</span>테스트를 고치는 중</p><p class="status">running · 2m 14s</p></div></div>
+  </div>
+  <div class="cell full">
+    <p class="cap"><b>full</b> · ≥1100px (데스크톱)<br>220 × 204</p>
+    <div class="card p-codex s-running"><img src="../app/public/emoticons/Gpt-Codex/Gpt-Codex_neutral.webp"><div><p class="name">Codex</p><p class="line"><span class="phase">acting</span>테스트를 고치는 중</p><p class="status">running · 2m 14s</p></div></div>
+  </div>
+</div>
+
+<table>
+  <tr><th>밀도</th><th>조건</th><th>카드</th><th>5장 총 높이</th><th>비고</th></tr>
+  <tr><td>compact</td><td>&lt;600px, 또는 세로 700px 미만</td><td>250×66 가로형</td><td>362px</td><td>현행 유지</td></tr>
+  <tr><td>medium</td><td>600–1099px</td><td>300×88 가로형</td><td>472px</td><td><b class="good">신설</b> — 지금은 이 구간이 full로 처리됨</td></tr>
+  <tr><td>full</td><td>≥1100px 그리고 세로 ≥900px</td><td>220×204 세로형</td><td>1052px</td><td>세로 조건 추가 필요</td></tr>
+</table>
+</body>
+</html>

@@ -1,0 +1,304 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://claudex-workhouse.invalid/schemas/release-manifest.schema.json",
+  "title": "Claudex Workhouse signed public release manifest",
+  "description": "Structural interchange schema. Authoritative verification additionally binds each URL to its filename, requires all artifacts to share one immutable release directory, and enforces trusted origins in the backend and installer verifier.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "channel",
+    "version",
+    "releaseSequence",
+    "publishedAt",
+    "expiresAt",
+    "server",
+    "workers",
+    "requirements",
+    "signing"
+  ],
+  "properties": {
+    "schemaVersion": { "enum": [1, 2, 3] },
+    "channel": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]{0,31}$"
+    },
+    "version": { "$ref": "#/$defs/semver" },
+    "releaseSequence": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 9007199254740991
+    },
+    "publishedAt": { "type": "string", "format": "date-time" },
+    "expiresAt": { "type": "string", "format": "date-time" },
+    "server": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["image", "tag", "digest", "platforms"],
+      "properties": {
+        "image": {
+          "type": "string",
+          "pattern": "^[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?(?::[0-9]{2,5})?(?:/[a-z0-9]+(?:[._-][a-z0-9]+)*)+$"
+        },
+        "tag": { "$ref": "#/$defs/semver" },
+        "digest": {
+          "type": "string",
+          "pattern": "^sha256:[a-f0-9]{64}$"
+        },
+        "platforms": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 2,
+          "uniqueItems": true,
+          "items": {
+            "enum": ["linux/amd64", "linux/arm64"]
+          },
+          "allOf": [
+            { "contains": { "const": "linux/amd64" } },
+            { "contains": { "const": "linux/arm64" } }
+          ]
+        },
+        "minimumUpdaterProtocolVersion": { "$ref": "#/$defs/updaterProtocolVersion" }
+      }
+    },
+    "windowsServer": { "$ref": "#/$defs/windowsServer" },
+    "windowsPortable": { "$ref": "#/$defs/windowsPortable" },
+    "workers": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["windows-x64", "linux-x64", "linux-arm64"],
+      "properties": {
+        "windows-x64": {
+          "allOf": [
+            { "$ref": "#/$defs/worker" },
+            {
+              "properties": {
+                "platform": { "const": "windows" },
+                "architecture": { "const": "x64" },
+                "format": { "const": "zip" },
+                "filename": { "pattern": "\\.zip$" }
+              },
+              "required": ["launcher"]
+            }
+          ]
+        },
+        "linux-x64": {
+          "allOf": [
+            { "$ref": "#/$defs/worker" },
+            {
+              "properties": {
+                "platform": { "const": "linux" },
+                "architecture": { "const": "x64" },
+                "format": { "const": "tar.gz" },
+                "filename": { "pattern": "\\.tar\\.gz$" }
+              },
+              "not": { "required": ["launcher"] }
+            }
+          ]
+        },
+        "linux-arm64": {
+          "allOf": [
+            { "$ref": "#/$defs/worker" },
+            {
+              "properties": {
+                "platform": { "const": "linux" },
+                "architecture": { "const": "arm64" },
+                "format": { "const": "tar.gz" },
+                "filename": { "pattern": "\\.tar\\.gz$" }
+              },
+              "not": { "required": ["launcher"] }
+            }
+          ]
+        }
+      }
+    },
+    "requirements": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["docker", "compose"],
+      "properties": {
+        "docker": {
+          "type": "string",
+          "pattern": "^>=[0-9]+\\.[0-9]+\\.[0-9]+$"
+        },
+        "compose": {
+          "type": "string",
+          "pattern": "^>=[0-9]+\\.[0-9]+\\.[0-9]+$"
+        }
+      }
+    },
+    "legal": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["license", "notice", "thirdPartyNotices"],
+      "properties": {
+        "license": { "const": "AGPL-3.0-only" },
+        "notice": { "const": "NOTICE.md" },
+        "thirdPartyNotices": { "const": "THIRD_PARTY_NOTICES.md" }
+      }
+    },
+    "signing": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["keyId", "algorithm"],
+      "properties": {
+        "keyId": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$"
+        },
+        "algorithm": { "const": "rsa-sha256" }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "schemaVersion": { "minimum": 2 } }, "required": ["schemaVersion"] },
+      "then": { "required": ["windowsServer"] },
+      "else": { "not": { "required": ["windowsServer"] } }
+    },
+    {
+      "if": { "properties": { "schemaVersion": { "const": 3 } }, "required": ["schemaVersion"] },
+      "then": {
+        "required": ["windowsPortable"],
+        "properties": {
+          "server": { "required": ["minimumUpdaterProtocolVersion"] },
+          "workers": {
+            "properties": {
+              "windows-x64": { "required": ["minimumUpdaterProtocolVersion"] },
+              "linux-x64": { "required": ["minimumUpdaterProtocolVersion"] },
+              "linux-arm64": { "required": ["minimumUpdaterProtocolVersion"] }
+            }
+          }
+        }
+      },
+      "else": {
+        "not": { "required": ["windowsPortable"] },
+        "properties": {
+          "server": { "not": { "required": ["minimumUpdaterProtocolVersion"] } },
+          "workers": {
+            "properties": {
+              "windows-x64": { "not": { "required": ["minimumUpdaterProtocolVersion"] } },
+              "linux-x64": { "not": { "required": ["minimumUpdaterProtocolVersion"] } },
+              "linux-arm64": { "not": { "required": ["minimumUpdaterProtocolVersion"] } }
+            }
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "semver": {
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+(?:-[0-9A-Za-z.-]+)?(?:\\+[0-9A-Za-z.-]+)?$"
+    },
+    "safeRelativePath": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._ /-]{0,255}$"
+    },
+    "updaterProtocolVersion": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 1000000
+    },
+    "worker": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "platform",
+        "architecture",
+        "format",
+        "filename",
+        "url",
+        "size",
+        "sha256",
+        "entrypoint"
+      ],
+      "properties": {
+        "platform": { "enum": ["windows", "linux"] },
+        "architecture": { "enum": ["x64", "arm64"] },
+        "format": { "enum": ["zip", "tar.gz"] },
+        "filename": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+        },
+        "url": {
+          "type": "string",
+          "format": "uri",
+          "pattern": "^https://"
+        },
+        "size": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 2147483648
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "minimumUpdaterProtocolVersion": { "$ref": "#/$defs/updaterProtocolVersion" },
+        "entrypoint": { "$ref": "#/$defs/safeRelativePath" },
+        "launcher": { "$ref": "#/$defs/safeRelativePath" }
+      }
+    },
+    "windowsPortable": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["platform", "architecture", "format", "filename", "url", "size", "sha256", "minimumUpdaterProtocolVersion"],
+      "properties": {
+        "platform": { "const": "windows" },
+        "architecture": { "const": "x64" },
+        "format": { "const": "zip" },
+        "filename": { "const": "claudex-workhouse-server-windows-x64-portable.zip" },
+        "url": { "type": "string", "format": "uri", "pattern": "^https://" },
+        "size": { "type": "integer", "minimum": 1, "maximum": 2147483648 },
+        "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "minimumUpdaterProtocolVersion": { "$ref": "#/$defs/updaterProtocolVersion" }
+      }
+    },
+    "windowsServer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["platform", "architecture", "format", "filename", "url", "size", "sha256", "authenticode"],
+      "properties": {
+        "platform": { "const": "windows" },
+        "architecture": { "const": "x64" },
+        "format": { "const": "exe" },
+        "filename": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,123}\\.exe$"
+        },
+        "url": {
+          "type": "string",
+          "format": "uri",
+          "pattern": "^https://",
+          "description": "The authoritative verifier also requires this path to end in /filename, use the Worker immutable release directory, and match a trusted origin."
+        },
+        "size": { "type": "integer", "minimum": 1, "maximum": 2147483648 },
+        "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "authenticode": {
+          "oneOf": [
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["status"],
+              "properties": { "status": { "const": "unsigned" } }
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["status", "certificateSha256", "subject", "timestamped"],
+              "properties": {
+                "status": { "const": "valid" },
+                "certificateSha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+                "subject": { "type": "string", "minLength": 1, "maxLength": 512 },
+                "timestamped": { "const": true }
+              }
+            }
+          ]
+        }
+      }
+    }
+  }
+}

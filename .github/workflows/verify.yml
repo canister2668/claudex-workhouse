@@ -1,0 +1,81 @@
+name: verify
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: verify-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  application:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: pnpm/action-setup@008330803749db0355799c700092d9a85fd074e9 # v6.0.9
+        with:
+          version: 10.17.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: app/pnpm-lock.yaml
+      - name: Install locked dependencies
+        run: pnpm install --frozen-lockfile
+        working-directory: app
+      - name: Type and Svelte checks
+        run: pnpm run check
+        working-directory: app
+      - name: Production build
+        run: pnpm run build
+        working-directory: app
+      - name: Install Chromium for browser release checks
+        run: pnpm exec playwright install --with-deps chromium
+        working-directory: app
+      - name: Browser release checks
+        run: pnpm run test:e2e:release
+        working-directory: app
+      - name: Unit and integration tests
+        run: pnpm test
+        working-directory: app
+      - name: Node SQLite worker contract
+        run: pnpm run test:sqlite-node
+        working-directory: app
+      - name: Standalone installer checks
+        run: |
+          npm --prefix installer-web run check
+          npm --prefix installer-web test
+          npm --prefix installer-web run build
+
+  container:
+    needs: application
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
+      - name: Build verification image
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        with:
+          context: .
+          platforms: linux/amd64
+          load: true
+          push: false
+          tags: claudex-workhouse:verify
+          provenance: false
+          sbom: false
+      - name: Block unaccepted high and critical vulnerabilities
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: claudex-workhouse:verify
+          format: table
+          ignore-unfixed: true
+          severity: HIGH,CRITICAL
+          exit-code: "1"

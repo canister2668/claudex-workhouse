@@ -1,0 +1,17 @@
+.git
+.pnpm-store
+.tmp
+archive
+backups
+data
+logs
+run
+runtime
+snapshots
+workspaces
+packages
+app/node_modules
+app/dist
+app/dist-server
+app/test-results
+app/playwright-report

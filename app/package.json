@@ -1,0 +1,93 @@
+{
+  "name": "claudex-workhouse",
+  "version": "1.0.0",
+  "private": true,
+  "license": "AGPL-3.0-only",
+  "repository": "https://github.com/canister2668/claudex-workhouse",
+  "type": "module",
+  "bin": {
+    "claudex-workhouse-worker": "bin/claudex-workhouse-worker.mjs",
+    "claudex-workhouse-worker-ui": "bin/claudex-workhouse-worker-ui.mjs"
+  },
+  "files": [
+    "bin/claudex-workhouse-worker.mjs",
+    "bin/claudex-workhouse-worker-ui.mjs",
+    "dist-server"
+  ],
+  "scripts": {
+    "build": "vite build && node scripts/verify-push-contract.mjs && node scripts/verify-sqlite-worker-contract.mjs && node scripts/prune-dist.mjs && tsc -p tsconfig.server.json && node scripts/copy-server-assets.mjs",
+    "dev": "tsx watch src/server/index.ts",
+    "start": "node dist-server/index.js",
+    "test": "vitest run",
+    "test:sqlite-node": "node scripts/test-sqlite-node-worker.mjs",
+    "test:e2e": "playwright test",
+    "test:e2e:release": "playwright test tests/e2e/conversation-mode-redesign.spec.ts tests/e2e/input-folding.spec.ts tests/e2e/context-usage.spec.ts tests/e2e/task-outcome-popup.spec.ts tests/e2e/work-panel-scroll.spec.ts tests/e2e/mini-tablet-landscape-chrome.spec.ts tests/e2e/scroll-chrome-resolution-matrix.spec.ts --project=mobile-360 --project=mobile-412 --project=tablet-800",
+    "test:e2e:docker": "sh scripts/test-e2e-docker.sh",
+    "check": "pnpm run check:version && pnpm run docs:verify && svelte-check --tsconfig ./tsconfig.json && tsc -p tsconfig.server.json --noEmit",
+    "check:version": "node scripts/verify-private-version.mjs",
+    "docs:verify": "node scripts/verify-doc-navigation.mjs",
+    "worker": "node dist-server/desktop-worker/cli.js",
+    "worker:pack": "pnpm run build && pnpm pack --pack-destination ../packages",
+    "worker:portable": "pnpm run build && node scripts/package-worker-portable.mjs",
+    "windows:folder": "pnpm run build && node scripts/package-windows-server.mjs",
+    "windows:exe": "pnpm run build && node scripts/package-windows-server.mjs",
+    "worker:release": "node scripts/package-worker-release.mjs",
+    "release:manifest": "node scripts/create-release-manifest.mjs",
+    "release:checksums": "node scripts/create-release-checksums.mjs",
+    "release:verify-directory": "tsx scripts/verify-release-directory.ts",
+    "release:channel-progression": "tsx scripts/verify-release-channel.ts",
+    "release:promotion-guard": "tsx scripts/verify-release-promotion.ts"
+  },
+  "dependencies": {
+    "@fastify/compress": "^9.1.1",
+    "@fastify/multipart": "^10.1.0",
+    "@fastify/rate-limit": "^10.3.0",
+    "@fastify/static": "^10.1.2",
+    "@fastify/websocket": "^11.3.0",
+    "@lucide/svelte": "^1.0.1",
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "better-sqlite3": "12.11.1",
+    "dompurify": "^3.4.12",
+    "fastify": "^5.10.0",
+    "jose": "^6.1.2",
+    "marked": "^18.0.6",
+    "qrcode": "^1.5.4",
+    "web-push": "^3.6.7",
+    "ws": "^8.21.0",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.55.1",
+    "@sveltejs/vite-plugin-svelte": "~7.1.4",
+    "@types/better-sqlite3": "7.6.13",
+    "@types/node": "^22.18.6",
+    "@types/pngjs": "^6.0.5",
+    "@types/qrcode": "^1.5.6",
+    "@types/web-push": "^3.6.4",
+    "@types/ws": "^8.18.1",
+    "esbuild": "^0.28.1",
+    "happy-dom": "^20.11.1",
+    "pngjs": "^7.0.0",
+    "svelte": "^5.46.4",
+    "svelte-check": "^4.3.2",
+    "tsx": "^4.20.6",
+    "typescript": "^5.9.2",
+    "vite": "~8.1.4",
+    "vite-plugin-pwa": "^1.3.0",
+    "vitest": "^4.1.10"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "better-sqlite3",
+      "esbuild"
+    ],
+    "overrides": {
+      "brace-expansion@5.0.8": "5.0.9",
+      "fast-uri@3.1.4": "3.1.5",
+      "fast-uri@4.1.1": "4.1.2",
+      "find-my-way@9.6.0": "9.7.0",
+      "ip-address@10.2.0": "10.3.1"
+    }
+  },
+  "packageManager": "pnpm@10.17.1"
+}

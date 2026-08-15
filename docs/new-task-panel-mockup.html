@@ -1,0 +1,485 @@
+<!doctype html>
+<html lang="ko" data-theme="light">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>새 작업 패널 시안 v2 — Claudex Workhouse</title>
+<style>
+:root{
+  color-scheme:dark;
+  --bg:#0f1411;--surface:#161c18;--surface-2:#1f2721;--surface-3:#28312a;
+  --line:#2c362e;--line-strong:#3d4a3f;--text:#e9efe9;--muted:#97a49a;
+  --accent:#5ad38a;--accent-strong:#7fe3a6;--on-accent:#0b2416;
+  --amber:#efbd58;--red:#f27777;--blue:#7ba9ff;--violet:#a78bfa;
+  --shadow:0 1px 2px rgba(0,0,0,.25);--shadow-lg:0 14px 38px rgba(0,0,0,.5);
+  --radius-card:17px;--radius-control-lg:10px;--radius-pill:999px;
+  font-family:Inter,ui-sans-serif,system-ui,-apple-system,"Noto Sans KR",sans-serif;
+}
+:root[data-theme="light"]{
+  color-scheme:light;
+  --bg:#f4f6f4;--surface:#ffffff;--surface-2:#eaefeb;--surface-3:#dfe6e0;
+  --line:#dbe2dc;--line-strong:#bfcac1;--text:#1b241e;--muted:#5e6c63;
+  --accent:#15803d;--accent-strong:#116632;--on-accent:#fff;
+  --amber:#b45309;--red:#c2413e;--blue:#3b62c4;--violet:#6d3fb1;
+  --shadow:0 1px 2px rgba(25,40,30,.08);--shadow-lg:0 16px 42px rgba(25,40,30,.18);
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font-size:16px;-webkit-font-smoothing:antialiased}
+.page{max-width:1760px;margin:0 auto;padding:22px 18px 60px}
+.page>h1{font-size:1.25rem;margin:0 0 4px;letter-spacing:-.01em}
+.page>p.lede{margin:0 0 18px;color:var(--muted);font-size:.85rem;line-height:1.6;max-width:900px}
+.toolbar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:20px}
+.toolbar button{min-height:36px;padding:0 14px;border:1px solid var(--line-strong);border-radius:var(--radius-pill);
+  background:var(--surface);color:var(--text);font-size:.78rem;font-weight:700;cursor:pointer}
+.toolbar button.on{background:var(--accent);border-color:var(--accent);color:var(--on-accent)}
+
+.rule{margin:0 0 24px;padding:14px 16px;border:1px solid var(--line);border-left:3px solid var(--accent);
+  border-radius:12px;background:var(--surface);max-width:900px;font-size:.79rem;line-height:1.65}
+.rule b{font-weight:800}
+.rule table{width:100%;border-collapse:collapse;margin-top:9px;font-size:.76rem}
+.rule th,.rule td{text-align:left;padding:5px 8px 5px 0;vertical-align:top;border-top:1px solid var(--line)}
+.rule th{color:var(--muted);font-weight:700;border-top:0}
+.rule td:first-child{white-space:nowrap;font-weight:700}
+.rule code{background:var(--surface-2);padding:1px 5px;border-radius:5px;font-size:.92em}
+
+.stage{display:flex;flex-wrap:wrap;gap:24px;align-items:flex-start}
+.col{flex:1 1 375px;min-width:355px;max-width:420px}
+.col>h2{font-size:.92rem;margin:0 0 3px;letter-spacing:-.01em}
+.col>p{margin:0 0 12px;color:var(--muted);font-size:.76rem;line-height:1.55}
+.col[hidden]{display:none}
+
+.phone{width:100%;border:1px solid var(--line);border-radius:22px;background:var(--surface);
+  box-shadow:var(--shadow-lg);overflow:hidden}
+.sheet{padding:16px 16px 20px}
+.sheet-head{display:flex;align-items:center;gap:10px;margin-bottom:14px}
+.sheet-head h3{margin:0;font-size:1.1rem;letter-spacing:-.01em}
+.sheet-head .x{margin-left:auto;width:34px;height:34px;border:0;border-radius:var(--radius-pill);
+  background:transparent;color:var(--muted);font-size:1.15rem;cursor:pointer}
+
+/* ---------- 현재 (문제 재현) ---------- */
+.before label{display:block;color:var(--muted);font-size:.82rem;margin-top:16px;font-weight:600;overflow-wrap:anywhere}
+.before .segments{display:flex;gap:6px;margin-top:7px}
+.before .segments button{flex:1;min-height:38px;border:1px solid var(--line-strong);border-radius:9px;
+  background:var(--surface);color:var(--text);font-size:.74rem;font-weight:700;line-height:1.25}
+.before .segments button.active{background:var(--accent);border-color:var(--accent);color:var(--on-accent)}
+.before .compact-choice{display:inline-flex;position:relative;vertical-align:baseline}
+.before .choice-trigger{min-width:102px;min-height:36px;padding:0 10px;display:flex;align-items:center;
+  justify-content:space-between;gap:7px;border:1px solid var(--line);border-radius:10px;background:var(--surface);
+  color:var(--accent-strong);box-shadow:var(--shadow);font-size:.72rem;font-weight:800;white-space:nowrap}
+.before .choice-trigger.danger{background:var(--red);border-color:var(--red);color:#fff}
+.before .chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:7px}
+.before .chips button{min-height:34px;padding:0 11px;border:1px solid var(--line-strong);border-radius:var(--radius-pill);
+  background:var(--surface);color:var(--text);font-size:.73rem;font-weight:700}
+.before .chips button.active{background:var(--accent);border-color:var(--accent);color:var(--on-accent)}
+.before fieldset{margin:16px 0 0;padding:10px 11px 12px;border:1px solid var(--line);border-radius:12px}
+.before legend{padding:0 5px;color:var(--muted);font-size:.74rem;font-weight:700}
+.before .grid2{display:grid;grid-template-columns:1fr 1fr;gap:7px}
+.before .grid2 button{padding:8px 9px;border:1px solid var(--line-strong);border-radius:10px;background:var(--surface);
+  color:var(--text);text-align:left;display:flex;flex-direction:column;gap:2px}
+.before .grid2 button.active{border-color:var(--accent);background:color-mix(in srgb,var(--accent) 12%,transparent)}
+.before .grid2 strong{font-size:.76rem}.before .grid2 small{color:var(--muted);font-size:.63rem;overflow-wrap:anywhere}
+.before textarea{width:100%;margin-top:7px;min-height:96px;padding:11px 12px;border:1.5px solid var(--line-strong);
+  border-radius:10px;background:var(--bg);color:var(--text);font:inherit;font-size:.84rem}
+.before .cards{display:flex;flex-direction:column;gap:6px;margin-top:7px}
+.before .cards button{padding:9px 10px;border:1px solid var(--line-strong);border-radius:10px;background:var(--surface);
+  color:var(--text);text-align:left;display:flex;flex-direction:column;gap:2px}
+.before .cards button.active{border-color:var(--accent);background:color-mix(in srgb,var(--accent) 12%,transparent)}
+.before .cards strong{font-size:.76rem}.before .cards small{color:var(--muted);font-size:.65rem;line-height:1.35}
+.before input[type=number]{width:100%;margin-top:7px;min-height:42px;padding:0 12px;border:1.5px solid var(--line-strong);
+  border-radius:10px;background:var(--bg);color:var(--text);font:inherit;font-size:.84rem}
+.before select{width:100%;margin-top:7px;min-height:42px;padding:0 10px;border:1.5px solid var(--line-strong);
+  border-radius:10px;background:var(--bg);color:var(--text);font:inherit;font-size:.8rem}
+.flag{position:relative;outline:2px dashed color-mix(in srgb,var(--red) 70%,transparent);outline-offset:5px;border-radius:6px}
+.flag::after{content:attr(data-flag);position:absolute;right:-6px;top:-9px;z-index:3;padding:2px 7px;border-radius:var(--radius-pill);
+  background:var(--red);color:#fff;font-size:.6rem;font-weight:800;white-space:nowrap}
+
+/* ---------- new design primitives ---------- */
+.group{margin-top:13px;border:1px solid var(--line);border-radius:var(--radius-card);background:var(--surface);overflow:hidden}
+.group>h4{margin:0;padding:11px 14px 3px;font-size:.67rem;font-weight:800;letter-spacing:.06em;
+  text-transform:uppercase;color:var(--muted);display:flex;align-items:center;gap:7px}
+.group>h4 .hint{margin-left:auto;text-transform:none;letter-spacing:0;font-weight:600;font-size:.66rem}
+
+/* field: label always above its control — collision impossible */
+.field{padding:9px 14px 11px;border-top:1px solid var(--line)}
+.group>h4+.field,.group>.field:first-child{border-top:0}
+.field>.lab{display:flex;align-items:baseline;gap:8px;margin-bottom:7px}
+.field>.lab b{font-size:.79rem;font-weight:700;color:var(--text)}
+.field>.lab small{font-size:.68rem;color:var(--muted);margin-left:auto;text-align:right}
+
+/* row: label left / value right — only for long or rarely-changed values */
+.row{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,auto);align-items:center;gap:14px;
+  min-height:52px;padding:8px 14px;border-top:1px solid var(--line);cursor:pointer}
+.group>h4+.row,.group>.row:first-child{border-top:0}
+.row .k{min-width:0}
+.row .k b{display:block;font-size:.82rem;font-weight:700;color:var(--text)}
+.row .k small{display:block;margin-top:2px;font-size:.69rem;color:var(--muted);line-height:1.35;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%}
+.row .v{display:flex;align-items:center;gap:6px;justify-self:end;min-width:0;font-size:.79rem;font-weight:700}
+.row .v span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+.seg{display:flex;gap:4px;padding:4px;border-radius:var(--radius-control-lg);background:var(--surface-2)}
+.seg button{flex:1;min-height:38px;padding:0 6px;border:0;border-radius:8px;background:transparent;color:var(--muted);
+  font:inherit;font-size:.76rem;font-weight:700;cursor:pointer;line-height:1.2}
+.seg button.active{background:var(--surface);color:var(--text);box-shadow:var(--shadow)}
+.seg button.danger.active{background:color-mix(in srgb,var(--red) 16%,var(--surface));color:var(--red)}
+
+.pillrow{display:flex;flex-wrap:wrap;gap:6px}
+.pill{min-height:34px;padding:0 12px;display:inline-flex;align-items:center;gap:6px;border:1px solid var(--line-strong);
+  border-radius:var(--radius-pill);background:var(--surface);color:var(--text);font-size:.74rem;font-weight:700;cursor:pointer;
+  white-space:nowrap;flex:none}
+.pill.active{background:var(--accent);border-color:var(--accent);color:var(--on-accent)}
+.pill.danger.active{background:var(--red);border-color:var(--red);color:#fff}
+.pill.ghost{border-style:dashed;color:var(--muted)}
+.pill.off{opacity:.55}
+.why{margin:7px 0 0;font-size:.68rem;line-height:1.45;color:var(--muted)}
+
+.warn{margin:9px 0 0;padding:9px 11px;border-radius:11px;font-size:.72rem;line-height:1.5;
+  background:color-mix(in srgb,var(--red) 12%,transparent);color:var(--red);
+  box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--red) 30%,transparent)}
+.warn label{display:flex;gap:8px;align-items:flex-start;margin-top:7px;font-weight:700;color:var(--text)}
+.warn input{margin:2px 0 0}
+
+/* participant card */
+.who{margin:9px 0 0;border:1px solid var(--line);border-radius:13px;overflow:hidden;background:var(--surface)}
+.who>header{display:flex;align-items:center;gap:8px;padding:8px 12px;background:var(--surface-2)}
+.who>header b{font-size:.77rem}
+.who>header .dot{width:8px;height:8px;border-radius:50%;background:var(--accent)}
+.who>header .dot.claude{background:var(--amber)}.who>header .dot.gem{background:var(--violet)}
+.who>header .off{margin-left:auto;font-size:.67rem;color:var(--muted);font-weight:700}
+.who .row{padding-left:12px;padding-right:12px;min-height:46px}
+.who .row .k b{font-size:.77rem}
+
+.stepper{display:flex;align-items:center;gap:8px}
+.stepper button.pill{width:auto;height:34px;padding:0 12px}
+.stepper button{width:34px;height:34px;border:1px solid var(--line-strong);border-radius:9px;background:var(--surface);
+  color:var(--text);font:inherit;font-weight:800;cursor:pointer}
+.stepper span{min-width:44px;text-align:center;font-size:.82rem;font-weight:800}
+
+.summarybar{margin-top:12px;border:1px solid var(--line);border-radius:var(--radius-card);background:var(--surface)}
+.summarybar>button{width:100%;display:flex;align-items:center;gap:10px;padding:11px 13px;border:0;background:transparent;
+  color:var(--text);font:inherit;cursor:pointer;text-align:left}
+.summarybar .chipline{display:flex;flex-wrap:wrap;gap:5px;min-width:0}
+.summarybar .chipline span{padding:4px 9px;border-radius:var(--radius-pill);background:var(--surface-2);font-size:.69rem;font-weight:700}
+.summarybar .chipline span.lead{background:color-mix(in srgb,var(--accent) 15%,transparent);color:var(--accent-strong)}
+.summarybar .chipline span.danger{background:color-mix(in srgb,var(--red) 15%,transparent);color:var(--red)}
+.summarybar .more{margin-left:auto;color:var(--muted);font-size:.71rem;font-weight:700;white-space:nowrap}
+
+.prompt-block{margin-top:13px}
+.prompt-block textarea{width:100%;min-height:120px;padding:13px 14px;border:1.5px solid var(--line-strong);
+  border-radius:var(--radius-card);background:var(--surface);color:var(--text);font:inherit;font-size:.87rem;line-height:1.55;resize:vertical}
+.prompt-block textarea:focus{outline:0;border-color:var(--accent)}
+.prompt-meta{display:flex;align-items:center;gap:8px;margin-top:8px;color:var(--muted);font-size:.69rem}
+.prompt-meta .spacer{margin-left:auto}
+.presets{display:flex;gap:6px;overflow-x:auto;padding-bottom:2px;margin-top:9px;scrollbar-width:none}
+.presets::-webkit-scrollbar{display:none}
+.presets .pill{white-space:nowrap;flex:none}
+
+.plan{margin-top:12px;padding:11px 13px;border-radius:13px;background:var(--surface-2);font-size:.73rem;line-height:1.55}
+.plan b{display:block;font-size:.72rem;margin-bottom:4px}
+.plan ol{margin:0;padding-left:18px}.plan li{margin:2px 0;color:var(--muted)}
+.plan li b{display:inline;color:var(--text);font-size:inherit}
+
+.quota{display:flex;flex-wrap:wrap;gap:6px 12px;margin-top:11px;padding:10px 12px;border-radius:12px;
+  background:var(--surface-2);color:var(--muted);font-size:.69rem;font-weight:600}
+.quota b{color:var(--text);font-size:.71rem}
+.actions{margin-top:14px;display:flex;gap:8px}
+.actions button{flex:1;min-height:48px;border:1px solid var(--line-strong);border-radius:var(--radius-control-lg);
+  background:var(--surface);color:var(--text);font:inherit;font-size:.84rem;font-weight:800;cursor:pointer}
+.actions button.primary{flex:2;background:var(--accent);border-color:var(--accent);color:var(--on-accent)}
+
+.note{margin-top:13px;font-size:.74rem;line-height:1.65;color:var(--muted)}
+.note b{color:var(--text)}
+.note ul{margin:6px 0 0;padding-left:17px}
+.note li{margin:3px 0}
+.note code{background:var(--surface-2);padding:1px 5px;border-radius:5px;font-size:.92em}
+.tapcost{display:inline-block;margin-left:6px;padding:1px 7px;border-radius:var(--radius-pill);
+  background:color-mix(in srgb,var(--accent) 15%,transparent);color:var(--accent-strong);font-size:.66rem;font-weight:800}
+.tapcost.bad{background:color-mix(in srgb,var(--red) 14%,transparent);color:var(--red)}
+</style>
+</head>
+<body>
+<div class="page">
+  <h1>새 작업 패널 — UI 정리 시안 v2</h1>
+  <p class="lede">
+    v1은 모든 설정을 “행 + 시트”로 통일했는데, 그러면 모델·추론 강도처럼 자주 바꾸는 값이 1탭에서 2~3탭으로 늘어납니다.
+    v2는 <b>바꾸는 빈도에 따라 컨트롤을 나누고</b>, 겹침 문제는 “라벨은 항상 컨트롤 위”라는 한 줄 규칙으로 해결합니다.
+    단일 / 검토 / 대화 세 탭을 모두 담았습니다.
+  </p>
+
+  <div class="rule">
+    <b>배치 규칙 — 컨트롤 선택 기준</b>
+    <table>
+      <tr><th>형태</th><th>쓰는 곳</th><th>이 패널의 예</th></tr>
+      <tr><td>세그먼트</td><td>2~3개, 서로 배타, 자주 바꿈</td><td>세션 유형, 작업 방식, 진행 방식, 검토 깊이, 대화 길이</td></tr>
+      <tr><td>칩</td><td>4~8개 또는 개수 가변, 자주 바꿈</td><td>엔진, <b>모델</b>, <b>추론 강도</b>, 자동화 수준, 참여자</td></tr>
+      <tr><td>행 + 시트</td><td>값이 길거나 개수가 많고, 거의 안 바꿈</td><td>호스트, 작업 위치, 말투 프리셋, 타임아웃</td></tr>
+      <tr><td>카드</td><td>선택마다 설명이 꼭 필요함</td><td>검토 방법, 마무리 방식</td></tr>
+    </table>
+    <p class="why" style="margin-top:9px">
+      핵심은 <code>.modal label{display:block}</code> 안에서 컨트롤이 <code>inline-flex</code>로 라벨 옆에 붙는 걸 없애는 것입니다.
+      라벨을 항상 자기 줄에 두면 <b>드롭다운을 유지하든 칩으로 바꾸든 겹칠 수 없습니다.</b>
+    </p>
+  </div>
+
+  <div class="toolbar">
+    <button id="theme" onclick="toggleTheme()">라이트 / 다크</button>
+    <button class="on" data-col="0" onclick="toggleCol(this)">현재 (문제)</button>
+    <button class="on" data-col="1" onclick="toggleCol(this)">단일</button>
+    <button class="on" data-col="2" onclick="toggleCol(this)">검토</button>
+    <button class="on" data-col="3" onclick="toggleCol(this)">대화</button>
+  </div>
+
+  <div class="stage">
+
+  <!-- ================= 현재 ================= -->
+  <section class="col" data-col="0">
+    <h2>현재 (문제 재현)</h2>
+    <p>단일 탭. 라벨과 드롭다운이 한 줄에서 충돌합니다. 검토·대화 탭은 이 형태로 필드가 15~20개까지 늘어납니다.</p>
+    <div class="phone"><div class="sheet before">
+      <div class="sheet-head"><h3>새 작업</h3><button class="x">×</button></div>
+      <label>세션 유형<div class="segments"><button class="active">단일</button><button>검토</button><button>대화</button></div></label>
+      <fieldset><legend>실행 위치</legend><div class="grid2">
+        <button class="active"><strong>NAS</strong><small>linux · 온라인</small></button>
+        <button><strong>Desktop</strong><small>win32 · 오프라인</small></button></div></fieldset>
+      <fieldset><legend>작업 위치</legend><div class="grid2">
+        <button class="active"><strong>claudex-workhouse</strong><small>/srv/claudex-workhouse</small></button>
+        <button><strong>risu</strong><small>/srv/projects/example</small></button></div></fieldset>
+      <label>엔진<div class="segments"><button class="active">Codex</button><button>Claude</button><button>DeepSeek</button></div></label>
+      <label class="flag" data-flag="라벨 겹침">작업 방식<span class="compact-choice"><span class="choice-trigger"><span>바로 실행</span>⌃</span></span></label>
+      <label class="flag" data-flag="라벨 겹침">자동화 수준<span class="compact-choice"><span class="choice-trigger danger"><span>전체 권한</span>⌃</span></span></label>
+      <label>모델<div class="chips"><button class="active">GPT-5.4 Codex</button><button>GPT-5.4</button><button>GPT-5.4 mini</button></div></label>
+      <label>추론 강도<div class="chips"><button>낮음</button><button class="active">중간</button><button>높음</button><button>최고</button></div></label>
+      <label>요청<textarea placeholder="무엇을 시킬까요?"></textarea></label>
+    </div></div>
+    <div class="note">
+      <b>확인된 문제</b>
+      <ul>
+        <li><code>WorkModeChips</code> / <code>AutomationLevelChips</code>가 <code>inline-flex</code>라 <code>display:block</code> 라벨 텍스트와 같은 줄에서 baseline 정렬 → 글자를 덮음</li>
+        <li>선택지가 2개뿐인 <b>작업 방식</b>이 드롭다운이라, 값 하나 바꾸는 데 2탭</li>
+        <li>대화 탭은 이 형태로 필드가 20개 가까이 세로 나열됨</li>
+      </ul>
+    </div>
+  </section>
+
+  <!-- ================= 단일 ================= -->
+  <section class="col" data-col="1">
+    <h2>단일</h2>
+    <p>모델·추론 강도는 <b>칩 그대로 노출 유지</b>(1탭). 호스트·작업 위치만 행으로 접습니다.</p>
+    <div class="phone"><div class="sheet">
+      <div class="sheet-head"><h3>새 작업</h3><button class="x">×</button></div>
+      <div class="seg" style="margin-top:2px"><button class="active">단일</button><button>검토</button><button>대화</button></div>
+
+      <div class="group">
+        <h4>실행 대상<span class="hint">거의 안 바뀜</span></h4>
+        <div class="row"><span class="k"><b>호스트</b><small>linux · 온라인 · 방금</small></span><span class="v"><span>NAS</span>›</span></div>
+        <div class="row"><span class="k"><b>작업 위치</b><small>/srv/claudex-workhouse</small></span><span class="v"><span>claudex-workhouse</span>›</span></div>
+      </div>
+
+      <div class="group">
+        <h4>실행 방식</h4>
+        <div class="field"><div class="lab"><b>엔진</b></div>
+          <div class="pillrow"><button class="pill active">Codex</button><button class="pill">Claude</button><button class="pill">DeepSeek</button><button class="pill">Ollama</button><button class="pill">Antigravity</button></div></div>
+        <div class="field"><div class="lab"><b>모델</b></div>
+          <div class="pillrow"><button class="pill active">GPT-5.4 Codex</button><button class="pill">GPT-5.4</button><button class="pill">GPT-5.4 mini</button></div></div>
+        <div class="field"><div class="lab"><b>추론 강도</b></div>
+          <div class="seg"><button>낮음</button><button class="active">중간</button><button>높음</button><button>최고</button></div></div>
+        <div class="field"><div class="lab"><b>작업 방식</b></div>
+          <div class="seg"><button class="active">바로 실행</button><button>계획 먼저</button></div>
+          <p class="why">요청을 바로 실행합니다.</p></div>
+        <div class="field"><div class="lab"><b>자동화 수준</b></div>
+          <div class="pillrow"><button class="pill">읽기 전용</button><button class="pill">확인 후</button><button class="pill">자동</button><button class="pill danger active">전체 권한</button></div>
+          <p class="why">제한 없이 자동으로 진행 · 샌드박스 없음</p>
+          <div class="warn">작업 위치 밖의 파일도 변경될 수 있습니다.
+            <label><input type="checkbox"/><span>위험을 확인했습니다</span></label></div></div>
+      </div>
+
+      <div class="prompt-block">
+        <textarea>새 작업 패널의 라벨 겹침을 고쳐줘.</textarea>
+        <div class="presets"><button class="pill ghost">+ 저장</button><button class="pill">버그 조사</button><button class="pill">테스트 추가</button><button class="pill">리팩터</button></div>
+        <div class="prompt-meta"><span>첨부 0</span><span class="spacer"></span><span>28 / 20,000</span></div>
+      </div>
+      <div class="quota"><b>Codex</b><span>5시간 42%</span><span>주간 18%</span><span>3시간 12분 후 초기화</span></div>
+      <div class="actions"><button>예약</button><button class="primary">지금 시작</button></div>
+    </div></div>
+    <div class="note">
+      <b>현재 대비 탭 수</b>
+      <ul>
+        <li>모델 바꾸기 <span class="tapcost">1탭 (변화 없음)</span> · 추론 강도 <span class="tapcost">1탭 (변화 없음)</span></li>
+        <li>작업 방식 <span class="tapcost">2탭 → 1탭</span> · 자동화 수준 <span class="tapcost">2탭 → 1탭</span></li>
+        <li>작업 위치 <span class="tapcost bad">1탭 → 2탭</span> — 대신 등록 작업공간이 늘어도 목록이 안 터짐</li>
+      </ul>
+      <b style="display:block;margin-top:8px">겹침이 사라지는 이유</b>
+      <ul><li>라벨이 <code>.lab</code> 블록으로 자기 줄을 차지 → 컨트롤이 무엇이든 같은 줄에 못 옴</li></ul>
+    </div>
+  </section>
+
+  <!-- ================= 검토 ================= -->
+  <section class="col" data-col="2">
+    <h2>검토</h2>
+    <p>참여자별 설정이 세로로 3벌 늘어지던 걸 <b>프로바이더 카드</b>로 묶고, 실행 계획을 요약으로 먼저 보여줍니다.</p>
+    <div class="phone"><div class="sheet">
+      <div class="sheet-head"><h3>새 검토</h3><button class="x">×</button></div>
+      <div class="seg" style="margin-top:2px"><button>단일</button><button class="active">검토</button><button>대화</button></div>
+
+      <div class="group">
+        <h4>실행 대상</h4>
+        <div class="row"><span class="k"><b>호스트 · 작업 위치</b><small>NAS · /srv/claudex-workhouse</small></span><span class="v"><span>변경</span>›</span></div>
+      </div>
+
+      <div class="group">
+        <h4>검토 방법</h4>
+        <div class="field">
+          <div class="seg"><button class="active">독립 검토</button><button>교차 검토</button></div>
+          <p class="why">참여자가 서로 보지 않고 각자 결과를 냅니다.</p></div>
+        <div class="field"><div class="lab"><b>검토 깊이</b></div>
+          <div class="seg"><button class="active">기본</button><button>심층</button></div></div>
+      </div>
+
+      <div class="group">
+        <h4>참여자<span class="hint">2명 선택됨</span></h4>
+        <div class="field">
+          <div class="pillrow"><button class="pill active">Codex</button><button class="pill active">Claude</button><button class="pill off">DeepSeek</button><button class="pill off">Ollama</button><button class="pill off">Antigravity</button></div>
+
+          <div class="who">
+            <header><span class="dot"></span><b>Codex</b><span class="off">최종 정리 담당</span></header>
+            <div class="field"><div class="lab"><b>모델</b><small>추론 강도</small></div>
+              <div class="pillrow"><button class="pill active">GPT-5.4 Codex</button><button class="pill">GPT-5.4</button></div>
+              <div class="seg" style="margin-top:6px"><button>낮음</button><button class="active">중간</button><button>높음</button></div></div>
+            <div class="field"><div class="lab"><b>자동화 수준</b></div>
+              <div class="pillrow"><button class="pill">읽기 전용</button><button class="pill">확인 후</button><button class="pill">자동</button><button class="pill danger active">전체 권한</button></div></div>
+          </div>
+
+          <div class="who">
+            <header><span class="dot claude"></span><b>Claude</b></header>
+            <div class="field"><div class="lab"><b>모델</b><small>추론 강도</small></div>
+              <div class="pillrow"><button class="pill active">Opus 5</button><button class="pill">Sonnet 5</button></div>
+              <div class="seg" style="margin-top:6px"><button>낮음</button><button class="active">중간</button><button>높음</button></div></div>
+            <div class="field"><div class="lab"><b>자동화 수준</b></div>
+              <div class="pillrow"><button class="pill active">읽기 전용</button><button class="pill">확인 후</button><button class="pill">자동</button><button class="pill danger">전체 권한</button></div></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="group">
+        <h4>마무리 방식</h4>
+        <div class="field">
+          <div class="seg"><button class="active">대표가 종합</button><button>나란히</button><button>원문</button></div>
+          <p class="why">Codex가 두 검토 결과를 하나로 정리해 마지막에 제출합니다.</p>
+          <div class="pillrow" style="margin-top:8px"><button class="pill active">✓ 수정까지 적용</button></div>
+        </div>
+      </div>
+
+      <div class="plan">
+        <b>실행 계획</b>
+        <ol>
+          <li><b>Codex</b> 검토 · 전체 권한</li>
+          <li><b>Claude</b> 검토 · 읽기 전용</li>
+          <li><b>Codex</b> 종합 후 수정 적용</li>
+        </ol>
+        <p class="why" style="margin-top:6px">모델 호출 3회 · 예상 소요 상한 60분</p>
+      </div>
+      <div class="warn" style="margin-top:11px">전체 권한 참여자가 있어 작업 위치 밖 파일이 변경될 수 있습니다.
+        <label><input type="checkbox"/><span>위험을 확인했습니다</span></label></div>
+
+      <div class="prompt-block">
+        <textarea placeholder="무엇을 검토할까요?"></textarea>
+        <div class="prompt-meta"><span>첨부 0</span><span class="spacer"></span><span>0 / 20,000</span></div>
+      </div>
+      <div class="actions"><button>제한 60분 ›</button><button class="primary">검토 시작</button></div>
+    </div></div>
+    <div class="note">
+      <b>바뀌는 점</b>
+      <ul>
+        <li>참여자 칩과 그 참여자의 설정이 <b>같은 그룹 안에</b> 있어서, 켠 사람과 설정할 사람이 화면에서 떨어지지 않음</li>
+        <li>참여자별 모델·추론 강도는 카드 안에서도 <b>칩/세그먼트 그대로</b> — 여기서 시트로 내리면 2명×2값 = 8탭이 됨</li>
+        <li>흩어져 있던 “검토 N회 · 결과만/수정까지” 문구를 <b>실행 계획 3줄</b>로 바꿔 순서와 권한을 같이 보여줌</li>
+        <li>총 타임아웃은 실행 버튼 옆으로 — 값은 거의 안 바꾸지만 시작 직전에 확인하는 값</li>
+      </ul>
+    </div>
+  </section>
+
+  <!-- ================= 대화 ================= -->
+  <section class="col" data-col="3">
+    <h2>대화</h2>
+    <p>가장 무거운 탭(필드 약 20개). 자주 안 건드리는 <b>말투·한도·결론</b>을 접고, 참여자 설정을 카드로 묶습니다.</p>
+    <div class="phone"><div class="sheet">
+      <div class="sheet-head"><h3>새 대화</h3><button class="x">×</button></div>
+      <div class="seg" style="margin-top:2px"><button>단일</button><button>검토</button><button class="active">대화</button></div>
+
+      <div class="summarybar">
+        <button>
+          <span class="chipline"><span class="lead">Codex 먼저</span><span>NAS</span><span>claudex-workhouse</span><span>읽기 전용</span></span>
+          <span class="more">변경 ›</span>
+        </button>
+      </div>
+
+      <div class="group">
+        <h4>참여자<span class="hint">2명 · Codex 먼저</span></h4>
+        <div class="field">
+          <div class="pillrow"><button class="pill active">Codex</button><button class="pill active">Claude</button><button class="pill off">DeepSeek</button><button class="pill off">Ollama</button><button class="pill off">Antigravity</button></div>
+          <p class="why">대화 세션은 항상 읽기 전용으로 실행됩니다.</p>
+
+          <div class="who">
+            <header><span class="dot"></span><b>Codex</b><span class="off">첫 응답</span></header>
+            <div class="field"><div class="lab"><b>모델</b></div>
+              <div class="pillrow"><button class="pill active">GPT-5.4</button><button class="pill">GPT-5.4 mini</button></div>
+              <div class="seg" style="margin-top:6px"><button>낮음</button><button class="active">중간</button><button>높음</button></div></div>
+            <div class="row"><span class="k"><b>말투</b><small>전역 설정 사용</small></span><span class="v"><span>차분함</span>›</span></div>
+          </div>
+
+          <div class="who">
+            <header><span class="dot claude"></span><b>Claude</b></header>
+            <div class="field"><div class="lab"><b>모델</b></div>
+              <div class="pillrow"><button class="pill active">Opus 5</button><button class="pill">Sonnet 5</button></div>
+              <div class="seg" style="margin-top:6px"><button>낮음</button><button class="active">중간</button><button>높음</button></div></div>
+            <div class="row"><span class="k"><b>말투</b><small>전역 설정 사용</small></span><span class="v"><span>친근함</span>›</span></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="group">
+        <h4>대화 진행</h4>
+        <div class="field"><div class="lab"><b>진행 방식</b></div>
+          <div class="seg"><button class="active">안내형</button><button>자동</button></div>
+          <p class="why">내 차례마다 멈추고 다음 발언을 기다립니다.</p></div>
+        <div class="field"><div class="lab"><b>한 발언 길이</b></div>
+          <div class="seg"><button class="active">간결</button><button>충분히</button></div></div>
+        <div class="field"><div class="lab"><b>최대 턴</b><small>모델당</small></div>
+          <div class="stepper"><button>−</button><span>12</span><button>+</button>
+            <button class="pill">무제한으로</button></div></div>
+      </div>
+
+      <div class="group">
+        <h4>내 정보<span class="hint">선택</span></h4>
+        <div class="row"><span class="k"><b>대화에서 부를 이름</b><small>미설정 시 “사용자”</small></span><span class="v"><span>설정</span>›</span></div>
+        <div class="row"><span class="k"><b>검토 도구 사용</b><small>파일·diff를 읽고 이야기함</small></span><span class="v"><span>끔</span>›</span></div>
+        <div class="row"><span class="k"><b>끝나면 결론 파일 생성</b><small>docs/conversation-…md</small></span><span class="v"><span>끔</span>›</span></div>
+      </div>
+
+      <div class="prompt-block">
+        <textarea placeholder="무엇을 이야기할까요?"></textarea>
+        <div class="prompt-meta"><span>첨부 0</span><span class="spacer"></span><span>0 / 20,000</span></div>
+      </div>
+      <div class="actions"><button>제한 90분 ›</button><button class="primary">대화 시작</button></div>
+    </div></div>
+    <div class="note">
+      <b>바뀌는 점</b>
+      <ul>
+        <li>필드 약 20개 → <b>보이는 그룹 4개</b>. 스크롤이 대략 절반</li>
+        <li>말투는 “전역 사용 / 세션 지정” 세그먼트 + 프로바이더별 select 두 겹이었는데, <b>참여자 카드 안 한 행</b>으로 합침 (전역이면 값 옆에 “전역 설정 사용”)</li>
+        <li>최대 턴은 숫자 입력 + 무제한 체크박스 → <b>스테퍼 + 무제한 칩</b>. 모바일 숫자 키보드가 안 올라옴</li>
+        <li>닉네임·검토 도구·결론 파일처럼 기본값으로 두는 게 대부분인 항목은 “내 정보” 그룹으로 내림</li>
+        <li>무제한을 켜면 지금처럼 비용 경고 + 확인 체크가 그 자리에서 펼쳐짐</li>
+      </ul>
+    </div>
+  </section>
+
+  </div>
+</div>
+
+<script>
+function toggleTheme(){const r=document.documentElement;r.dataset.theme=r.dataset.theme==="light"?"dark":"light";}
+function toggleCol(btn){btn.classList.toggle("on");document.querySelector('section.col[data-col="'+btn.dataset.col+'"]').hidden=!btn.classList.contains("on");}
+</script>
+</body>
+</html>

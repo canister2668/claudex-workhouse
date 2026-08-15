@@ -1,0 +1,8 @@
+import {describe,expect,it} from "vitest";
+import {ModelCatalogAnnouncementCoordinator} from "../../src/server/model-catalog-announcements.js";
+
+const snapshot=(ids:string[],stale=false,source="provider-api")=>({models:ids.map(id=>({id,displayName:id.toUpperCase()})),stale,source});
+describe("model catalog announcements",()=>{
+  it("seeds silently, announces unseen ids once, and ignores stale catalogs",async()=>{let stored:any=null;const events:any[]=[],coordinator=new ModelCatalogAnnouncementCoordinator(async()=>stored,async value=>{stored=structuredClone(value);});await coordinator.initialize();coordinator.subscribe(0,event=>events.push(event));expect(await coordinator.observe("deepseek",snapshot(["a"]))).toBeNull();expect(await coordinator.observe("deepseek",snapshot(["a","b"],true))).toBeNull();await coordinator.observe("deepseek",snapshot(["a","b"]));await coordinator.observe("deepseek",snapshot(["a"]));await coordinator.observe("deepseek",snapshot(["a","b"]));expect(events).toHaveLength(1);expect(events[0]).toMatchObject({provider:"deepseek",type:"models_discovered",count:1,models:[{id:"b"}]});expect(stored.providers.deepseek.seenIds).toEqual(["a","b"]);});
+  it("does not adopt fallback data as a baseline",async()=>{let stored:any=null;const coordinator=new ModelCatalogAnnouncementCoordinator(async()=>stored,async value=>{stored=value;});await coordinator.initialize();await coordinator.observe("claude",snapshot(["fallback"],true,"fallback:picker unavailable"));expect(stored).toBeNull();await coordinator.observe("claude",snapshot(["real"]));expect(stored.providers.claude.seenIds).toEqual(["real"]);});
+});

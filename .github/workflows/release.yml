@@ -1,0 +1,1122 @@
+name: public release
+
+on:
+  push:
+    tags:
+      - "v[0-9]+.[0-9]+.[0-9]+"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: public-release-stable
+  cancel-in-progress: false
+
+jobs:
+  preflight:
+    runs-on: ubuntu-24.04
+    environment: release
+    timeout-minutes: 10
+    outputs:
+      version: ${{ steps.release.outputs.version }}
+      published-at: ${{ steps.release.outputs.published_at }}
+      image-repository: ${{ steps.release.outputs.image_repository }}
+      asset-base-url: ${{ steps.release.outputs.asset_base_url }}
+      installer-origin: ${{ steps.release.outputs.installer_origin }}
+      public-manifest-url: ${{ steps.release.outputs.public_manifest_url }}
+      public-signature-url: ${{ steps.release.outputs.public_signature_url }}
+      installer-connect-origin: ${{ steps.release.outputs.installer_connect_origin }}
+      resume-draft: ${{ steps.release.outputs.resume_draft }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - name: Verify generated public source proof
+        run: node app/scripts/public-source-proof.mjs --root .
+      - name: Validate immutable release inputs
+        id: release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -eu
+          umask 077
+          version="${GITHUB_REF_NAME#v}"
+          node -e '
+            const value = process.argv[1];
+            if (!/^[0-9]+\.[0-9]+\.[0-9]+$/.test(value)) {
+              throw new Error("Release tag must contain a supported semantic version.");
+            }
+            const packageVersion = require("./app/package.json").version;
+            if (packageVersion !== value) {
+              throw new Error(`Release tag version ${value} does not match app/package.json ${packageVersion}.`);
+            }
+          ' "$version"
+          for notice in LICENSE LICENSE.ko.md LICENSE.ja.md NOTICE.md NOTICE.ko.md NOTICE.ja.md THIRD_PARTY_NOTICES.md THIRD_PARTY_NOTICES.ko.md THIRD_PARTY_NOTICES.ja.md; do
+            test -f "$notice" || {
+              printf '%s\n' "Required project notice is missing: $notice" >&2
+              exit 1
+            }
+          done
+          test -f deploy/release-key-ring.json || {
+            printf '%s\n' 'deploy/release-key-ring.json must pin the production public release key.' >&2
+            exit 1
+          }
+          gh api \
+            -H 'X-GitHub-Api-Version: 2026-03-10' \
+            "repos/$GITHUB_REPOSITORY/immutable-releases" \
+            --jq 'select(.enabled == true) | .enabled' | grep -qx true || {
+              printf '%s\n' 'GitHub immutable releases must be enabled before publishing.' >&2
+              exit 1
+            }
+          resume_draft=false
+          if release_json="$(gh release view "$GITHUB_REF_NAME" \
+            --repo "$GITHUB_REPOSITORY" \
+            --json isDraft 2>/dev/null)"; then
+            is_draft="$(printf '%s' "$release_json" | node -e '
+              let value = "";
+              process.stdin.on("data", chunk => value += chunk);
+              process.stdin.on("end", () => {
+                const parsed = JSON.parse(value);
+                process.stdout.write(parsed.isDraft === true ? "true" : "false");
+              });
+            ')"
+            if [ "$is_draft" != true ]; then
+              printf '%s\n' "Published immutable release $GITHUB_REF_NAME already exists." >&2
+              exit 1
+            fi
+            resume_draft=true
+          fi
+          published_at="$(date -u '+%Y-%m-%dT%H:%M:%S.000Z')"
+          image_repository="ghcr.io/${GITHUB_REPOSITORY,,}"
+          repository_name="${GITHUB_REPOSITORY#*/}"
+          installer_origin="${{ vars.PUBLIC_INSTALLER_ORIGIN }}"
+          if [ -z "$installer_origin" ]; then
+            installer_origin="https://${GITHUB_REPOSITORY_OWNER,,}.github.io/$repository_name"
+          fi
+          installer_origin="$(node -e '
+            const url = new URL(process.argv[1]);
+            if (url.protocol !== "https:" || url.username || url.password || url.search || url.hash) {
+              throw new Error("PUBLIC_INSTALLER_ORIGIN must be a trusted HTTPS URL without credentials, query, or fragment.");
+            }
+            process.stdout.write(url.href.replace(/\\/+$/, ""));
+          ' "$installer_origin")"
+          asset_base_url="https://github.com/$GITHUB_REPOSITORY/releases/download/$GITHUB_REF_NAME"
+          installer_connect_origin="https://github.com"
+          {
+            printf 'version=%s\n' "$version"
+            printf 'published_at=%s\n' "$published_at"
+            printf 'image_repository=%s\n' "$image_repository"
+            printf 'asset_base_url=%s\n' "$asset_base_url"
+            printf 'installer_origin=%s\n' "$installer_origin"
+            printf 'public_manifest_url=%s/releases/stable/release-manifest.json\n' "$installer_origin"
+            printf 'public_signature_url=%s/releases/stable/release-manifest.json.sig\n' "$installer_origin"
+            printf 'installer_connect_origin=%s\n' "$installer_connect_origin"
+            printf 'resume_draft=%s\n' "$resume_draft"
+          } >> "$GITHUB_OUTPUT"
+
+  application:
+    needs: preflight
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: pnpm/action-setup@008330803749db0355799c700092d9a85fd074e9 # v6.0.9
+        with:
+          version: 10.17.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: app/pnpm-lock.yaml
+      - name: Install locked dependencies
+        run: pnpm install --frozen-lockfile
+        working-directory: app
+      - name: Type and Svelte checks
+        run: pnpm run check
+        working-directory: app
+      - name: Unit and integration tests
+        run: pnpm test
+        working-directory: app
+      - name: Production build
+        env:
+          CLAUDEX_WORKHOUSE_COMMIT_SHA: ${{ github.sha }}
+        run: pnpm run build
+        working-directory: app
+      - name: Install Chromium for browser release checks
+        run: pnpm exec playwright install --with-deps chromium
+        working-directory: app
+      - name: Browser release checks
+        run: pnpm run test:e2e:release
+        working-directory: app
+
+  image:
+    needs: [preflight, application]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+    outputs:
+      digest: ${{ steps.image.outputs.digest }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: docker/setup-qemu-action@96fe6ef7f33517b61c61be40b68a1882f3264fb8 # v4.2.0
+      - uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
+      - uses: docker/login-action@abd2ef45e78c5afb21d64d4ca52ee8550d9572c7 # v4.5.1
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build and push unpromoted multi-architecture image
+        id: image
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        with:
+          context: .
+          build-args: |
+            CLAUDEX_WORKHOUSE_COMMIT_SHA=${{ github.sha }}
+            CLAUDEX_WORKHOUSE_RELEASE_VERSION=${{ needs.preflight.outputs.version }}
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ needs.preflight.outputs.image-repository }}:release-candidate-${{ github.sha }}
+          provenance: mode=max
+          sbom: true
+      - name: Attest the image digest
+        uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
+        with:
+          subject-name: ${{ needs.preflight.outputs.image-repository }}
+          subject-digest: ${{ steps.image.outputs.digest }}
+          push-to-registry: true
+      - name: Smoke-test the exact amd64 image digest and health endpoint
+        run: |
+          set -eu
+          container_id="$(docker run \
+            --detach \
+            --platform linux/amd64 \
+            --publish 127.0.0.1::3410 \
+            "${{ needs.preflight.outputs.image-repository }}@${{ steps.image.outputs.digest }}")"
+          cleanup() {
+            docker rm --force "$container_id" >/dev/null 2>&1 || true
+          }
+          trap cleanup EXIT HUP INT TERM
+          endpoint="$(docker port "$container_id" 3410/tcp)"
+          port="${endpoint##*:}"
+          case "$port" in
+            *[!0-9]*|'') printf '%s\n' "Could not determine image smoke port: $endpoint" >&2; exit 1 ;;
+          esac
+          ready=false
+          for attempt in $(seq 1 60); do
+            if curl --fail --silent --show-error \
+              "http://127.0.0.1:$port/api/health/ready" >/dev/null 2>&1; then
+              ready=true
+              break
+            fi
+            sleep 1
+          done
+          [ "$ready" = true ] || {
+            printf '%s\n' 'The exact release image did not become healthy.' >&2
+            exit 1
+          }
+
+  workers:
+    needs: [preflight, application]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: windows-2022
+            platform: windows
+            architecture: x64
+            archive: claudex-workhouse-worker-windows-x64.zip
+          - runner: ubuntu-24.04
+            platform: linux
+            architecture: x64
+            archive: claudex-workhouse-worker-linux-x64.tar.gz
+          - runner: ubuntu-24.04-arm
+            platform: linux
+            architecture: arm64
+            archive: claudex-workhouse-worker-linux-arm64.tar.gz
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 35
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: pnpm/action-setup@008330803749db0355799c700092d9a85fd074e9 # v6.0.9
+        with:
+          version: 10.17.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: app/pnpm-lock.yaml
+      - name: Install locked dependencies
+        run: pnpm install --frozen-lockfile
+        working-directory: app
+      - name: Build native current-user Worker package
+        env:
+          CLAUDEX_WORKHOUSE_RELEASE_VERSION: ${{ needs.preflight.outputs.version }}
+          CLAUDEX_WORKHOUSE_WORKER_PLATFORM: ${{ matrix.platform }}
+          CLAUDEX_WORKHOUSE_WORKER_ARCHITECTURE: ${{ matrix.architecture }}
+          CLAUDEX_WORKHOUSE_LICENSE_FILE: ${{ github.workspace }}/LICENSE
+          CLAUDEX_WORKHOUSE_COMMIT_SHA: ${{ github.sha }}
+          SOURCE_DATE_EPOCH: "946684800"
+        run: pnpm worker:release
+        working-directory: app
+      - name: Smoke-test the extracted Linux archive runtime and CLI
+        if: matrix.platform == 'linux'
+        run: |
+          set -eu
+          smoke_directory="$(mktemp -d)"
+          trap 'rm -rf -- "$smoke_directory"' EXIT HUP INT TERM
+          tar -xzf "packages/${{ matrix.archive }}" -C "$smoke_directory"
+          test -x "$smoke_directory/claudex-workhouse-worker-${{ matrix.platform }}-${{ matrix.architecture }}/runtime/node"
+          test -x "$smoke_directory/claudex-workhouse-worker-${{ matrix.platform }}-${{ matrix.architecture }}/bin/claudex-workhouse-worker"
+          "$smoke_directory/claudex-workhouse-worker-${{ matrix.platform }}-${{ matrix.architecture }}/bin/claudex-workhouse-worker" status
+      - name: Smoke-test the extracted Windows archive runtime and CLI
+        if: matrix.platform == 'windows'
+        shell: pwsh
+        run: |
+          $smokeDirectory = Join-Path $env:RUNNER_TEMP ([Guid]::NewGuid().ToString('N'))
+          try {
+            Expand-Archive -LiteralPath "packages/${{ matrix.archive }}" -DestinationPath $smokeDirectory
+            $root = Join-Path $smokeDirectory 'claudex-workhouse-worker-windows-x64'
+            & (Join-Path $root 'node.exe') `
+              (Join-Path $root 'app/desktop-worker/cli.js') status
+            if ($LASTEXITCODE -ne 0) { throw 'Packaged Windows Worker smoke test failed.' }
+          } finally {
+            if (Test-Path -LiteralPath $smokeDirectory) {
+              Remove-Item -LiteralPath $smokeDirectory -Recurse -Force
+            }
+          }
+      - name: Generate Worker package SBOM
+        uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0
+        with:
+          path: packages/claudex-workhouse-worker-${{ matrix.platform }}-${{ matrix.architecture }}
+          format: spdx-json
+          output-file: packages/${{ matrix.archive }}.spdx.json
+          upload-artifact: false
+      - name: Attest Worker package
+        uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
+        with:
+          subject-path: packages/${{ matrix.archive }}
+      - name: Upload Worker release inputs
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: worker-${{ matrix.platform }}-${{ matrix.architecture }}
+          path: |
+            packages/${{ matrix.archive }}
+            packages/${{ matrix.archive }}.spdx.json
+          if-no-files-found: error
+          retention-days: 7
+
+  windows-server:
+    needs: [preflight, application]
+    runs-on: windows-2022
+    environment: release
+    timeout-minutes: 45
+    env:
+      npm_config_node_linker: hoisted
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: pnpm/action-setup@008330803749db0355799c700092d9a85fd074e9 # v6.0.9
+        with:
+          version: 10.17.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: app/pnpm-lock.yaml
+      - name: Install locked dependencies and build server assets
+        shell: pwsh
+        run: |
+          pnpm install --frozen-lockfile
+          if ($LASTEXITCODE -ne 0) { throw 'Dependency installation failed.' }
+          pnpm run build
+          if ($LASTEXITCODE -ne 0) { throw 'Application build failed.' }
+        working-directory: app
+      - name: Build the native launcher with MSVC warnings as errors
+        shell: pwsh
+        run: |
+          cmake -S launcher/windows -B out/windows-launcher -A x64
+          if ($LASTEXITCODE -ne 0) { throw 'Windows launcher configuration failed.' }
+          cmake --build out/windows-launcher --config Release
+          if ($LASTEXITCODE -ne 0) { throw 'Windows launcher build failed.' }
+      - name: Package and inspect the unsigned single EXE
+        shell: pwsh
+        env:
+          CLAUDEX_WORKHOUSE_RELEASE_VERSION: ${{ needs.preflight.outputs.version }}
+          CLAUDEX_WORKHOUSE_COMMIT_SHA: ${{ github.sha }}
+        run: |
+          pnpm prune --prod
+          if ($LASTEXITCODE -ne 0) { throw 'Production dependency pruning failed.' }
+          $env:CLAUDEX_WORKHOUSE_WINDOWS_NODE_EXE = (Get-Command node.exe).Source
+          $env:CLAUDEX_WORKHOUSE_WINDOWS_NODE_MODULES = (Resolve-Path 'node_modules').Path
+          $env:CLAUDEX_WORKHOUSE_WINDOWS_LAUNCHER_EXE = (Resolve-Path '..\out\windows-launcher\Release\claudex-workhouse.exe').Path
+          node scripts/package-windows-server.mjs
+          if ($LASTEXITCODE -ne 0) { throw 'Windows server packaging failed.' }
+          node --input-type=module -e "import {inspectWindowsSingleExe} from './dist-server/windows/single-exe.js'; const value=inspectWindowsSingleExe('../packages/claudex-workhouse-server-windows-x64.exe'); if(value.manifest.version!==process.env.CLAUDEX_WORKHOUSE_RELEASE_VERSION)throw Error('Unsigned EXE version mismatch');"
+          if ($LASTEXITCODE -ne 0) { throw 'Unsigned Windows single EXE inspection failed.' }
+        working-directory: app
+      - name: Confirm unsigned EXE and create portable ZIP and checksums
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $exe = (Resolve-Path 'packages\claudex-workhouse-server-windows-x64.exe').Path
+          $signature = Get-AuthenticodeSignature -LiteralPath $exe
+          if ($signature.Status -ne [Management.Automation.SignatureStatus]::NotSigned) { throw "Windows release policy requires an unsigned EXE, received: $($signature.Status)" }
+          node --input-type=module -e "import {inspectWindowsSingleExe} from './app/dist-server/windows/single-exe.js'; inspectWindowsSingleExe('./packages/claudex-workhouse-server-windows-x64.exe');"
+          if ($LASTEXITCODE -ne 0) { throw 'Unsigned Windows single EXE inspection failed.' }
+          $portableRoot = Join-Path $env:RUNNER_TEMP 'claudex-workhouse-server-windows-x64-portable'
+          Copy-Item -LiteralPath 'packages\claudex-workhouse-server-windows-x64-folder' -Destination $portableRoot -Recurse
+          $zip = (Join-Path (Resolve-Path 'packages').Path 'claudex-workhouse-server-windows-x64-portable.zip')
+          Compress-Archive -LiteralPath $portableRoot -DestinationPath $zip -CompressionLevel Optimal
+          foreach ($file in @($exe,$zip)) {
+            $hash = (Get-FileHash -LiteralPath $file -Algorithm SHA256).Hash.ToLowerInvariant()
+            "$hash  $([IO.Path]::GetFileName($file))" | Set-Content -LiteralPath "$file.sha256" -Encoding ascii -NoNewline
+          }
+      - name: Launch-test unsigned EXE and portable ZIP
+        shell: pwsh
+        run: |
+          & .\app\scripts\test-windows-server-package.ps1 `
+            -SingleExe '.\packages\claudex-workhouse-server-windows-x64.exe' `
+            -PortableZip '.\packages\claudex-workhouse-server-windows-x64-portable.zip' `
+            -ExpectedCommit "${{ github.sha }}"
+      - name: Scan unsigned Windows server EXE with Defender
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $exe = (Resolve-Path 'packages\claudex-workhouse-server-windows-x64.exe').Path
+          $status = Get-MpComputerStatus
+          if (-not $status.AMServiceEnabled -or -not $status.AntivirusEnabled) { throw 'Windows Defender antivirus engine is not enabled.' }
+          if ($null -eq $status.AntivirusSignatureLastUpdated -or $status.AntivirusSignatureLastUpdated -lt (Get-Date).AddDays(-7)) { throw 'Windows Defender signatures are stale.' }
+          $before = (Get-FileHash -LiteralPath $exe -Algorithm SHA256).Hash
+          $started = Get-Date
+          Start-MpScan -ScanType CustomScan -ScanPath $exe
+          if (-not (Test-Path -LiteralPath $exe -PathType Leaf)) { throw 'Windows Defender removed or quarantined the unsigned EXE.' }
+          $after = (Get-FileHash -LiteralPath $exe -Algorithm SHA256).Hash
+          if ($before -ne $after) { throw 'Unsigned EXE changed during Windows Defender scanning.' }
+          $escaped = [Regex]::Escape($exe)
+          $detections = @(Get-MpThreatDetection | Where-Object {
+            $_.InitialDetectionTime -ge $started.AddSeconds(-5) -and
+            (($_.Resources -join "`n") -match $escaped)
+          })
+          $activeThreats = @(Get-MpThreat | Where-Object { $_.IsActive })
+          if ($detections.Count -gt 0 -or $activeThreats.Count -gt 0) { throw 'Windows Defender reported a threat; release promotion is blocked.' }
+      - name: Generate Windows server SBOM
+        uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0
+        with:
+          path: packages/claudex-workhouse-server-windows-x64-folder
+          format: spdx-json
+          output-file: packages/claudex-workhouse-server-windows-x64.exe.spdx.json
+          upload-artifact: false
+      - name: Attest unsigned Windows server EXE
+        uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
+        with:
+          subject-path: packages/claudex-workhouse-server-windows-x64.exe
+      - name: Attest Windows portable ZIP
+        uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
+        with:
+          subject-path: packages/claudex-workhouse-server-windows-x64-portable.zip
+      - name: Upload unsigned Windows server release inputs
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: windows-server-x64
+          path: |
+            packages/claudex-workhouse-server-windows-x64.exe
+            packages/claudex-workhouse-server-windows-x64.exe.sha256
+            packages/claudex-workhouse-server-windows-x64-portable.zip
+            packages/claudex-workhouse-server-windows-x64-portable.zip.sha256
+            packages/claudex-workhouse-server-windows-x64.exe.spdx.json
+          if-no-files-found: error
+          retention-days: 7
+
+  prepare-release:
+    needs: [preflight, image, workers, windows-server]
+    runs-on: ubuntu-24.04
+    environment: release
+    timeout-minutes: 40
+    permissions:
+      contents: write
+      packages: write
+      id-token: write
+      attestations: write
+    outputs:
+      stage-pages-artifact: ${{ steps.pages-artifacts.outputs.stage }}
+      promote-pages-artifact: ${{ steps.pages-artifacts.outputs.promote }}
+      previous-present: ${{ steps.channel.outputs.previous_present }}
+      previous-version: ${{ steps.channel.outputs.previous_version }}
+      previous-sequence: ${{ steps.channel.outputs.previous_sequence }}
+      previous-manifest-sha256: ${{ steps.channel.outputs.previous_manifest_sha256 }}
+      release-sequence: ${{ steps.channel.outputs.next_sequence }}
+      release-manifest-sha256: ${{ steps.release-state.outputs.manifest_sha256 }}
+      release-asset-inventory-base64: ${{ steps.release-state.outputs.inventory_base64 }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: pnpm/action-setup@008330803749db0355799c700092d9a85fd074e9 # v6.0.9
+        with:
+          version: 10.17.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+      - name: Install locked dependencies
+        run: pnpm install --frozen-lockfile
+        working-directory: app
+      - name: Download Worker release inputs
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: worker-*
+          path: release-assets
+          merge-multiple: true
+      - name: Download unsigned Windows server release inputs
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: windows-server-x64
+          path: release-assets
+      - name: Package the Linux and NAS quick-start files
+        run: |
+          set -eu
+          archive="release-assets/claudex-workhouse-linux-nas-quickstart-${{ needs.preflight.outputs.version }}.tar.gz"
+          tar -czf "$archive" -C deploy/quickstart .
+          sha256sum "$archive" > "$archive.sha256"
+      - name: Attest the Linux and NAS quick-start bundle
+        uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
+        with:
+          subject-path: release-assets/claudex-workhouse-linux-nas-quickstart-${{ needs.preflight.outputs.version }}.tar.gz
+      - name: Verify stable channel progression
+        id: channel
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CURRENT_MANIFEST_URL: ${{ needs.preflight.outputs.public-manifest-url }}
+          CURRENT_SIGNATURE_URL: ${{ needs.preflight.outputs.public-signature-url }}
+          NEXT_VERSION: ${{ needs.preflight.outputs.version }}
+          IMAGE_REPOSITORY: ${{ needs.preflight.outputs.image-repository }}
+          WORKER_ORIGIN: ${{ needs.preflight.outputs.installer-connect-origin }}
+        run: |
+          set -eu
+          current_directory="$GITHUB_WORKSPACE/current-channel"
+          mkdir -p "$current_directory"
+          cache_nonce="${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-$(date +%s%N)"
+          manifest_status="$(curl \
+            --silent --show-error --location \
+            --proto '=https' --proto-redir '=https' \
+            --header 'Cache-Control: no-cache' \
+            --header 'Pragma: no-cache' \
+            --output "$current_directory/release-manifest.json" \
+            --write-out '%{http_code}' \
+            "$CURRENT_MANIFEST_URL?claudex-release-guard=$cache_nonce-manifest")"
+          signature_status="$(curl \
+            --silent --show-error --location \
+            --proto '=https' --proto-redir '=https' \
+            --header 'Cache-Control: no-cache' \
+            --header 'Pragma: no-cache' \
+            --output "$current_directory/release-manifest.json.sig" \
+            --write-out '%{http_code}' \
+            "$CURRENT_SIGNATURE_URL?claudex-release-guard=$cache_nonce-signature")"
+          current_argument=
+          if [ "$manifest_status:$signature_status" = 200:200 ]; then
+            current_argument="$current_directory"
+            printf 'CURRENT_CHANNEL_PRESENT=true\n' >> "$GITHUB_ENV"
+          elif [ "$manifest_status:$signature_status" = 404:404 ]; then
+            published_count="$(gh release list \
+              --repo "$GITHUB_REPOSITORY" \
+              --limit 100 \
+              --json isDraft \
+              --jq '[.[] | select(.isDraft == false)] | length')"
+            if [ "$published_count" -ne 0 ]; then
+              printf '%s\n' \
+                'Published releases exist, but the signed stable pointer is missing.' >&2
+              exit 1
+            fi
+            rm -f \
+              "$current_directory/release-manifest.json" \
+              "$current_directory/release-manifest.json.sig"
+            printf 'CURRENT_CHANNEL_PRESENT=false\n' >> "$GITHUB_ENV"
+          else
+            printf '%s\n' \
+              "Stable manifest/signature fetch was inconsistent: $manifest_status/$signature_status" >&2
+            exit 1
+          fi
+          manifest_origin="$(node -e \
+            'process.stdout.write(new URL(process.argv[1]).origin)' \
+            "$CURRENT_MANIFEST_URL")"
+          progression="$(env \
+            CLAUDEX_WORKHOUSE_CURRENT_CHANNEL_DIRECTORY="$current_argument" \
+            CLAUDEX_WORKHOUSE_NEXT_RELEASE_VERSION="$NEXT_VERSION" \
+            CLAUDEX_WORKHOUSE_RELEASE_KEY_RING_FILE="$GITHUB_WORKSPACE/deploy/release-key-ring.json" \
+            CLAUDEX_WORKHOUSE_RELEASE_MANIFEST_ORIGINS="$manifest_origin" \
+            CLAUDEX_WORKHOUSE_RELEASE_WORKER_ORIGINS="$WORKER_ORIGIN" \
+            CLAUDEX_WORKHOUSE_RELEASE_IMAGE_REPOSITORIES="$IMAGE_REPOSITORY" \
+            CLAUDEX_WORKHOUSE_CURRENT_MANIFEST_URL="$CURRENT_MANIFEST_URL" \
+            CLAUDEX_WORKHOUSE_CURRENT_SIGNATURE_URL="$CURRENT_SIGNATURE_URL" \
+            pnpm --silent --dir app release:channel-progression)"
+          node -e '
+            const fs = require("node:fs");
+            const parsed = JSON.parse(process.argv[1]);
+            if (!Number.isSafeInteger(parsed.nextSequence) || parsed.nextSequence < 1) {
+              throw new Error("Invalid next release sequence.");
+            }
+            const current = parsed.current;
+            if (current !== null && (
+              typeof current.version !== "string" ||
+              !Number.isSafeInteger(current.releaseSequence) ||
+              !/^[a-f0-9]{64}$/.test(current.manifestSha256)
+            )) {
+              throw new Error("Invalid current release state.");
+            }
+            fs.appendFileSync(process.env.GITHUB_OUTPUT, [
+              `previous_present=${current !== null}`,
+              `previous_version=${current?.version ?? ""}`,
+              `previous_sequence=${current?.releaseSequence ?? ""}`,
+              `previous_manifest_sha256=${current?.manifestSha256 ?? ""}`,
+              `next_sequence=${parsed.nextSequence}`
+            ].join("\n") + "\n");
+            fs.appendFileSync(
+              process.env.GITHUB_ENV,
+              `CLAUDEX_WORKHOUSE_RELEASE_SEQUENCE=${parsed.nextSequence}\n`
+            );
+          ' "$progression"
+      - name: Create signed unified release manifest
+        env:
+          RELEASE_PRIVATE_KEY_BASE64: ${{ secrets.RELEASE_SIGNING_PRIVATE_KEY_BASE64 }}
+          CLAUDEX_WORKHOUSE_RELEASE_VERSION: ${{ needs.preflight.outputs.version }}
+          CLAUDEX_WORKHOUSE_RELEASE_PUBLISHED_AT: ${{ needs.preflight.outputs.published-at }}
+          CLAUDEX_WORKHOUSE_RELEASE_ASSET_BASE_URL: ${{ needs.preflight.outputs.asset-base-url }}
+          CLAUDEX_WORKHOUSE_RELEASE_KEY_ID: ${{ vars.RELEASE_SIGNING_KEY_ID }}
+          CLAUDEX_WORKHOUSE_RELEASE_KEY_RING_FILE: ${{ github.workspace }}/deploy/release-key-ring.json
+          CLAUDEX_WORKHOUSE_IMAGE_REPOSITORY: ${{ needs.preflight.outputs.image-repository }}
+          CLAUDEX_WORKHOUSE_IMAGE_DIGEST: ${{ needs.image.outputs.digest }}
+          CLAUDEX_WORKHOUSE_WINDOWS_X64_PACKAGE: ${{ github.workspace }}/release-assets/claudex-workhouse-worker-windows-x64.zip
+          CLAUDEX_WORKHOUSE_LINUX_X64_PACKAGE: ${{ github.workspace }}/release-assets/claudex-workhouse-worker-linux-x64.tar.gz
+          CLAUDEX_WORKHOUSE_LINUX_ARM64_PACKAGE: ${{ github.workspace }}/release-assets/claudex-workhouse-worker-linux-arm64.tar.gz
+          CLAUDEX_WORKHOUSE_WINDOWS_SERVER_EXE: ${{ github.workspace }}/release-assets/claudex-workhouse-server-windows-x64.exe
+          CLAUDEX_WORKHOUSE_WINDOWS_SERVER_PORTABLE: ${{ github.workspace }}/release-assets/claudex-workhouse-server-windows-x64-portable.zip
+          CLAUDEX_WORKHOUSE_RELEASE_OUTPUT_DIR: ${{ github.workspace }}/release-assets
+        run: |
+          set -eu
+          umask 077
+          signing_key="$(mktemp)"
+          trap 'rm -f -- "$signing_key"' EXIT HUP INT TERM
+          printf '%s' "$RELEASE_PRIVATE_KEY_BASE64" | base64 --decode > "$signing_key"
+          unset RELEASE_PRIVATE_KEY_BASE64
+          export CLAUDEX_WORKHOUSE_RELEASE_PRIVATE_KEY_FILE="$signing_key"
+          pnpm release:manifest
+        working-directory: app
+      - name: Build the trusted standalone installer site
+        env:
+          CLAUDEX_INSTALLER_MANIFEST_URL: ${{ needs.preflight.outputs.public-manifest-url }}
+          CLAUDEX_INSTALLER_MANIFEST_SIGNATURE_URL: ${{ needs.preflight.outputs.public-signature-url }}
+          CLAUDEX_INSTALLER_KEY_RING_FILE: ${{ github.workspace }}/deploy/release-key-ring.json
+          CLAUDEX_INSTALLER_RELEASE_CHANNEL: stable
+          CLAUDEX_INSTALLER_IMAGE_REPOSITORIES: ${{ needs.preflight.outputs.image-repository }}
+          CLAUDEX_INSTALLER_WORKER_ORIGINS: ${{ needs.preflight.outputs.installer-connect-origin }}
+        run: |
+          set -eu
+          npm --prefix installer-web run check
+          npm --prefix installer-web test
+          npm --prefix installer-web run build
+          stage_directory="$GITHUB_WORKSPACE/public-installer-stage"
+          promote_directory="$GITHUB_WORKSPACE/public-installer-promote"
+          mkdir -p \
+            "$stage_directory/releases/stable" \
+            "$promote_directory/releases/stable"
+          cp -R installer-web/dist/. "$stage_directory/"
+          cp -R installer-web/dist/. "$promote_directory/"
+          if [ "$CURRENT_CHANNEL_PRESENT" = true ]; then
+            cp current-channel/release-manifest.json \
+              "$stage_directory/releases/stable/release-manifest.json"
+            cp current-channel/release-manifest.json.sig \
+              "$stage_directory/releases/stable/release-manifest.json.sig"
+          fi
+          cp release-assets/release-manifest.json \
+            "$promote_directory/releases/stable/release-manifest.json"
+          cp release-assets/release-manifest.json.sig \
+            "$promote_directory/releases/stable/release-manifest.json.sig"
+          tar -czf \
+            "release-assets/claudex-workhouse-installer-site-${{ needs.preflight.outputs.version }}.tar.gz" \
+            -C "$promote_directory" .
+      - name: Create unified release checksums
+        env:
+          CLAUDEX_WORKHOUSE_RELEASE_ASSET_DIRECTORY: ${{ github.workspace }}/release-assets
+        run: pnpm release:checksums
+        working-directory: app
+      - name: Scan release inputs
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: fs
+          scan-ref: release-assets
+          format: table
+          ignore-unfixed: true
+          severity: HIGH,CRITICAL
+          exit-code: "1"
+      - uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
+      - uses: docker/login-action@abd2ef45e78c5afb21d64d4ca52ee8550d9572c7 # v4.5.1
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Scan the exact image digest
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: ${{ needs.preflight.outputs.image-repository }}@${{ needs.image.outputs.digest }}
+          format: table
+          ignore-unfixed: true
+          severity: HIGH,CRITICAL
+          exit-code: "1"
+      - name: Bind the exact immutable release asset inventory
+        id: release-state
+        env:
+          CLAUDEX_WORKHOUSE_RELEASE_ASSET_DIRECTORY: ${{ github.workspace }}/release-assets
+          CLAUDEX_WORKHOUSE_RELEASE_VERSION: ${{ needs.preflight.outputs.version }}
+        run: |
+          set -eu
+          inventory="$(pnpm --silent --dir app release:promotion-guard inventory)"
+          inventory_base64="$(printf '%s' "$inventory" | base64 --wrap=0)"
+          manifest_sha256="$(sha256sum release-assets/release-manifest.json | cut -d ' ' -f 1)"
+          case "$manifest_sha256" in
+            [a-f0-9][a-f0-9][a-f0-9][a-f0-9]*) ;;
+            *) printf '%s\n' 'Could not determine the release manifest SHA-256.' >&2; exit 1 ;;
+          esac
+          printf 'inventory_base64=%s\n' "$inventory_base64" >> "$GITHUB_OUTPUT"
+          printf 'manifest_sha256=%s\n' "$manifest_sha256" >> "$GITHUB_OUTPUT"
+      - name: Create and verify draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.ref_name }}
+          CLAUDEX_WORKHOUSE_PROMOTION_PHASE: prepare
+          CLAUDEX_WORKHOUSE_STABLE_MANIFEST_URL: ${{ needs.preflight.outputs.public-manifest-url }}
+          CLAUDEX_WORKHOUSE_STABLE_SIGNATURE_URL: ${{ needs.preflight.outputs.public-signature-url }}
+          CLAUDEX_WORKHOUSE_RELEASE_KEY_RING_FILE: ${{ github.workspace }}/deploy/release-key-ring.json
+          CLAUDEX_WORKHOUSE_RELEASE_WORKER_ORIGIN: ${{ needs.preflight.outputs.installer-connect-origin }}
+          CLAUDEX_WORKHOUSE_RELEASE_IMAGE_REPOSITORY: ${{ needs.preflight.outputs.image-repository }}
+          CLAUDEX_WORKHOUSE_EXPECTED_PREVIOUS_PRESENT: ${{ steps.channel.outputs.previous_present }}
+          CLAUDEX_WORKHOUSE_EXPECTED_PREVIOUS_VERSION: ${{ steps.channel.outputs.previous_version }}
+          CLAUDEX_WORKHOUSE_EXPECTED_PREVIOUS_SEQUENCE: ${{ steps.channel.outputs.previous_sequence }}
+          CLAUDEX_WORKHOUSE_EXPECTED_PREVIOUS_MANIFEST_SHA256: ${{ steps.channel.outputs.previous_manifest_sha256 }}
+          CLAUDEX_WORKHOUSE_NEXT_RELEASE_VERSION: ${{ needs.preflight.outputs.version }}
+          CLAUDEX_WORKHOUSE_NEXT_RELEASE_SEQUENCE: ${{ steps.channel.outputs.next_sequence }}
+          CLAUDEX_WORKHOUSE_NEXT_MANIFEST_SHA256: ${{ steps.release-state.outputs.manifest_sha256 }}
+          CLAUDEX_WORKHOUSE_EXPECTED_ASSET_INVENTORY_BASE64: ${{ steps.release-state.outputs.inventory_base64 }}
+        run: |
+          set -eu
+          pnpm --silent --dir app release:promotion-guard guard >/dev/null
+          if existing="$(gh release view "$RELEASE_TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --json isDraft \
+            --jq .isDraft 2>/dev/null)"; then
+            if [ "$existing" != true ]; then
+              printf '%s\n' "Published immutable release $RELEASE_TAG already exists." >&2
+              exit 1
+            fi
+          else
+            pnpm --silent --dir app release:promotion-guard guard >/dev/null
+            gh release create "$RELEASE_TAG" \
+              --repo "$GITHUB_REPOSITORY" \
+              --verify-tag \
+              --draft \
+              --latest=false \
+              --title "Claudex Workhouse $RELEASE_TAG" \
+              --generate-notes
+          fi
+          gh release upload "$RELEASE_TAG" release-assets/* \
+            --repo "$GITHUB_REPOSITORY" \
+            --clobber
+          pnpm --silent --dir app release:promotion-guard assets >/dev/null
+          verify_directory="$(mktemp -d)"
+          trap 'rm -rf -- "$verify_directory"' EXIT HUP INT TERM
+          gh release download "$RELEASE_TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --dir "$verify_directory"
+          env CLAUDEX_WORKHOUSE_RELEASE_VERIFY_DIRECTORY="$verify_directory" \
+            CLAUDEX_WORKHOUSE_RELEASE_KEY_RING_FILE="$GITHUB_WORKSPACE/deploy/release-key-ring.json" \
+            CLAUDEX_WORKHOUSE_EXPECTED_IMAGE_DIGEST="${{ needs.image.outputs.digest }}" \
+            CLAUDEX_WORKHOUSE_EXPECTED_IMAGE_REPOSITORY="${{ needs.preflight.outputs.image-repository }}" \
+            CLAUDEX_WORKHOUSE_EXPECTED_VERSION="${{ needs.preflight.outputs.version }}" \
+            CLAUDEX_WORKHOUSE_EXPECTED_ASSET_BASE_URL="${{ needs.preflight.outputs.asset-base-url }}" \
+            pnpm --dir app release:verify-directory
+      - name: Name this attempt's Pages artifacts
+        id: pages-artifacts
+        run: |
+          printf 'stage=installer-stage-%s-%s\n' "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" >> "$GITHUB_OUTPUT"
+          printf 'promote=installer-promote-%s-%s\n' "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" >> "$GITHUB_OUTPUT"
+      - name: Upload staged installer site with the previous stable pointer
+        uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        with:
+          name: ${{ steps.pages-artifacts.outputs.stage }}
+          path: public-installer-stage
+          retention-days: 14
+      - name: Upload installer site with the new stable pointer
+        uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        with:
+          name: ${{ steps.pages-artifacts.outputs.promote }}
+          path: public-installer-promote
+          retention-days: 14
+      - name: Promote the immutable image version only when absent or identical
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CLAUDEX_WORKHOUSE_PROMOTION_PHASE: stage
+          CLAUDEX_WORKHOUSE_STABLE_MANIFEST_URL: ${{ needs.preflight.outputs.public-manifest-url }}
+          CLAUDEX_WORKHOUSE_STABLE_SIGNATURE_URL: ${{ needs.preflight.outputs.public-signature-url }}
+          CLAUDEX_WORKHOUSE_RELEASE_KEY_RING_FILE: ${{ github.workspace }}/deploy/release-key-ring.json
+          CLAUDEX_WORKHOUSE_RELEASE_WORKER_ORIGIN: ${{ needs.preflight.outputs.installer-connect-origin }}
+          CLAUDEX_WORKHOUSE_RELEASE_IMAGE_REPOSITORY: ${{ needs.preflight.outputs.image-repository }}
+          CLAUDEX_WORKHOUSE_EXPECTED_PREVIOUS_PRESENT: ${{ steps.channel.outputs.previous_present }}
+          CLAUDEX_WORKHOUSE_EXPECTED_PREVIOUS_VERSION: ${{ steps.channel.outputs.previous_version }}
+          CLAUDEX_WORKHOUSE_EXPECTED_PREVIOUS_SEQUENCE: ${{ steps.channel.outputs.previous_sequence }}
+          CLAUDEX_WORKHOUSE_EXPECTED_PREVIOUS_MANIFEST_SHA256: ${{ steps.channel.outputs.previous_manifest_sha256 }}
+          CLAUDEX_WORKHOUSE_NEXT_RELEASE_VERSION: ${{ needs.preflight.outputs.version }}
+          CLAUDEX_WORKHOUSE_NEXT_RELEASE_SEQUENCE: ${{ steps.channel.outputs.next_sequence }}
+          CLAUDEX_WORKHOUSE_NEXT_MANIFEST_SHA256: ${{ steps.release-state.outputs.manifest_sha256 }}
+        run: |
+          set -eu
+          pnpm --silent --dir app release:promotion-guard guard >/dev/null
+          version_reference="${{ needs.preflight.outputs.image-repository }}:${{ needs.preflight.outputs.version }}"
+          expected="${{ needs.image.outputs.digest }}"
+          inspect_error="$(mktemp)"
+          trap 'rm -f -- "$inspect_error"' EXIT HUP INT TERM
+          if inspection="$(docker buildx imagetools inspect "$version_reference" 2>"$inspect_error")"; then
+            current="$(printf '%s\n' "$inspection" | awk '$1 == "Digest:" { print $2; exit }')"
+            case "$current" in
+              sha256:[a-f0-9][a-f0-9]*) ;;
+              *) printf '%s\n' 'Could not determine the existing immutable image digest.' >&2; exit 1 ;;
+            esac
+            if [ "$current" != "$expected" ]; then
+              printf '%s\n' "Immutable image tag already points to $current, expected $expected." >&2
+              exit 1
+            fi
+          elif grep -Eiq '(manifest unknown|:[[:space:]]*not found)$' "$inspect_error"; then
+            docker buildx imagetools create \
+              --tag "$version_reference" \
+              "${{ needs.preflight.outputs.image-repository }}@$expected"
+          else
+            printf '%s\n' \
+              'Could not safely determine whether the immutable image version already exists.' >&2
+            exit 1
+          fi
+          promoted_inspection="$(docker buildx imagetools inspect "$version_reference")"
+          promoted="$(printf '%s\n' "$promoted_inspection" |
+            awk '$1 == "Digest:" { print $2; exit }')"
+          case "$promoted" in
+            sha256:[a-f0-9][a-f0-9]*) ;;
+            *) printf '%s\n' 'Could not determine the promoted image digest.' >&2; exit 1 ;;
+          esac
+          if [ "$promoted" != "$expected" ]; then
+            printf '%s\n' \
+              "Immutable image tag resolved to $promoted after promotion, expected $expected." >&2
+            exit 1
+          fi
+
+  deploy-installer-stage:
+    needs: [preflight, prepare-release]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.pages.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: pnpm/action-setup@008330803749db0355799c700092d9a85fd074e9 # v6.0.9
+        with:
+          version: 10.17.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: app/pnpm-lock.yaml
+      - name: Install locked verification dependencies
+        run: pnpm install --frozen-lockfile
+        working-directory: app
+      - name: Revalidate the exact live channel before staging Pages
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CLAUDEX_WORKHOUSE_PROMOTION_PHASE: stage
+          CLAUDEX_WORKHOUSE_STABLE_MANIFEST_URL: ${{ needs.preflight.outputs.public-manifest-url }}
+          CLAUDEX_WORKHOUSE_STABLE_SIGNATURE_URL: ${{ needs.preflight.outputs.public-signature-url }}
+          CLAUDEX_WORKHOUSE_RELEASE_KEY_RING_FILE: ${{ github.workspace }}/deploy/release-key-ring.json
+          CLAUDEX_WORKHOUSE_RELEASE_WORKER_ORIGIN: ${{ needs.preflight.outputs.installer-connect-origin }}
+          CLAUDEX_WORKHOUSE_RELEASE_IMAGE_REPOSITORY: ${{ needs.preflight.outputs.image-repository }}
+          CLAUDEX_WORKHOUSE_EXPECTED_PREVIOUS_PRESENT: ${{ needs.prepare-release.outputs.previous-present }}
+          CLAUDEX_WORKHOUSE_EXPECTED_PREVIOUS_VERSION: ${{ needs.prepare-release.outputs.previous-version }}
+          CLAUDEX_WORKHOUSE_EXPECTED_PREVIOUS_SEQUENCE: ${{ needs.prepare-release.outputs.previous-sequence }}
+          CLAUDEX_WORKHOUSE_EXPECTED_PREVIOUS_MANIFEST_SHA256: ${{ needs.prepare-release.outputs.previous-manifest-sha256 }}
+          CLAUDEX_WORKHOUSE_NEXT_RELEASE_VERSION: ${{ needs.preflight.outputs.version }}
+          CLAUDEX_WORKHOUSE_NEXT_RELEASE_SEQUENCE: ${{ needs.prepare-release.outputs.release-sequence }}
+          CLAUDEX_WORKHOUSE_NEXT_MANIFEST_SHA256: ${{ needs.prepare-release.outputs.release-manifest-sha256 }}
+        run: pnpm --silent --dir app release:promotion-guard guard >/dev/null
+      - name: Deploy installer while preserving the previous stable pointer
+        id: pages
+        uses: actions/deploy-pages@cd2ce8fcbc39b97be8ca5fce6e763baed58fa128 # v5.0.0
+        with:
+          artifact_name: ${{ needs.prepare-release.outputs.stage-pages-artifact }}
+
+  publish-release:
+    needs: [preflight, image, prepare-release, deploy-installer-stage]
+    runs-on: ubuntu-24.04
+    environment: release
+    timeout-minutes: 20
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: pnpm/action-setup@008330803749db0355799c700092d9a85fd074e9 # v6.0.9
+        with:
+          version: 10.17.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: app/pnpm-lock.yaml
+      - name: Install locked verification dependencies
+        run: pnpm install --frozen-lockfile
+        working-directory: app
+      - name: Publish the verified immutable release without promoting latest
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CLAUDEX_WORKHOUSE_PROMOTION_PHASE: publish
+          CLAUDEX_WORKHOUSE_STABLE_MANIFEST_URL: ${{ needs.preflight.outputs.public-manifest-url }}
+          CLAUDEX_WORKHOUSE_STABLE_SIGNATURE_URL: ${{ needs.preflight.outputs.public-signature-url }}
+          CLAUDEX_WORKHOUSE_RELEASE_KEY_RING_FILE: ${{ github.workspace }}/deploy/release-key-ring.json
+          CLAUDEX_WORKHOUSE_RELEASE_WORKER_ORIGIN: ${{ needs.preflight.outputs.installer-connect-origin }}
+          CLAUDEX_WORKHOUSE_RELEASE_IMAGE_REPOSITORY: ${{ needs.preflight.outputs.image-repository }}
+          CLAUDEX_WORKHOUSE_EXPECTED_PREVIOUS_PRESENT: ${{ needs.prepare-release.outputs.previous-present }}
+          CLAUDEX_WORKHOUSE_EXPECTED_PREVIOUS_VERSION: ${{ needs.prepare-release.outputs.previous-version }}
+          CLAUDEX_WORKHOUSE_EXPECTED_PREVIOUS_SEQUENCE: ${{ needs.prepare-release.outputs.previous-sequence }}
+          CLAUDEX_WORKHOUSE_EXPECTED_PREVIOUS_MANIFEST_SHA256: ${{ needs.prepare-release.outputs.previous-manifest-sha256 }}
+          CLAUDEX_WORKHOUSE_NEXT_RELEASE_VERSION: ${{ needs.preflight.outputs.version }}
+          CLAUDEX_WORKHOUSE_NEXT_RELEASE_SEQUENCE: ${{ needs.prepare-release.outputs.release-sequence }}
+          CLAUDEX_WORKHOUSE_NEXT_MANIFEST_SHA256: ${{ needs.prepare-release.outputs.release-manifest-sha256 }}
+          CLAUDEX_WORKHOUSE_EXPECTED_ASSET_INVENTORY_BASE64: ${{ needs.prepare-release.outputs.release-asset-inventory-base64 }}
+        run: |
+          set -eu
+          release_id="$(gh release view "$GITHUB_REF_NAME" \
+            --repo "$GITHUB_REPOSITORY" \
+            --json databaseId \
+            --jq .databaseId)"
+          is_draft="$(gh release view "$GITHUB_REF_NAME" \
+            --repo "$GITHUB_REPOSITORY" \
+            --json isDraft \
+            --jq .isDraft)"
+          pnpm --silent --dir app release:promotion-guard assets >/dev/null
+          pnpm --silent --dir app release:promotion-guard guard >/dev/null
+          if [ "$is_draft" = true ]; then
+            gh api \
+              --method PATCH \
+              -H 'X-GitHub-Api-Version: 2026-03-10' \
+              "repos/$GITHUB_REPOSITORY/releases/$release_id" \
+              -F draft=false \
+              -f make_latest=false >/dev/null
+          fi
+          gh release view "$GITHUB_REF_NAME" \
+            --repo "$GITHUB_REPOSITORY" \
+            --json isDraft \
+            --jq 'select(.isDraft == false) | .isDraft' | grep -qx false
+      - name: Re-download and verify every public release asset
+        env:
+          ASSET_BASE_URL: ${{ needs.preflight.outputs.asset-base-url }}
+        run: |
+          set -eu
+          verify_directory="$(mktemp -d)"
+          trap 'rm -rf -- "$verify_directory"' EXIT HUP INT TERM
+          cache_nonce="${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-$(date +%s%N)"
+          for asset in \
+            SHA256SUMS \
+            release-manifest.json \
+            release-manifest.json.sig \
+            "claudex-workhouse-installer-site-${{ needs.preflight.outputs.version }}.tar.gz" \
+            claudex-workhouse-server-windows-x64.exe \
+            claudex-workhouse-server-windows-x64.exe.sha256 \
+            claudex-workhouse-server-windows-x64.exe.spdx.json \
+            claudex-workhouse-server-windows-x64-portable.zip \
+            claudex-workhouse-server-windows-x64-portable.zip.sha256 \
+            claudex-workhouse-worker-windows-x64.zip \
+            claudex-workhouse-worker-windows-x64.zip.spdx.json \
+            claudex-workhouse-worker-linux-x64.tar.gz \
+            claudex-workhouse-worker-linux-x64.tar.gz.spdx.json \
+            claudex-workhouse-worker-linux-arm64.tar.gz \
+            claudex-workhouse-worker-linux-arm64.tar.gz.spdx.json
+          do
+            curl \
+              --fail --silent --show-error --location \
+              --proto '=https' --proto-redir '=https' \
+              --header 'Cache-Control: no-cache' \
+              --header 'Pragma: no-cache' \
+              "$ASSET_BASE_URL/$asset?claudex-release-guard=$cache_nonce" \
+              --output "$verify_directory/$asset"
+          done
+          env \
+            CLAUDEX_WORKHOUSE_RELEASE_VERIFY_DIRECTORY="$verify_directory" \
+            CLAUDEX_WORKHOUSE_RELEASE_KEY_RING_FILE="$GITHUB_WORKSPACE/deploy/release-key-ring.json" \
+            CLAUDEX_WORKHOUSE_EXPECTED_IMAGE_DIGEST="${{ needs.image.outputs.digest }}" \
+            CLAUDEX_WORKHOUSE_EXPECTED_IMAGE_REPOSITORY="${{ needs.preflight.outputs.image-repository }}" \
+            CLAUDEX_WORKHOUSE_EXPECTED_VERSION="${{ needs.preflight.outputs.version }}" \
+            CLAUDEX_WORKHOUSE_EXPECTED_ASSET_BASE_URL="$ASSET_BASE_URL" \
+            pnpm --dir app release:verify-directory
+
+  deploy-installer-promote:
+    needs: [preflight, prepare-release, publish-release]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.pages.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: pnpm/action-setup@008330803749db0355799c700092d9a85fd074e9 # v6.0.9
+        with:
+          version: 10.17.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: app/pnpm-lock.yaml
+      - name: Install locked verification dependencies
+        run: pnpm install --frozen-lockfile
+        working-directory: app
+      - name: Revalidate the exact live channel before promoting Pages
+        id: live-guard
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CLAUDEX_WORKHOUSE_PROMOTION_PHASE: promote
+          CLAUDEX_WORKHOUSE_STABLE_MANIFEST_URL: ${{ needs.preflight.outputs.public-manifest-url }}
+          CLAUDEX_WORKHOUSE_STABLE_SIGNATURE_URL: ${{ needs.preflight.outputs.public-signature-url }}
+          CLAUDEX_WORKHOUSE_RELEASE_KEY_RING_FILE: ${{ github.workspace }}/deploy/release-key-ring.json
+          CLAUDEX_WORKHOUSE_RELEASE_WORKER_ORIGIN: ${{ needs.preflight.outputs.installer-connect-origin }}
+          CLAUDEX_WORKHOUSE_RELEASE_IMAGE_REPOSITORY: ${{ needs.preflight.outputs.image-repository }}
+          CLAUDEX_WORKHOUSE_EXPECTED_PREVIOUS_PRESENT: ${{ needs.prepare-release.outputs.previous-present }}
+          CLAUDEX_WORKHOUSE_EXPECTED_PREVIOUS_VERSION: ${{ needs.prepare-release.outputs.previous-version }}
+          CLAUDEX_WORKHOUSE_EXPECTED_PREVIOUS_SEQUENCE: ${{ needs.prepare-release.outputs.previous-sequence }}
+          CLAUDEX_WORKHOUSE_EXPECTED_PREVIOUS_MANIFEST_SHA256: ${{ needs.prepare-release.outputs.previous-manifest-sha256 }}
+          CLAUDEX_WORKHOUSE_NEXT_RELEASE_VERSION: ${{ needs.preflight.outputs.version }}
+          CLAUDEX_WORKHOUSE_NEXT_RELEASE_SEQUENCE: ${{ needs.prepare-release.outputs.release-sequence }}
+          CLAUDEX_WORKHOUSE_NEXT_MANIFEST_SHA256: ${{ needs.prepare-release.outputs.release-manifest-sha256 }}
+        run: |
+          set -eu
+          result="$(pnpm --silent --dir app release:promotion-guard guard)"
+          node -e '
+            const fs = require("node:fs");
+            const action = JSON.parse(process.argv[1]).action;
+            if (action !== "proceed" && action !== "already-applied") {
+              throw new Error("Promotion guard returned an invalid action.");
+            }
+            fs.appendFileSync(process.env.GITHUB_OUTPUT, `action=${action}\n`);
+          ' "$result"
+      - name: Promote the new signed stable pointer
+        if: steps.live-guard.outputs.action == 'proceed'
+        id: pages
+        uses: actions/deploy-pages@cd2ce8fcbc39b97be8ca5fce6e763baed58fa128 # v5.0.0
+        with:
+          artifact_name: ${{ needs.prepare-release.outputs.promote-pages-artifact }}
+
+  finalize-stable:
+    needs: [preflight, image, prepare-release, publish-release, deploy-installer-promote]
+    runs-on: ubuntu-24.04
+    environment: release
+    timeout-minutes: 15
+    permissions:
+      contents: write
+      packages: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: pnpm/action-setup@008330803749db0355799c700092d9a85fd074e9 # v6.0.9
+        with:
+          version: 10.17.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: app/pnpm-lock.yaml
+      - name: Install locked verification dependencies
+        run: pnpm install --frozen-lockfile
+        working-directory: app
+      - uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
+      - uses: docker/login-action@abd2ef45e78c5afb21d64d4ca52ee8550d9572c7 # v4.5.1
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Verify the public stable pointer matches the immutable release
+        env:
+          STABLE_MANIFEST_URL: ${{ needs.preflight.outputs.public-manifest-url }}
+          STABLE_SIGNATURE_URL: ${{ needs.preflight.outputs.public-signature-url }}
+          IMMUTABLE_BASE_URL: ${{ needs.preflight.outputs.asset-base-url }}
+        run: |
+          set -eu
+          verify_directory="$(mktemp -d)"
+          trap 'rm -rf -- "$verify_directory"' EXIT HUP INT TERM
+          cache_nonce="${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-$(date +%s%N)"
+          for pair in \
+            "stable-manifest:$STABLE_MANIFEST_URL" \
+            "stable-signature:$STABLE_SIGNATURE_URL" \
+            "immutable-manifest:$IMMUTABLE_BASE_URL/release-manifest.json" \
+            "immutable-signature:$IMMUTABLE_BASE_URL/release-manifest.json.sig"
+          do
+            name="${pair%%:*}"
+            url="${pair#*:}"
+            curl \
+              --fail --silent --show-error --location \
+              --proto '=https' --proto-redir '=https' \
+              --header 'Cache-Control: no-cache' \
+              --header 'Pragma: no-cache' \
+              "$url?claudex-release-guard=$cache_nonce-$name" \
+              --output "$verify_directory/$name"
+          done
+          cmp "$verify_directory/stable-manifest" "$verify_directory/immutable-manifest"
+          cmp "$verify_directory/stable-signature" "$verify_directory/immutable-signature"
+      - name: Promote stable image and GitHub latest only after the channel is live
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CLAUDEX_WORKHOUSE_PROMOTION_PHASE: finalize
+          CLAUDEX_WORKHOUSE_STABLE_MANIFEST_URL: ${{ needs.preflight.outputs.public-manifest-url }}
+          CLAUDEX_WORKHOUSE_STABLE_SIGNATURE_URL: ${{ needs.preflight.outputs.public-signature-url }}
+          CLAUDEX_WORKHOUSE_RELEASE_KEY_RING_FILE: ${{ github.workspace }}/deploy/release-key-ring.json
+          CLAUDEX_WORKHOUSE_RELEASE_WORKER_ORIGIN: ${{ needs.preflight.outputs.installer-connect-origin }}
+          CLAUDEX_WORKHOUSE_RELEASE_IMAGE_REPOSITORY: ${{ needs.preflight.outputs.image-repository }}
+          CLAUDEX_WORKHOUSE_EXPECTED_PREVIOUS_PRESENT: ${{ needs.prepare-release.outputs.previous-present }}
+          CLAUDEX_WORKHOUSE_EXPECTED_PREVIOUS_VERSION: ${{ needs.prepare-release.outputs.previous-version }}
+          CLAUDEX_WORKHOUSE_EXPECTED_PREVIOUS_SEQUENCE: ${{ needs.prepare-release.outputs.previous-sequence }}
+          CLAUDEX_WORKHOUSE_EXPECTED_PREVIOUS_MANIFEST_SHA256: ${{ needs.prepare-release.outputs.previous-manifest-sha256 }}
+          CLAUDEX_WORKHOUSE_NEXT_RELEASE_VERSION: ${{ needs.preflight.outputs.version }}
+          CLAUDEX_WORKHOUSE_NEXT_RELEASE_SEQUENCE: ${{ needs.prepare-release.outputs.release-sequence }}
+          CLAUDEX_WORKHOUSE_NEXT_MANIFEST_SHA256: ${{ needs.prepare-release.outputs.release-manifest-sha256 }}
+        run: |
+          set -eu
+          pnpm --silent --dir app release:promotion-guard guard >/dev/null
+          docker buildx imagetools create \
+            --tag "${{ needs.preflight.outputs.image-repository }}:stable" \
+            "${{ needs.preflight.outputs.image-repository }}@${{ needs.image.outputs.digest }}"
+          stable_inspection="$(docker buildx imagetools inspect \
+            "${{ needs.preflight.outputs.image-repository }}:stable")"
+          stable_digest="$(printf '%s\n' "$stable_inspection" |
+            awk '$1 == "Digest:" { print $2; exit }')"
+          if [ "$stable_digest" != "${{ needs.image.outputs.digest }}" ]; then
+            printf '%s\n' \
+              "Stable image resolved to $stable_digest after promotion." >&2
+            exit 1
+          fi
+          release_id="$(gh release view "$GITHUB_REF_NAME" \
+            --repo "$GITHUB_REPOSITORY" \
+            --json databaseId \
+            --jq .databaseId)"
+          pnpm --silent --dir app release:promotion-guard guard >/dev/null
+          gh api \
+            --method PATCH \
+            -H 'X-GitHub-Api-Version: 2026-03-10' \
+            "repos/$GITHUB_REPOSITORY/releases/$release_id" \
+            -f make_latest=true >/dev/null

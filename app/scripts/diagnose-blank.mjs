@@ -1,0 +1,15 @@
+import { chromium } from "@playwright/test";
+const browser = await chromium.launch();
+const page = await browser.newPage();
+const errors = [];
+page.on("console", (m) => { if (["error","warning"].includes(m.type())) errors.push(`[console.${m.type()}] ${m.text()}`); });
+page.on("pageerror", (e) => errors.push(`[pageerror] ${e.message}\n${(e.stack||"").split("\n").slice(0,4).join("\n")}`));
+await page.goto("http://127.0.0.1:3410/", { waitUntil: "networkidle", timeout: 20000 });
+await page.waitForTimeout(2500);
+const appHtmlLen = await page.evaluate(() => document.getElementById("app")?.innerHTML.length ?? -1);
+const fatal = await page.evaluate(() => document.getElementById("fatal-error")?.textContent ?? null);
+console.log("app innerHTML length:", appHtmlLen);
+console.log("fatal box:", fatal ? fatal.slice(0, 600) : "(none)");
+console.log("errors:", errors.length ? errors.join("\n---\n").slice(0, 1500) : "(none)");
+await page.screenshot({ path: "test-results/blank-diagnose.png" });
+await browser.close();

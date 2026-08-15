@@ -1,0 +1,33 @@
+{
+  "name": "claudex-workhouse-vscode",
+  "displayName": "Claudex Workhouse",
+  "description": "Send the active file, selection, and diagnostics to Claudex Workhouse.",
+  "version": "1.0.0",
+  "publisher": "claudex-workhouse",
+  "license": "AGPL-3.0-only",
+  "repository": "https://github.com/canister2668/claudex-workhouse",
+  "engines": {"vscode": "^1.90.0"},
+  "categories": ["Other"],
+  "activationEvents": ["onCommand:claudexWorkhouse.sendSelection"],
+  "main": "./extension.js",
+  "contributes": {
+    "commands": [
+      {"command": "claudexWorkhouse.sendSelection", "title": "Claudex Workhouse: Send Selection"}
+    ],
+    "menus": {
+      "editor/context": [
+        {"command": "claudexWorkhouse.sendSelection", "group": "navigation@20", "when": "editorTextFocus"}
+      ]
+    },
+    "configuration": {
+      "title": "Claudex Workhouse",
+      "properties": {
+        "claudexWorkhouse.serverUrl": {
+          "type": "string",
+          "default": "http://127.0.0.1:3410",
+          "description": "Claudex Workhouse web origin. Use HTTPS for a remote server."
+        }
+      }
+    }
+  }
+}

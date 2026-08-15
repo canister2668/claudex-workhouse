@@ -1,0 +1,61 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://claudex-workhouse.invalid/schemas/trusted-release-metadata.schema.json",
+  "title": "Claudex Workhouse trusted release metadata",
+  "description": "The release pipeline must populate this document from an independently trusted configuration. This repository intentionally contains no production key or digest defaults.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "version", "image", "manifest"],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "version": {
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+(?:-[0-9A-Za-z.-]+)?(?:\\+[0-9A-Za-z.-]+)?$"
+    },
+    "image": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repository", "digest"],
+      "properties": {
+        "repository": {
+          "type": "string",
+          "description": "Tag-free registry/repository path."
+        },
+        "digest": {
+          "type": "string",
+          "pattern": "^sha256:[a-f0-9]{64}$"
+        }
+      }
+    },
+    "manifest": { "$ref": "#/$defs/signedManifest" }
+  },
+  "$defs": {
+    "signedManifest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "url",
+        "signatureUrl",
+        "sha256",
+        "signatureAlgorithm",
+        "signingPublicKeySha256",
+        "signingPublicKeyPem"
+      ],
+      "properties": {
+        "url": { "type": "string", "format": "uri", "pattern": "^https://" },
+        "signatureUrl": { "type": "string", "format": "uri", "pattern": "^https://" },
+        "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "signatureAlgorithm": { "const": "rsa-sha256" },
+        "signingPublicKeySha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$",
+          "description": "SHA-256 of the exact UTF-8 signingPublicKeyPem value."
+        },
+        "signingPublicKeyPem": {
+          "type": "string",
+          "description": "RSA public key in SubjectPublicKeyInfo PEM format."
+        }
+      }
+    }
+  }
+}

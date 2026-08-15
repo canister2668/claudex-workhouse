@@ -1,0 +1,36 @@
+/* Direction A — light polish. Dark theme untouched.
+   Cards pick up a faint role tint so the page is not a field of white boxes, the
+   code block stops being a black slab in a light UI, and flat gains rhythm. */
+
+/* Scoped to the code block itself, so the terminal skin's console cards keep
+   their own dark treatment. */
+:root[data-theme="light"] .bubble .markdown-body pre,
+:root[data-theme="light"] .bubble > pre {
+  background: #f2f5f2;
+  color: #24312a;
+  border-color: color-mix(in srgb, var(--line-strong) 62%, transparent);
+  --syntax-bg: #f2f5f2; --syntax-fg: #24312a;
+  --syntax-comment: #7b8a80; --syntax-string: #b2551f; --syntax-number: #3f7d3f;
+  --syntax-keyword: #7c3aad; --syntax-literal: #b5501f; --syntax-type: #12736a;
+  --syntax-function: #2a5fbf; --syntax-property: #2a6da8; --syntax-operator: #b03470;
+  --syntax-line-number: #9aa8a0; --syntax-caret: #1b241e;
+  --syntax-match-bg: #1b241e1a; --syntax-match-outline: #1b241e66; --syntax-match-fg: #1b241e;
+}
+:root[data-theme="light"][data-skin="terminal"] .bubble .markdown-body pre {
+  background: var(--term-bg);
+  color: var(--term-fg);
+}
+
+/* Role tint: the card is no longer plain white, but stays quiet. */
+:root[data-theme="light"]:not([data-skin="terminal"]) .bubble.agent {
+  background: color-mix(in srgb, var(--cyan) 4%, var(--surface));
+}
+:root[data-theme="light"]:not([data-skin="terminal"]) .bubble.user {
+  background: color-mix(in srgb, var(--accent) 8%, var(--surface));
+}
+
+/* Flat: separation by rhythm instead of a single hairline. */
+:root[data-skin="flat"] .bubble { border-bottom: 0; padding: 14px 16px; border-radius: 12px }
+:root[data-skin="flat"] .conversation { gap: 2px }
+:root[data-theme="light"][data-skin="flat"] .bubble.agent { background: color-mix(in srgb, var(--cyan) 5%, var(--surface)) }
+:root[data-theme="light"][data-skin="flat"] .bubble.user { background: color-mix(in srgb, var(--accent) 9%, var(--surface)) }

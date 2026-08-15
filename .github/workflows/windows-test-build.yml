@@ -1,0 +1,186 @@
+name: unsigned Windows test build
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: unsigned-windows-test-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  windows-test-build:
+    runs-on: windows-2022
+    timeout-minutes: 45
+    env:
+      npm_config_node_linker: hoisted
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Select verified public source tree
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $scrubber = Join-Path $env:GITHUB_WORKSPACE 'scripts\public-release\scrub.mjs'
+          if (Test-Path -LiteralPath $scrubber -PathType Leaf) {
+            $publicRoot = Join-Path $env:RUNNER_TEMP 'public-source'
+            node $scrubber --output $publicRoot
+            if ($LASTEXITCODE -ne 0) { throw 'Public source scrub failed.' }
+            $privateSource = 'true'
+          } else {
+            $publicRoot = $env:GITHUB_WORKSPACE
+            $privateSource = 'false'
+          }
+          node (Join-Path $publicRoot 'app\scripts\public-source-proof.mjs') --root $publicRoot
+          if ($LASTEXITCODE -ne 0) { throw 'Public source proof verification failed.' }
+          if (Test-Path -LiteralPath (Join-Path $publicRoot 'app\src\server\browser')) { throw 'Restricted browser source remained in the public tree.' }
+          "CLAUDEX_PUBLIC_ROOT=$publicRoot" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "CLAUDEX_PRIVATE_SOURCE=$privateSource" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+      - uses: pnpm/action-setup@008330803749db0355799c700092d9a85fd074e9 # v6.0.9
+        with:
+          version: 10.17.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: app/pnpm-lock.yaml
+      - name: Build application and native launcher
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $publicRoot = $env:CLAUDEX_PUBLIC_ROOT
+          Push-Location (Join-Path $publicRoot 'app')
+          try {
+            pnpm install --frozen-lockfile
+            if ($LASTEXITCODE -ne 0) { throw 'Dependency installation failed.' }
+            pnpm run build
+            if ($LASTEXITCODE -ne 0) { throw 'Application build failed.' }
+          } finally { Pop-Location }
+          cmake -S (Join-Path $publicRoot 'launcher/windows') -B (Join-Path $publicRoot 'out/windows-launcher') -A x64
+          if ($LASTEXITCODE -ne 0) { throw 'Windows launcher configuration failed.' }
+          cmake --build (Join-Path $publicRoot 'out/windows-launcher') --config Release
+          if ($LASTEXITCODE -ne 0) { throw 'Windows launcher build failed.' }
+      - name: Parse and simulate the recommended Windows Docker bootstrap
+        shell: pwsh
+        env:
+          CLAUDEX_WINDOWS_DOCKER_SCRIPT_OUTPUT: ${{ runner.temp }}\install-claudex-workhouse-docker-test.ps1
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $publicRoot = $env:CLAUDEX_PUBLIC_ROOT
+          npm --prefix (Join-Path $publicRoot 'installer-web') run check
+          if ($LASTEXITCODE -ne 0) { throw 'Installer TypeScript check failed.' }
+          npm --prefix (Join-Path $publicRoot 'installer-web') test
+          if ($LASTEXITCODE -ne 0) { throw 'Installer tests failed.' }
+          npm --prefix (Join-Path $publicRoot 'installer-web') run build
+          if ($LASTEXITCODE -ne 0) { throw 'Installer build failed.' }
+          & (Join-Path $publicRoot 'installer-web\scripts\test-windows-docker-bootstrap.ps1') `
+            -BootstrapScript $env:CLAUDEX_WINDOWS_DOCKER_SCRIPT_OUTPUT
+      - name: Package explicitly unsigned test files
+        shell: pwsh
+        env:
+          CLAUDEX_WORKHOUSE_COMMIT_SHA: ${{ github.sha }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $publicRoot = $env:CLAUDEX_PUBLIC_ROOT
+          Push-Location (Join-Path $publicRoot 'app')
+          try {
+            pnpm prune --prod
+            if ($LASTEXITCODE -ne 0) { throw 'Production dependency pruning failed.' }
+            $env:CLAUDEX_WORKHOUSE_WINDOWS_NODE_EXE = (Get-Command node.exe).Source
+            $env:CLAUDEX_WORKHOUSE_WINDOWS_NODE_MODULES = (Resolve-Path 'node_modules').Path
+            $env:CLAUDEX_WORKHOUSE_WINDOWS_LAUNCHER_EXE = (Resolve-Path (Join-Path $publicRoot 'out\windows-launcher\Release\claudex-workhouse.exe')).Path
+            node scripts/package-windows-server.mjs
+            if ($LASTEXITCODE -ne 0) { throw 'Windows server packaging failed.' }
+          } finally { Pop-Location }
+          # Release-blocking gate. The rules live in the private tree on
+          # purpose: they name the restricted identifiers verbatim, so a copy
+          # inside the published tree would leak what it exists to keep out.
+          if ($env:CLAUDEX_PRIVATE_SOURCE -eq 'true') {
+            node scripts/public-release/inspect-public-payload.mjs --payload (Join-Path $publicRoot 'packages\claudex-workhouse-server-windows-x64-folder')
+            if ($LASTEXITCODE -ne 0) { throw 'Packaged payload failed the mandatory public payload inspection.' }
+          }
+          $output = Join-Path $env:RUNNER_TEMP 'claudex-workhouse-windows-x64-unsigned'
+          New-Item -ItemType Directory -Path $output | Out-Null
+          $exe = (Resolve-Path (Join-Path $publicRoot 'packages\claudex-workhouse-server-windows-x64.exe')).Path
+          $signature = Get-AuthenticodeSignature -LiteralPath $exe
+          if ($signature.Status -ne [Management.Automation.SignatureStatus]::NotSigned) { throw "Expected an unsigned EXE, received: $($signature.Status)" }
+          Push-Location $publicRoot
+          try { node --input-type=module -e "import {inspectWindowsSingleExe} from './app/dist-server/windows/single-exe.js'; inspectWindowsSingleExe('./packages/claudex-workhouse-server-windows-x64.exe');" }
+          finally { Pop-Location }
+          if ($LASTEXITCODE -ne 0) { throw 'Unsigned single EXE inspection failed.' }
+          Copy-Item -LiteralPath $exe -Destination $output
+          $portableRoot = Join-Path $env:RUNNER_TEMP 'claudex-workhouse-server-windows-x64-portable'
+          Copy-Item -LiteralPath (Join-Path $publicRoot 'packages\claudex-workhouse-server-windows-x64-folder') -Destination $portableRoot -Recurse
+          $zip = Join-Path $output 'claudex-workhouse-server-windows-x64-portable.zip'
+          Compress-Archive -LiteralPath $portableRoot -DestinationPath $zip -CompressionLevel Optimal
+          # Inspect the archive as shipped as well as the directory it came
+          # from, so a packaging step that reintroduces a file cannot pass.
+          if ($env:CLAUDEX_PRIVATE_SOURCE -eq 'true') {
+            node scripts/public-release/inspect-public-payload.mjs --zip $zip
+            if ($LASTEXITCODE -ne 0) { throw 'Portable ZIP failed the mandatory public payload inspection.' }
+          }
+          $outputExe = Join-Path $output 'claudex-workhouse-server-windows-x64.exe'
+          foreach ($file in @($outputExe,$zip)) {
+            $hash = (Get-FileHash -LiteralPath $file -Algorithm SHA256).Hash.ToLowerInvariant()
+            "$hash  $([IO.Path]::GetFileName($file))" | Set-Content -LiteralPath "$file.sha256" -Encoding ascii -NoNewline
+          }
+          @"
+          Claudex Workhouse unsigned Windows test build
+          Commit: ${{ github.sha }}
+
+          This is not an Authenticode-signed public release. Windows may show
+          Unknown publisher or Microsoft Defender SmartScreen. Verify the
+          adjacent SHA-256 file before running either package.
+          "@ | Set-Content -LiteralPath (Join-Path $output 'README-FIRST.txt') -Encoding utf8
+      - name: Launch-test unsigned EXE and portable ZIP
+        shell: pwsh
+        run: |
+          $publicRoot = $env:CLAUDEX_PUBLIC_ROOT
+          & (Join-Path $publicRoot 'app\scripts\test-windows-server-package.ps1') `
+            -SingleExe "$env:RUNNER_TEMP\claudex-workhouse-windows-x64-unsigned\claudex-workhouse-server-windows-x64.exe" `
+            -PortableZip "$env:RUNNER_TEMP\claudex-workhouse-windows-x64-unsigned\claudex-workhouse-server-windows-x64-portable.zip" `
+            -ExpectedCommit "${{ github.sha }}" `
+            -StatusGuideScreenshot "$env:RUNNER_TEMP\claudex-workhouse-windows-x64-unsigned\installed-status-guide.ko.png"
+      - name: Scan unsigned EXE with Microsoft Defender
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $exe = Join-Path $env:RUNNER_TEMP 'claudex-workhouse-windows-x64-unsigned\claudex-workhouse-server-windows-x64.exe'
+          $status = Get-MpComputerStatus
+          if (-not $status.AMServiceEnabled -or -not $status.AntivirusEnabled) { throw 'Windows Defender antivirus engine is not enabled.' }
+          $before = (Get-FileHash -LiteralPath $exe -Algorithm SHA256).Hash
+          Start-MpScan -ScanType CustomScan -ScanPath $exe
+          if (-not (Test-Path -LiteralPath $exe -PathType Leaf)) { throw 'Windows Defender removed or quarantined the unsigned EXE.' }
+          $after = (Get-FileHash -LiteralPath $exe -Algorithm SHA256).Hash
+          if ($before -ne $after) { throw 'Unsigned EXE changed during Windows Defender scanning.' }
+      - name: Upload unsigned files to a private draft test release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $tag = "windows-test-${{ github.sha }}"
+          $title = "Unsigned Windows test build ${{ github.sha }}"
+          $notes = @"
+          Unsigned Windows test files for commit ${{ github.sha }}.
+
+          These files passed the Windows EXE and portable ZIP launch tests and
+          Microsoft Defender scanning. They are not an Authenticode-signed
+          public release. Verify the adjacent SHA-256 files before testing.
+          "@
+          gh release view $tag --repo $env:GITHUB_REPOSITORY *> $null
+          if ($LASTEXITCODE -ne 0) {
+            gh release create $tag `
+              --repo $env:GITHUB_REPOSITORY `
+              --target '${{ github.sha }}' `
+              --title $title `
+              --notes $notes `
+              --draft
+            if ($LASTEXITCODE -ne 0) { throw 'Draft test release creation failed.' }
+          }
+          $output = Join-Path $env:RUNNER_TEMP 'claudex-workhouse-windows-x64-unsigned'
+          $files = Get-ChildItem -LiteralPath $output -File | ForEach-Object { $_.FullName }
+          if ($files.Count -eq 0) { throw 'No Windows test files were produced.' }
+          gh release upload $tag @files --repo $env:GITHUB_REPOSITORY --clobber
+          if ($LASTEXITCODE -ne 0) { throw 'Draft test release upload failed.' }

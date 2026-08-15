@@ -1,0 +1,13 @@
+{
+  "name": "claudex-workhouse-installer-web",
+  "version": "1.0.0",
+  "private": true,
+  "license": "AGPL-3.0-only",
+  "repository": "https://github.com/canister2668/claudex-workhouse",
+  "type": "module",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "check": "node ../app/node_modules/typescript/bin/tsc -p tsconfig.json --noEmit",
+    "test": "node scripts/test.mjs"
+  }
+}

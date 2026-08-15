@@ -1,0 +1,23 @@
+import type{FastifyInstance,FastifyRequest}from"fastify";
+import type{ExternalAccessCoordinator}from"./coordinator.js";
+import crypto from"node:crypto";
+import{applySchema,detectSchema,operationParamsSchema,planInputSchema,profileParamsSchema,testSchema}from"./schemas.js";
+import{assertNoBrowserExecutionFields}from"./executors/registry.js";
+type Idempotent=(request:FastifyRequest,action:string,body:unknown,run:()=>Promise<unknown>)=>Promise<unknown>;
+type Audit=(request:FastifyRequest,action:string,outcome:string,detail?:string)=>Promise<void>;
+export function registerExternalAccessRoutes(app:FastifyInstance,input:{coordinator:ExternalAccessCoordinator;idempotent:Idempotent;audit?:Audit}){const c=input.coordinator,record=(request:FastifyRequest,action:string,outcome:string,detail?:string)=>input.audit?.(request,action,outcome,detail)??Promise.resolve();
+ app.addHook("preValidation",async request=>{if(request.url.startsWith("/api/external-access/"))assertNoBrowserExecutionFields(request.body);});
+ app.get("/api/external-access/v1/methods",()=>c.methods());
+ app.post("/api/external-access/v1/detect",async request=>c.detect(detectSchema.parse(request.body).provider));
+ app.get("/api/external-access/v1/configuration",()=>c.configuration());
+ app.post("/api/external-access/v1/plans",{bodyLimit:8192,config:{rateLimit:{max:10,timeWindow:"10 minutes"}}},async request=>{const body=planInputSchema.parse(request.body),tokenDigest=body.provider==="cloudflare"&&body.token?crypto.createHash("sha256").update(body.token).digest("hex"):undefined;return input.idempotent(request,"external-access-plan",{...body,token:undefined,tokenDigest},async()=>{const plan=await c.createPlan(body);await record(request,"external-access-plan","success",`provider=${body.provider};action=${body.action}`);return plan;});});
+ app.get("/api/external-access/v1/plans/:id",request=>c.getPlan(operationParamsSchema.parse(request.params).id));
+ app.post("/api/external-access/v1/plans/:id/apply",async request=>{const{id}=operationParamsSchema.parse(request.params),body=applySchema.parse(request.body);return input.idempotent(request,`external-access-apply:${id}`,body,async()=>{const operation=await c.apply(id,body);await record(request,"external-access-apply","success",`operation=${operation.id}`);return operation;});});
+ app.get("/api/external-access/v1/operations/:id",request=>c.getOperation(operationParamsSchema.parse(request.params).id));
+ app.get("/api/external-access/v1/operations/:id/events",async(request,reply)=>{const{id}=operationParamsSchema.parse(request.params);reply.hijack();reply.raw.writeHead(200,{"Content-Type":"text/event-stream","Cache-Control":"no-cache, no-store","Connection":"keep-alive","X-Accel-Buffering":"no"});let sequence=0;const send=(value:unknown)=>reply.raw.write(`id: ${++sequence}\nevent: operation\ndata: ${JSON.stringify(value)}\n\n`);send(await c.getOperation(id));const unsubscribe=c.subscribe(id,send),heartbeat=setInterval(()=>reply.raw.write(": keepalive\n\n"),15000);request.raw.on("close",()=>{clearInterval(heartbeat);unsubscribe();});});
+ app.post("/api/external-access/v1/tests",async request=>{const body=testSchema.parse(request.body);return c.test(body.provider,body.profileId);});
+ app.post("/api/external-access/v1/operations/:id/cancel",async request=>{const{id}=operationParamsSchema.parse(request.params);return input.idempotent(request,`external-access-cancel:${id}`,{id},async()=>{const result=await c.cancel(id);await record(request,"external-access-cancel","success",`operation=${id}`);return result;});});
+ app.post("/api/external-access/v1/operations/:id/rollback",async request=>{const{id}=operationParamsSchema.parse(request.params);return input.idempotent(request,`external-access-rollback:${id}`,{id},async()=>{const result=await c.rollback(id);await record(request,"external-access-rollback-plan","success",`operation=${id}`);return result;});});
+ app.delete("/api/external-access/v1/configuration/:profileId",async request=>{const{profileId}=profileParamsSchema.parse(request.params);return input.idempotent(request,`external-access-remove:${profileId}`,{profileId},async()=>{const result=await c.remove(profileId);await record(request,"external-access-remove-plan","success",`profile=${profileId}`);return result;});});
+ app.get("/api/external-access/v1/support",()=>c.support());
+}

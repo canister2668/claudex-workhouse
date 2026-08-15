@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<style>
+  body{margin:0;font-family:system-ui,-apple-system,"Apple SD Gothic Neo",sans-serif;background:#fff}
+  .gallery{display:grid;grid-template-columns:repeat(3,1fr)}
+  .cell{border:1px solid #d9dde2}
+  .cell>h3{margin:0;padding:8px 12px;font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:#5f6874;font-weight:700;background:#f2f4f7;border-bottom:1px solid #d9dde2}
+  iframe{display:block;width:100%;height:620px;border:0}
+</style>
+</head>
+<body>
+<div class="gallery" id="gallery"></div>
+<script>
+const SKINS=["soft","elevated","outline","compact","terminal","flat"];
+const params=new URLSearchParams(location.search);
+const theme=params.get("theme")||"light";
+const dirParam=params.get("dir")||"";
+const overlays={a:["dir-a"],b:["dir-a","dir-b"],c:["dir-c"]}[dirParam]||[];
+const conversation=`
+  <article class="bubble user">
+    <span class="bubble-card-head"><span>요청</span><time class="bubble-card-time">18:20</time></span>
+    <div class="markdown-body"><p>파비콘이 16px에서 뭉개지는 것 같아. 확인해줄래?</p></div>
+  </article>
+  <article class="bubble agent">
+    <span class="bubble-card-head"><span>답변</span><time class="bubble-card-time">18:21</time></span>
+    <div class="markdown-body">
+      <p>확인했습니다. 세 줄 카드가 겹쳐 보이는 게 원인입니다.</p>
+      <pre><code>node scripts/generate-icons.mjs</code></pre>
+      <p>버전 해시를 붙여 캐시도 함께 무효화했습니다.</p>
+    </div>
+  </article>`;
+const doc=(skin)=>`<!doctype html><html lang="ko" data-theme="${theme}"${skin==="soft"?"":` data-skin="${skin}"`}>
+<head><meta charset="utf-8">
+<link rel="stylesheet" href="../../app/src/web/styles.css">${overlays.map(n=>`<link rel="stylesheet" href="${n}.css">`).join("")}
+<style>body{margin:0;padding:16px;background:var(--bg);font-family:system-ui,-apple-system,"Apple SD Gothic Neo",sans-serif}
+.conversation{display:flex;flex-direction:column;gap:var(--card-gap,14px)}</style></head>
+<body><div class="conversation">${conversation}</div></body></html>`;
+const gallery=document.getElementById("gallery");
+for(const skin of SKINS){
+  const cell=document.createElement("div");
+  cell.className="cell";
+  cell.innerHTML=`<h3>${skin} · ${theme}${dirParam?` · ${dirParam.toUpperCase()}`:" · NOW"}</h3>`;
+  const frame=document.createElement("iframe");
+  frame.srcdoc=doc(skin);
+  cell.append(frame);
+  gallery.append(cell);
+}
+</script>
+</body>
+</html>

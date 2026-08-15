@@ -1,0 +1,4 @@
+# Regenerate with:
+#   node docs/theme-directions/render.mjs && node docs/theme-directions/build.mjs
+shot-*.png
+index.html

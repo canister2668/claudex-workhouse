@@ -1,0 +1,58 @@
+# Operational state and secrets
+/data/
+/runtime/
+/logs/
+/run/
+/backups/
+/snapshots/
+/uploads/
+/packages/
+/archive/
+/.pnpm-store/
+/app/.pnpm-store/
+/@eaDir/
+/.claudex-workhouse-staging/
+
+# Site-local configuration (commit redacted examples only)
+/config/*.json
+/config/*.json.backup*
+!/config/*.example.json
+
+# JavaScript build and test outputs
+/app/node_modules/
+/app/dist/
+/app/dist-server/
+/app/test-results/
+/app/playwright-report/
+/app/coverage/
+__pycache__/
+*.pyc
+
+# Desktop Worker local credentials and state
+/.claudex-workhouse-worker/
+**/.claudex-workhouse-worker/
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+
+# Local environment/editor files
+.env
+.env.*
+!.env.example
+.DS_Store
+*.log
+
+# Local exports, archives, and private key material
+*.zip
+*.tgz
+*.tar.gz
+*.pem
+*.key
+*.p12
+*.pfx
+*.jks
+
+# Generated release bundles and visual-review outputs
+/release-files/
+/artifacts/
+/answer-card-folding-mockup.html

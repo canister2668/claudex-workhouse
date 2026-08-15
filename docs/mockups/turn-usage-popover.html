@@ -1,0 +1,161 @@
+<!doctype html>
+<html lang="ko" data-theme="dark">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>턴 사용량 팝오버 시안</title>
+<style>
+:root{
+  --bg:#0f1411;--surface:#161c18;--surface-2:#1f2721;--line:#2c362e;--line-strong:#3d4a3f;
+  --text:#e9efe9;--muted:#97a49a;--accent:#5ad38a;--accent-strong:#7fe3a6;
+  --overlay-medium:rgba(0,0,0,.18);
+  font-family:Inter,ui-sans-serif,system-ui,"Noto Sans KR",sans-serif;
+}
+*{box-sizing:border-box}
+body{margin:0;padding:32px;background:var(--bg);color:var(--text);font-size:16px}
+h1{font-size:1rem;margin:0 0 6px}
+p.lede{margin:0 0 28px;color:var(--muted);font-size:.8rem}
+.grid{display:flex;flex-wrap:wrap;gap:28px;align-items:flex-start}
+.case{width:330px}
+.case>h2{font-size:.78rem;margin:0 0 4px;color:var(--accent-strong)}
+.case>p{margin:0 0 12px;color:var(--muted);font-size:.7rem;line-height:1.5}
+
+/* ---- 접힌 상태 (summary) ---- */
+.summary-row{display:flex;gap:10px;align-items:center;margin-bottom:10px;
+  padding:7px 10px;border:1px dashed var(--line);border-radius:9px;font-size:.72rem;color:var(--muted)}
+.summary-row b{color:var(--text);font-weight:600}
+.summary-row .live{color:var(--accent-strong)}
+
+/* ---- 팝오버 공통 ---- */
+.pop{width:290px;padding:12px;border:1px solid var(--line-strong);border-radius:12px;
+  background:var(--surface);box-shadow:0 16px 40px var(--overlay-medium);
+  font-size:.72rem;font-weight:500;line-height:1.45}
+.pop .cap{display:block;margin-bottom:9px;color:var(--muted);font-size:.67rem;
+  letter-spacing:.02em;font-weight:600}
+.pop hr{height:1px;margin:9px 0;border:0;background:var(--line)}
+.row{display:flex;justify-content:space-between;gap:12px;padding:3px 0;color:var(--muted)}
+.row.muted{color:var(--muted);font-size:.67rem}
+.row .sub{padding-left:10px}
+
+/* 히어로: 실사용 */
+.hero{display:flex;align-items:baseline;justify-content:space-between;gap:10px}
+.hero .label{color:var(--text);font-weight:600}
+.hero .value{color:var(--accent-strong);font-size:1.32rem;font-weight:700;
+  letter-spacing:-.01em;font-variant-numeric:tabular-nums}
+.split{display:flex;gap:6px;color:var(--muted);padding:4px 0 0}
+.tree{color:var(--muted);font-size:.67rem;padding:2px 0 0 12px}
+
+/* 하단 회색 영역 */
+.footnote{color:var(--muted);font-size:.67rem;line-height:1.5}
+.footnote .k{opacity:.85}
+.save{color:var(--accent);opacity:.75}
+
+/* B안: 막대 */
+.bar{display:flex;height:6px;border-radius:999px;overflow:hidden;background:var(--surface-2);margin:8px 0 6px}
+.bar>i{display:block}
+.bar>i.fresh{background:var(--accent);flex:17.6}
+.bar>i.out{background:var(--accent-strong);opacity:.65;flex:5.1}
+.bar>i.cache{background:var(--line-strong);flex:895}
+.legend{display:flex;gap:10px;font-size:.65rem;color:var(--muted);flex-wrap:wrap}
+.legend span{display:inline-flex;align-items:center;gap:4px}
+.legend i{width:7px;height:7px;border-radius:2px;display:inline-block}
+
+/* C안: 배지 */
+.badges{display:flex;gap:6px;flex-wrap:wrap;margin-top:9px}
+.badge{padding:3px 7px;border-radius:999px;background:var(--surface-2);
+  color:var(--muted);font-size:.65rem}
+
+details.disc{margin-top:8px}
+details.disc>summary{cursor:pointer;color:var(--muted);font-size:.66rem;list-style:none}
+details.disc>summary::-webkit-details-marker{display:none}
+details.disc>summary::before{content:"▸ ";}
+details.disc[open]>summary::before{content:"▾ ";}
+details.disc .row{font-size:.66rem}
+.note{margin-top:14px;color:var(--muted);font-size:.66rem;line-height:1.6}
+.note code{color:var(--text);background:var(--surface-2);padding:1px 4px;border-radius:4px}
+</style>
+</head>
+<body>
+<h1>턴 사용량 팝오버 — 시안</h1>
+<p class="lede">샘플 값: 신규 입력 17.6k · 출력 5.1k(추론 1.6k 포함) · 캐시 읽기 895.2k · 내부 요청 12회 → 실사용 22.7k / 총 처리 917.9k</p>
+
+<div class="grid">
+
+  <!-- A안 -->
+  <section class="case">
+    <h2>A안 — 실사용 히어로 (권장)</h2>
+    <p>가장 큰 숫자를 “실사용”에 주고, 917.9k는 그것이 왜 작은지 설명하는 각주로 내림.</p>
+    <div class="summary-row">접힌 상태 → <b>22.7k</b> <span class="live">↑</span></div>
+    <div class="pop">
+      <span class="cap">이번 턴</span>
+      <div class="hero"><span class="label">실사용</span><span class="value">22.7k</span></div>
+      <div class="split"><span>입력 17.6k</span><span>·</span><span>출력 5.1k</span></div>
+      <div class="tree">└ 추론 1.6k</div>
+      <hr/>
+      <div class="footnote">
+        <div class="k">캐시 895.2k 재사용 <span class="save">· 98% 절감</span></div>
+        <div class="k">내부 요청 12회 · 총 처리량 917.9k</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- B안 -->
+  <section class="case">
+    <h2>B안 — 비율 막대 추가</h2>
+    <p>A안 + 한 줄 막대. “거의 다 캐시”가 숫자 없이 즉시 읽힘. 캐시가 압도적이라 막대는 로그 스케일 또는 최소폭 보정 필요.</p>
+    <div class="summary-row">접힌 상태 → <b>22.7k</b> <span class="live">↑</span></div>
+    <div class="pop">
+      <span class="cap">이번 턴</span>
+      <div class="hero"><span class="label">실사용</span><span class="value">22.7k</span></div>
+      <div class="bar"><i class="fresh"></i><i class="out"></i><i class="cache"></i></div>
+      <div class="legend">
+        <span><i style="background:var(--accent)"></i>입력 17.6k</span>
+        <span><i style="background:var(--accent-strong);opacity:.65"></i>출력 5.1k</span>
+        <span><i style="background:var(--line-strong)"></i>캐시 895.2k</span>
+      </div>
+      <div class="tree">└ 추론 1.6k</div>
+      <hr/>
+      <div class="footnote"><div class="k">캐시 재사용 <span class="save">98% 절감</span> · 내부 요청 12회</div></div>
+    </div>
+  </section>
+
+  <!-- C안 -->
+  <section class="case">
+    <h2>C안 — 접힌 상세</h2>
+    <p>기본은 두 줄만. 캐시·요청 수·총 처리량은 <em>자세히</em> 안으로. 팝오버 높이가 가장 짧아 모바일에 유리.</p>
+    <div class="summary-row">접힌 상태 → <b>22.7k</b> <span class="live">↑</span></div>
+    <div class="pop">
+      <span class="cap">이번 턴</span>
+      <div class="hero"><span class="label">실사용</span><span class="value">22.7k</span></div>
+      <div class="split"><span>입력 17.6k</span><span>·</span><span>출력 5.1k</span></div>
+      <div class="badges"><span class="badge">캐시 98% 절감</span><span class="badge">요청 12회</span></div>
+      <details class="disc">
+        <summary>자세히</summary>
+        <div class="row"><span>추론</span><span>1.6k</span></div>
+        <div class="row"><span>캐시 읽기</span><span>895.2k</span></div>
+        <div class="row"><span>캐시 쓰기</span><span>0</span></div>
+        <div class="row"><span>총 처리량</span><span>917.9k</span></div>
+      </details>
+    </div>
+  </section>
+
+  <!-- 예외 상태 -->
+  <section class="case">
+    <h2>예외 — 입력값 미제공 / 추정치</h2>
+    <p>공급자가 input을 안 줄 때(<code>inputTokens===null</code>)는 실사용을 계산할 수 없으니 출력만 히어로로.</p>
+    <div class="summary-row">접힌 상태 → <b>약 5.1k</b></div>
+    <div class="pop">
+      <span class="cap">이번 턴</span>
+      <div class="hero"><span class="label">출력</span><span class="value">약 5.1k</span></div>
+      <div class="tree">└ 추론 1.6k</div>
+      <hr/>
+      <div class="footnote">입력·캐시 토큰은 공급자가 제공하지 않았습니다.</div>
+    </div>
+    <p class="note">
+      캐시가 0인 첫 턴에서는 “캐시 …재사용” 줄과 절감 배지를 통째로 숨겨야 <code>0% 절감</code> 같은 무의미한 문구가 안 나옵니다.
+    </p>
+  </section>
+
+</div>
+</body>
+</html>

@@ -1,0 +1,26 @@
+services:
+  workhouse:
+    image: ${CLAUDEX_IMAGE:-claudex-workhouse-public-local:1.0.0}
+    restart: unless-stopped
+    ports:
+      - "${CLAUDEX_PORT:-3410}:3410"
+    environment:
+      CLAUDEX_WORKHOUSE_HOST: 0.0.0.0
+      CLAUDEX_WORKHOUSE_PORT: 3410
+      CLAUDEX_WORKHOUSE_EXTERNAL_ORIGIN: ${CLAUDEX_ORIGIN:-http://127.0.0.1:3410}
+      CLAUDEX_WORKHOUSE_AUTH_MODE: local
+    volumes:
+      - workhouse_config:/opt/claudex-workhouse/config
+      - workhouse_data:/opt/claudex-workhouse/data
+      - workhouse_logs:/opt/claudex-workhouse/logs
+      - workhouse_runtime:/opt/claudex-workhouse/runtime
+      - workhouse_snapshots:/opt/claudex-workhouse/snapshots
+      - workhouse_workspaces:/opt/claudex-workhouse/workspaces
+
+volumes:
+  workhouse_config:
+  workhouse_data:
+  workhouse_logs:
+  workhouse_runtime:
+  workhouse_snapshots:
+  workhouse_workspaces:

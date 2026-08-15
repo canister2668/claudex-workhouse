@@ -1,0 +1,83 @@
+/* Direction B — push each skin until its name is obvious at a glance.
+   Layered on top of A's light polish in the demo, so the difference you see here
+   is the per-skin character, not the colour work. */
+
+/* Elevated: actually floats. Soft layered shadow, no outline, lifted header shelf. */
+:root[data-skin="elevated"] {
+  --card-shadow: 0 1px 2px rgba(16,26,20,.06), 0 6px 16px -6px rgba(16,26,20,.18), 0 18px 36px -22px rgba(16,26,20,.28);
+  --card-border-width: 0px;
+  --radius-card: 16px;
+  --card-gap: 20px;
+}
+:root[data-skin="elevated"] .bubble > .bubble-card-head {
+  margin: -13px -15px 10px;
+  padding: 9px 14px;
+  border-radius: 16px 16px 0 0;
+  background: color-mix(in srgb, var(--card-role-color, var(--line)) 8%, var(--surface-2));
+  box-shadow: inset 0 -1px 0 color-mix(in srgb, var(--card-role-color, var(--line)) 18%, var(--line));
+}
+:root[data-theme="dark"][data-skin="elevated"] {
+  --card-shadow: 0 1px 0 rgba(255,255,255,.04), 0 10px 24px -12px rgba(0,0,0,.7), 0 24px 48px -28px rgba(0,0,0,.8);
+}
+
+/* Outline: line only. No fill anywhere, the role lives in the rail and the label. */
+:root[data-skin="outline"] {
+  --card-bg: transparent;
+  --card-user-bg: transparent;
+  --card-border-width: 1.5px;
+  --card-rail-width: 1.5px;
+  --radius-card: 12px;
+}
+:root[data-skin="outline"] .bubble {
+  --card-outline-color: color-mix(in srgb, var(--card-role-color, var(--line)) 55%, var(--line));
+  border-left: 1.5px solid var(--card-outline-color);
+  box-shadow: inset 3px 0 0 -1px var(--card-role-color, var(--line-strong));
+}
+:root[data-skin="outline"] .bubble > .bubble-card-head {
+  background: transparent;
+  box-shadow: none;
+  color: var(--card-role-color, var(--muted));
+}
+:root[data-skin="outline"] .bubble > .bubble-card-head > span { color: var(--card-role-color, var(--muted)); font-weight: 800 }
+
+/* Compact: rows, not cards. Density over decoration. */
+:root[data-skin="compact"] {
+  --card-padding: 6px 10px 8px;
+  --card-gap: 0px;
+  --radius-card: 0px;
+  --card-bg: transparent;
+  --card-user-bg: transparent;
+  --card-border-width: 0px;
+  --card-rail-width: 2px;
+}
+:root[data-skin="compact"] .bubble {
+  border-bottom: 1px solid color-mix(in srgb, var(--line) 70%, transparent);
+}
+:root[data-skin="compact"] .bubble:last-child { border-bottom: 0 }
+:root[data-skin="compact"] .bubble > .bubble-card-head > span {
+  color: var(--card-role-color, var(--muted));
+  font-weight: 800;
+}
+
+/* Flat: no lines at all. Whitespace and a strong role label do the separating. */
+:root[data-skin="flat"] {
+  --card-gap: 4px;
+  --card-padding: 16px 0 18px;
+}
+:root[data-skin="flat"] .bubble {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+:root[data-theme="light"][data-skin="flat"] .bubble.agent,
+:root[data-theme="light"][data-skin="flat"] .bubble.user { background: transparent }
+:root[data-skin="flat"] .bubble > .bubble-card-head > span {
+  color: var(--card-role-color, var(--muted));
+  font-weight: 850;
+  letter-spacing: .04em;
+}
+:root[data-skin="flat"] .bubble + .bubble { border-top: 1px solid color-mix(in srgb, var(--line) 55%, transparent) }
+
+/* Terminal: tighter bracket, sharper console. */
+:root[data-skin="terminal"] .bubble { border-radius: 0 }
+:root[data-skin="terminal"] .bubble > .bubble-card-head > span { color: var(--card-role-color) }

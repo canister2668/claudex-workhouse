@@ -1,0 +1,209 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>폰 세션 하단 컨트롤 시안</title>
+<style>
+  :root{
+    --bg:#0d1520;--surface:#141c28;--surface-2:#1b2532;--line:#26303f;--line-strong:#3a4657;
+    --text:#e8eef7;--muted:#8b98a9;--accent:#6cb6f0;--accent-strong:#8ecbf7;--red:#f08b8b;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;padding:20px 14px 60px;background:#070b11;color:var(--text);
+       font-family:-apple-system,"Noto Sans KR","Segoe UI",Roboto,sans-serif;font-size:14px;line-height:1.6}
+  h1{font-size:1.15rem;margin:0 0 4px}
+  h2{font-size:.95rem;margin:30px 0 2px;color:var(--accent-strong)}
+  p{margin:4px 0 10px;color:var(--muted);font-size:.82rem}
+  p b{color:var(--text)}
+  .note{margin:0 0 8px;font-size:.78rem;color:var(--muted)}
+  .bad{color:var(--red)}
+  .good{color:#8ee0a8}
+  /* phone frame */
+  .phone{width:100%;max-width:412px;margin:0 0 6px;border:1px solid var(--line-strong);border-radius:14px;
+         background:var(--bg);overflow:hidden}
+  .log{height:52px;background:linear-gradient(180deg,#0b1119,var(--bg));border-bottom:1px solid var(--line);
+       display:flex;align-items:flex-end;justify-content:center;color:#46536a;font-size:.7rem;padding-bottom:6px}
+  .drawer{padding:8px 10px 10px;background:var(--surface)}
+  .row{display:flex;align-items:center;gap:6px;padding-bottom:8px}
+  .row.wrap{flex-wrap:wrap;row-gap:6px}
+  .row.scroll{overflow-x:auto;scrollbar-width:none}
+  .row.scroll::-webkit-scrollbar{display:none}
+  .pill{flex:none;display:inline-flex;align-items:center;gap:5px;min-height:34px;padding:0 10px;
+        border:1px solid var(--line);border-radius:10px;background:var(--surface-2);color:var(--muted);
+        font-size:.72rem;font-weight:700;white-space:nowrap}
+  .pill.icon{width:34px;padding:0;justify-content:center}
+  .pill.on{color:var(--accent-strong);border-color:color-mix(in srgb,var(--accent) 45%,var(--line))}
+  .pill.danger{color:var(--red);border-color:color-mix(in srgb,var(--red) 40%,var(--line))}
+  .pill.solid-danger{background:var(--red);color:#20242c;border-color:var(--red)}
+  .pill.model{color:var(--muted)}
+  .pill.model b{color:var(--text);font-weight:800}
+  .pill.grow{flex:1 1 auto;min-width:0;justify-content:flex-start}
+  .pill.clipped{position:relative;overflow:hidden}
+  .pill.clipped::after{content:"";position:absolute;inset:0 0 0 auto;width:26px;
+        background:linear-gradient(90deg,transparent,var(--surface-2))}
+  .composer{display:flex;align-items:center;gap:7px}
+  .composer .box{flex:1 1 auto;min-width:0;min-height:44px;display:flex;align-items:center;justify-content:space-between;
+        gap:8px;padding:0 10px;border:1px solid var(--line-strong);border-radius:12px;color:#5d6b80;font-size:.8rem}
+  .composer .send{width:44px;height:44px;flex:none;border-radius:12px;background:#2f5f88;
+        display:flex;align-items:center;justify-content:center;color:#cfe6fa;font-size:1rem}
+  .chipmini{display:inline-flex;align-items:center;gap:4px;padding:3px 8px;border:1px solid color-mix(in srgb,var(--accent) 45%,var(--line));
+        border-radius:999px;color:var(--accent-strong);font-size:.68rem;font-weight:700;white-space:nowrap}
+  .nav{display:grid;grid-template-columns:repeat(5,1fr);gap:2px;margin:8px 10px 10px;padding:6px 4px;
+       border:1px solid var(--line);border-radius:13px;background:var(--surface)}
+  .nav span{text-align:center;font-size:.6rem;color:var(--muted)}
+  .nav span.active{color:var(--accent-strong)}
+  .nav i{display:block;font-style:normal;font-size:.9rem;margin-bottom:1px}
+  .sheet{width:100%;max-width:412px;margin:8px 0 0;padding:6px;border:1px solid var(--line);border-radius:14px;background:var(--surface)}
+  .sheet div{min-height:42px;display:flex;align-items:center;gap:10px;padding:0 10px;border-radius:9px;font-size:.78rem;font-weight:700}
+  .sheet div:hover{background:#1d2836}
+  .tag{display:inline-block;margin:0 0 6px;padding:2px 8px;border-radius:999px;font-size:.68rem;font-weight:800}
+  .tag.as-is{background:#3a2126;color:#f5a3a3}
+  .tag.plan{background:#12303f;color:#8ecbf7}
+  ul{margin:6px 0 0;padding-left:18px;color:var(--muted);font-size:.8rem}
+  li{margin:2px 0}
+  li b{color:var(--text)}
+  hr{border:0;border-top:1px solid var(--line);margin:26px 0 0}
+</style>
+</head>
+<body>
+
+<h1>폰 세션 하단 컨트롤 시안</h1>
+<p>세로 412px 기준. 실제 컴포넌트가 아니라 배치 확인용입니다. 코드는 아직 바꾸지 않았습니다.</p>
+
+<h2>현재 (as-is)</h2>
+<span class="tag as-is">지금 배포된 상태</span>
+<div class="phone">
+  <div class="log">… 로그 …</div>
+  <div class="drawer">
+    <div class="row scroll">
+      <span class="pill icon">⌄</span>
+      <span class="pill icon">⋮</span>
+      <span class="pill on">바로 실행 ⌃</span>
+      <span class="pill solid-danger">전체 권한 ⌃</span>
+      <span class="pill model clipped">· 1M · 전체 권한</span>
+    </div>
+    <div class="composer">
+      <span class="pill icon">📎</span>
+      <span class="pill icon">☁</span>
+      <span class="box">후속 요청 <span class="chipmini">결과 요약 ⌃</span></span>
+      <span class="send">➤</span>
+    </div>
+  </div>
+  <div class="nav"><span><i>⌂</i>홈</span><span><i>▥</i>협업 게시판</span><span class="active"><i>▶</i>세션</span><span><i>💬</i>대화</span><span><i>🌐</i>브라우저</span></div>
+</div>
+<ul>
+  <li class="bad">모델명이 잘림 — 줄이 가로 스크롤이고, 모델 배지 <b>안쪽에도</b> 스크롤이 또 있어 "Opus 5"와 톱니 아이콘이 왼쪽으로 밀려나감</li>
+  <li class="bad">토글이 두 개(<b>⌄ 접기</b>, <b>⋮ 작업</b>) — 역할이 달라 보이지 않음</li>
+  <li class="bad">접기를 누르면 <b>모델·권한이 전부 사라지고</b> "작업 메뉴 ⌃"와 ⋮만 남음</li>
+</ul>
+
+<h2>접기가 왜 있는지</h2>
+<p>
+저장소 이력으로 확인했습니다. <b>읽을 공간을 만드는 장치</b>였고, 지금은 역할이 겹칩니다.
+<code>handleConversationScroll</code>이 폰에서 위로 스크롤하면 <code>mobileSessionControlsCollapsed=true</code>로 컨트롤을 접습니다.
+그런데 이후에 <b>드로어 전체가 슬라이드로 사라지는 읽기 모드</b>(immersive chrome)가 들어왔고, 그게 같은 일을 더 많이 합니다.
+즉 <b>같은 목적의 장치가 두 개</b>이고, 접기 쪽은 모델·권한 표시까지 같이 가져가 버립니다.
+</p>
+
+<h2>안 A — 접기 제거, 한 줄 유지</h2>
+<span class="tag plan">최소 변경</span>
+<div class="phone">
+  <div class="log">… 로그 …</div>
+  <div class="drawer">
+    <div class="row scroll">
+      <span class="pill icon">⋮</span>
+      <span class="pill model"><span>⚙</span><b>Opus 5</b> · 1M · 전체 권한</span>
+      <span class="pill on">바로 실행 ⌃</span>
+      <span class="pill solid-danger">전체 권한 ⌃</span>
+    </div>
+    <div class="composer">
+      <span class="pill icon">📎</span>
+      <span class="pill icon">☁</span>
+      <span class="box">후속 요청 <span class="chipmini">결과 요약 ⌃</span></span>
+      <span class="send">➤</span>
+    </div>
+  </div>
+  <div class="nav"><span><i>⌂</i>홈</span><span><i>▥</i>협업 게시판</span><span class="active"><i>▶</i>세션</span><span><i>💬</i>대화</span><span><i>🌐</i>브라우저</span></div>
+</div>
+<ul>
+  <li>접기 삭제 → 토글 하나(⋮)만 남음. 읽을 공간은 드로어 슬라이드가 이미 담당</li>
+  <li>모델 배지를 <b>맨 앞으로</b> 옮기고 배지 내부 스크롤 제거 → 모델명은 항상 처음부터 보임</li>
+  <li class="bad">여전히 줄이 화면보다 길어 <b>오른쪽 끝 칩은 밀어야</b> 보임 (지금과 같은 가로 스크롤)</li>
+  <li>높이 변화 없음</li>
+</ul>
+
+<h2>안 B — 접기 제거, 넘치면 두 줄</h2>
+<span class="tag plan">아무것도 안 잘림</span>
+<div class="phone">
+  <div class="log">… 로그 …</div>
+  <div class="drawer">
+    <div class="row wrap">
+      <span class="pill icon">⋮</span>
+      <span class="pill model"><span>⚙</span><b>Opus 5</b> · 1M · 전체 권한</span>
+      <span class="pill on">바로 실행 ⌃</span>
+      <span class="pill solid-danger">전체 권한 ⌃</span>
+    </div>
+    <div class="composer">
+      <span class="pill icon">📎</span>
+      <span class="pill icon">☁</span>
+      <span class="box">후속 요청 <span class="chipmini">결과 요약 ⌃</span></span>
+      <span class="send">➤</span>
+    </div>
+  </div>
+  <div class="nav"><span><i>⌂</i>홈</span><span><i>▥</i>협업 게시판</span><span class="active"><i>▶</i>세션</span><span><i>💬</i>대화</span><span><i>🌐</i>브라우저</span></div>
+</div>
+<ul>
+  <li class="good">가로 스크롤 없음 — 넘치면 아래로 접힘. 모델명·권한·실행 모드가 <b>한눈에 전부</b></li>
+  <li>대신 좁은 폰에서는 줄이 두 줄이 될 수 있음 (약 40px)</li>
+  <li>읽는 동안에는 드로어째 사라지므로, 그 높이를 쓰는 건 로그 끝에 있을 때뿐</li>
+</ul>
+
+<h2>안 C — 모델 배지를 컴포저 줄로</h2>
+<span class="tag plan">한 줄 유지 + 안 잘림</span>
+<div class="phone">
+  <div class="log">… 로그 …</div>
+  <div class="drawer">
+    <div class="row">
+      <span class="pill icon">⋮</span>
+      <span class="pill on">바로 실행 ⌃</span>
+      <span class="pill solid-danger">전체 권한 ⌃</span>
+    </div>
+    <div class="composer">
+      <span class="pill icon">📎</span>
+      <span class="box">후속 요청 <span class="chipmini">결과 요약 ⌃</span></span>
+      <span class="send">➤</span>
+    </div>
+    <div class="row" style="padding:6px 0 0">
+      <span class="pill model grow"><span>⚙</span><b>Opus 5</b> · 1M · 전체 권한</span>
+    </div>
+  </div>
+  <div class="nav"><span><i>⌂</i>홈</span><span><i>▥</i>협업 게시판</span><span class="active"><i>▶</i>세션</span><span><i>💬</i>대화</span><span><i>🌐</i>브라우저</span></div>
+</div>
+<ul>
+  <li>모델 배지가 <b>자기 줄을 통째로</b> 가져 절대 안 잘림</li>
+  <li class="bad">항상 한 줄을 더 씀 — 안 B는 필요할 때만 두 줄</li>
+</ul>
+
+<h2>⋮ 시트 (공통)</h2>
+<p>세 안 모두 액션은 여기 들어갑니다. 중지는 실행 중일 때만 컨트롤 줄에 남깁니다.</p>
+<div class="sheet">
+  <div>⑂ 분기</div>
+  <div>⇄ 작업 인계</div>
+  <div>🤖 검토 모델 선택</div>
+  <div>▥ 협업 게시판에 추가</div>
+  <div>⇡ PR 생성</div>
+</div>
+
+<hr/>
+<h2>제안</h2>
+<p>
+<b>안 B</b>를 권합니다. "모델명은 잘리면 안 된다"를 만족하는 안은 B와 C뿐인데,
+C는 <b>항상</b> 한 줄을 더 쓰고 B는 <b>넘칠 때만</b> 씁니다.
+접기는 세 안 모두에서 삭제합니다 — 읽기 공간은 드로어 슬라이드가 이미 하고 있고,
+접기는 모델·권한 표시를 같이 숨겨서 손해가 더 큽니다.
+</p>
+<p>고르시면 그대로 구현하겠습니다. 다른 배치가 떠오르시면 그것도 시안으로 만들어 보여드리겠습니다.</p>
+
+</body>
+</html>

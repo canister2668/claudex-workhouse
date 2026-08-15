@@ -1,0 +1,9 @@
+{
+  "projects": [
+    {
+      "id": "claudex-workhouse",
+      "name": "Claudex Workhouse",
+      "path": "/srv/projects/claudex-workhouse"
+    }
+  ]
+}

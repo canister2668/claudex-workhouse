@@ -1,0 +1,106 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://claudex-workhouse.invalid/schemas/trusted-worker-package-metadata.schema.json",
+  "title": "Claudex Workhouse trusted Worker package metadata",
+  "description": "The release pipeline must populate this document from an independently trusted configuration. No production package digest or signing key is supplied by this repository.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "version",
+    "platform",
+    "architecture",
+    "format",
+    "artifact",
+    "manifest"
+  ],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "version": {
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+(?:-[0-9A-Za-z.-]+)?(?:\\+[0-9A-Za-z.-]+)?$"
+    },
+    "platform": { "enum": ["windows", "linux"] },
+    "architecture": { "enum": ["x64", "arm64"] },
+    "format": { "enum": ["zip", "tar.gz"] },
+    "artifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["url", "sha256", "size", "fileName", "entrypoint"],
+      "properties": {
+        "url": { "type": "string", "format": "uri", "pattern": "^https://" },
+        "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "size": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 268435456
+        },
+        "fileName": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+        },
+        "entrypoint": {
+          "type": "string",
+          "description": "Safe relative path to the current-user CLI after extraction."
+        },
+        "launcher": {
+          "type": "string",
+          "description": "Safe relative path to the Windows portable UI launcher."
+        }
+      }
+    },
+    "manifest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "url",
+        "signatureUrl",
+        "sha256",
+        "signatureAlgorithm",
+        "signingPublicKeySha256",
+        "signingPublicKeyPem"
+      ],
+      "properties": {
+        "url": { "type": "string", "format": "uri", "pattern": "^https://" },
+        "signatureUrl": { "type": "string", "format": "uri", "pattern": "^https://" },
+        "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "signatureAlgorithm": { "const": "rsa-sha256" },
+        "signingPublicKeySha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "signingPublicKeyPem": {
+          "type": "string",
+          "description": "RSA public key in SubjectPublicKeyInfo PEM format."
+        }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": { "platform": { "const": "windows" } },
+        "required": ["platform"]
+      },
+      "then": {
+        "properties": {
+          "architecture": { "const": "x64" },
+          "format": { "const": "zip" },
+          "artifact": { "required": ["launcher"] }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": { "platform": { "const": "linux" } },
+        "required": ["platform"]
+      },
+      "then": {
+        "properties": {
+          "format": { "const": "tar.gz" },
+          "artifact": { "not": { "required": ["launcher"] } }
+        }
+      }
+    }
+  ]
+}

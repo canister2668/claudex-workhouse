@@ -1,0 +1,46 @@
+services:
+  claudex-workhouse:
+    image: ghcr.io/example/claudex-workhouse:${CLAUDEX_WORKHOUSE_VERSION:-latest}
+    build:
+      context: .
+      args:
+        CLAUDEX_WORKHOUSE_COMMIT_SHA: ${CLAUDEX_WORKHOUSE_COMMIT_SHA:-unknown}
+    restart: unless-stopped
+    user: "10001:10001"
+    ports:
+      - "127.0.0.1:${CLAUDEX_WORKHOUSE_PORT:-3410}:3410"
+    environment:
+      CLAUDEX_WORKHOUSE_ROOT: /opt/claudex-workhouse
+      CLAUDEX_WORKHOUSE_HOST: 0.0.0.0
+      CLAUDEX_WORKHOUSE_PORT: 3410
+      CLAUDEX_WORKHOUSE_EXTERNAL_ORIGIN: ${CLAUDEX_WORKHOUSE_EXTERNAL_ORIGIN:-http://127.0.0.1:3410}
+      CLAUDEX_WORKHOUSE_AUTH_MODE: ${CLAUDEX_WORKHOUSE_AUTH_MODE:-local}
+      CLAUDEX_WORKHOUSE_TEAM_DOMAIN: ${CLAUDEX_WORKHOUSE_TEAM_DOMAIN:-}
+      CLAUDEX_WORKHOUSE_AUDIENCE: ${CLAUDEX_WORKHOUSE_AUDIENCE:-}
+      CLAUDEX_WORKHOUSE_ALLOWED_EMAIL: ${CLAUDEX_WORKHOUSE_ALLOWED_EMAIL:-admin@example.invalid}
+      CLAUDEX_WORKHOUSE_DISTRIBUTION_STATUS: ${CLAUDEX_WORKHOUSE_DISTRIBUTION_STATUS:-Official}
+      CLAUDEX_WORKHOUSE_DISTRIBUTOR: ${CLAUDEX_WORKHOUSE_DISTRIBUTOR:-}
+      CLAUDEX_WORKHOUSE_SOURCE_URL: ${CLAUDEX_WORKHOUSE_SOURCE_URL:-}
+    volumes:
+      - claudex-workhouse-config:/opt/claudex-workhouse/config
+      - claudex-workhouse-data:/opt/claudex-workhouse/data
+      - claudex-workhouse-runtime:/opt/claudex-workhouse/runtime
+      - claudex-workhouse-workspaces:/opt/claudex-workhouse/workspaces
+    tmpfs:
+      - /opt/claudex-workhouse/run:mode=700,uid=10001,gid=10001
+      - /tmp:mode=1777
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  claudex-workhouse-config:
+  claudex-workhouse-data:
+  claudex-workhouse-runtime:
+  claudex-workhouse-workspaces:

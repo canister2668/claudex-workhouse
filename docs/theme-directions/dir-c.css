@@ -1,0 +1,78 @@
+/* Direction C — full redesign. New spacing scale, typography and colour treatment
+   applied across every skin, so the skins become variations of one system rather
+   than six unrelated looks. */
+
+:root {
+  --radius-card: 18px;
+  --radius-card-inner: 12px;
+  --card-padding: 16px 18px;
+  --card-gap: 16px;
+  --card-max-width: 88%;
+  --card-label-size: .68rem;
+  --card-label-spacing: .06em;
+  --card-label-transform: uppercase;
+}
+
+/* One quiet page, one raised reading surface. */
+:root[data-theme="light"] {
+  --bg: #eef1ee;
+  --surface: #ffffff;
+  --line: #e2e8e3;
+  --line-strong: #c4d0c7;
+  --term-bg: #f3f6f3;
+  --term-fg: #22302a;
+  --syntax-comment: #7b8a80; --syntax-string: #b2551f; --syntax-number: #3f7d3f;
+  --syntax-keyword: #7c3aad; --syntax-literal: #b5501f; --syntax-type: #12736a;
+  --syntax-function: #2a5fbf; --syntax-property: #2a6da8; --syntax-operator: #b03470;
+  --syntax-line-number: #9aa8a0; --syntax-caret: #1b241e;
+  --syntax-match-bg: #1b241e1a; --syntax-match-outline: #1b241e66; --syntax-match-fg: #1b241e;
+}
+
+/* The message body carries the weight; metadata recedes to a caption. */
+.bubble > .bubble-card-head {
+  margin: 0 0 10px;
+  padding: 0;
+  min-height: 0;
+  background: transparent;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  box-shadow: none;
+}
+.bubble > .bubble-card-head > span {
+  color: var(--card-role-color, var(--muted));
+  font-size: .64rem;
+  font-weight: 800;
+  letter-spacing: .1em;
+}
+.bubble-card-time { font-size: .6rem; opacity: .65 }
+.bubble p, .bubble .markdown-body { font-size: .94rem; line-height: 1.68 }
+
+/* Role reads as a soft wash plus a single hairline, in every skin. */
+.bubble {
+  border-width: 1px;
+  border-left-width: 1px;
+  border-color: color-mix(in srgb, var(--card-role-color, var(--line)) 22%, var(--line));
+  box-shadow: 0 1px 2px rgba(16,26,20,.04), 0 10px 24px -18px rgba(16,26,20,.22);
+}
+.bubble.agent { background: color-mix(in srgb, var(--cyan) 5%, var(--surface)) }
+.bubble.user { background: color-mix(in srgb, var(--accent) 10%, var(--surface)) }
+:root[data-theme="dark"] .bubble { box-shadow: 0 1px 0 rgba(255,255,255,.03), 0 14px 30px -20px rgba(0,0,0,.75) }
+:root[data-theme="dark"] .bubble.agent { background: color-mix(in srgb, var(--cyan) 7%, var(--surface)) }
+:root[data-theme="dark"] .bubble.user { background: color-mix(in srgb, var(--accent) 13%, var(--surface)) }
+
+/* Code sits inside the card as an inset panel, not a foreign slab. */
+.bubble .markdown-body pre {
+  border-radius: var(--radius-card-inner);
+  border: 1px solid color-mix(in srgb, var(--line-strong) 55%, transparent);
+  background: var(--term-bg);
+  color: var(--term-fg);
+}
+
+/* Skins become density and edge variations of the same system. */
+:root[data-skin="elevated"] { --card-padding: 18px 20px; --card-gap: 20px; --radius-card: 20px }
+:root[data-skin="outline"] .bubble { background: transparent; box-shadow: inset 3px 0 0 -1px var(--card-role-color, var(--line-strong)) }
+:root[data-skin="compact"] { --card-padding: 9px 12px; --card-gap: 6px; --radius-card: 12px }
+:root[data-skin="compact"] .bubble > .bubble-card-head { margin-bottom: 5px }
+:root[data-skin="terminal"] { --radius-card: 6px; --card-font: var(--font-mono) }
+:root[data-skin="flat"] { --card-gap: 6px; --radius-card: 14px }
+:root[data-skin="flat"] .bubble { border-bottom: 1px solid color-mix(in srgb, var(--card-role-color, var(--line)) 22%, var(--line)) }

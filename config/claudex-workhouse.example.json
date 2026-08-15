@@ -1,0 +1,23 @@
+{
+  "host": "127.0.0.1",
+  "port": 3410,
+  "externalOrigin": "http://127.0.0.1:3410",
+  "allowedEmail": "admin@example.com",
+  "teamDomain": "https://example.cloudflareaccess.com",
+  "audience": "replace-with-access-audience",
+  "authMode": "local",
+  "promptMaxLength": 50000,
+  "commandTimeoutMs": 60000,
+  "commandOutputLimit": 1048576,
+  "claudeBinary": "claude",
+  "workspaceRoots": [
+    {
+      "path": "/srv/projects",
+      "displayName": "Projects",
+      "allowCreate": true,
+      "allowRegister": true,
+      "allowClone": true,
+      "allowDelete": false
+    }
+  ]
+}
