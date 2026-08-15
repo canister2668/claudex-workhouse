@@ -98,7 +98,7 @@ jobs:
             if (url.protocol !== "https:" || url.username || url.password || url.search || url.hash) {
               throw new Error("PUBLIC_INSTALLER_ORIGIN must be a trusted HTTPS URL without credentials, query, or fragment.");
             }
-            process.stdout.write(url.href.replace(/\\/+$/, ""));
+            process.stdout.write(url.href.replace(/\/+$/, ""));
           ' "$installer_origin")"
           asset_base_url="https://github.com/$GITHUB_REPOSITORY/releases/download/$GITHUB_REF_NAME"
           installer_connect_origin="https://github.com"
