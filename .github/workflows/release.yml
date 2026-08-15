@@ -690,7 +690,11 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
-      contents: read
+      # GitHub shows a draft release only to a token with push access, and this
+      # job re-reads the draft rather than trusting a value handed down from
+      # prepare-release. With `contents: read` the revalidation cannot see the
+      # draft it is meant to check and refuses to stage.
+      contents: write
       pages: write
       id-token: write
     environment:

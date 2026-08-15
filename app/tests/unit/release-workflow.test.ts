@@ -25,6 +25,20 @@ describe("release workflow Windows exclusion",()=>{
   });
 });
 
+describe("release job permission contract",()=>{
+  it("gives every job that re-reads the draft release the access to see one",()=>{
+    // A draft release is invisible to a token with only `contents: read`, so a
+    // job that revalidates the draft silently sees nothing and refuses to
+    // proceed. This cost a release run once.
+    const jobs=workflow.split(/\n  (?=[a-z][a-z-]*:\n)/);
+    for(const name of["deploy-installer-stage","prepare-release","publish-release","finalize-stable"]){
+      const job=jobs.find(value=>value.startsWith(`${name}:`))??jobs.find(value=>value.includes(`\n  ${name}:`));
+      expect(job,`${name} job is missing`).toBeTruthy();
+      expect(job,`${name} must be able to read a draft release`).toContain("contents: write");
+    }
+  });
+});
+
 describe("npm distribution contract",()=>{
   it("publishes the release's own tarball, after promotion, only against the signed digest",()=>{
     for(const value of[
