@@ -117,6 +117,7 @@ function fixture(){
   };
   const windowsServer=path.join(directory,"claudex-workhouse-server-windows-x64.exe"),pe=Buffer.alloc(256);pe.write("MZ");pe.writeUInt32LE(64,0x3c);Buffer.from([0x50,0x45,0,0]).copy(pe,64);fs.writeFileSync(windowsServer,pe);
   const windowsPortable=createWindowsPortable(directory);
+  const nodePackage=path.join(directory,"claudex-workhouse-1.0.0.tgz");fs.writeFileSync(nodePackage,Buffer.alloc(4096,7));
   const environment={
     CLAUDEX_WORKHOUSE_RELEASE_VERSION:"1.0.0",
     CLAUDEX_WORKHOUSE_RELEASE_SEQUENCE:"7",
@@ -131,6 +132,7 @@ function fixture(){
     CLAUDEX_WORKHOUSE_WINDOWS_X64_PACKAGE:files.windows,
     CLAUDEX_WORKHOUSE_LINUX_X64_PACKAGE:files.linuxX64,
     CLAUDEX_WORKHOUSE_LINUX_ARM64_PACKAGE:files.linuxArm64
+    ,CLAUDEX_WORKHOUSE_NODE_PACKAGE:nodePackage
     ,CLAUDEX_WORKHOUSE_WINDOWS_SERVER_EXE:windowsServer
     ,CLAUDEX_WORKHOUSE_WINDOWS_SERVER_PORTABLE:windowsPortable
   };
@@ -195,6 +197,29 @@ describe("release manifest publishing script",()=>{
       now:new Date("2026-07-27T12:01:00.000Z")
     });
     expect(verified.manifestSha256).toBe(result.manifestSha256);
+  });
+
+  it("binds the npm tarball so a registry download can be checked against the signature",()=>{
+    const value=fixture(),result=createReleaseManifest(value.environment);
+    expect(result.manifest.nodePackage).toMatchObject({
+      registry:"https://registry.npmjs.org",
+      name:"claudex-workhouse",
+      format:"tgz",
+      filename:"claudex-workhouse-1.0.0.tgz",
+      sha256:sha256(fs.readFileSync(value.environment.CLAUDEX_WORKHOUSE_NODE_PACKAGE))
+    });
+    expect(result.manifest.nodePackage.url).toBe(`${value.environment.CLAUDEX_WORKHOUSE_RELEASE_ASSET_BASE_URL}/claudex-workhouse-1.0.0.tgz`);
+    // A tarball named for another version would let a release publish bytes its
+    // own manifest does not describe.
+    const renamed=path.join(path.dirname(value.environment.CLAUDEX_WORKHOUSE_NODE_PACKAGE),"claudex-workhouse-9.9.9.tgz");
+    fs.renameSync(value.environment.CLAUDEX_WORKHOUSE_NODE_PACKAGE,renamed);
+    expect(()=>createReleaseManifest({...value.environment,CLAUDEX_WORKHOUSE_NODE_PACKAGE:renamed})).toThrow(/official filename/);
+  });
+
+  it("omits the npm tarball when a release supplies none",()=>{
+    const value=fixture();
+    const {CLAUDEX_WORKHOUSE_NODE_PACKAGE:_absent,...environment}=value.environment;
+    expect(createReleaseManifest(environment).manifest.nodePackage).toBeUndefined();
   });
 
   it("refuses a private key that does not match the pinned key ring",()=>{

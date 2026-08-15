@@ -86,6 +86,15 @@ const workerArtifactSchema = z.object({
   entrypoint: safeRelativePathSchema,
   launcher: safeRelativePathSchema.optional()
 }).strict();
+const nodePackageArtifactSchema=z.object({
+  registry:z.literal("https://registry.npmjs.org"),
+  name:z.literal("claudex-workhouse"),
+  format:z.literal("tgz"),
+  filename:z.string().regex(/^claudex-workhouse-\d+\.\d+\.\d+\.tgz$/),
+  url:strictHttpsUrl("Node package URL"),
+  size:z.number().int().positive().max(2*1024*1024*1024),
+  sha256:z.string().regex(SHA256)
+}).strict();
 const windowsPortableArtifactSchema=z.object({
   platform:z.literal("windows"),
   architecture:z.literal("x64"),
@@ -129,6 +138,9 @@ const releaseManifestSchema = z.object({
     platforms: z.array(z.enum(["linux/amd64", "linux/arm64"])).length(2),
     minimumUpdaterProtocolVersion:updaterProtocolSchema.optional()
   }).strict(),
+  // The npm tarball a release also publishes as an asset, so an installer can
+  // verify the bytes it fetched against this signed manifest.
+  nodePackage:nodePackageArtifactSchema.optional(),
   windowsServer:windowsServerArtifactSchema.optional(),
   windowsPortable:windowsPortableArtifactSchema.optional(),
   workers: z.object({
@@ -157,6 +169,9 @@ const releaseManifestSchema = z.object({
   // development and a release ships none of them.
   if(manifest.schemaVersion<2&&manifest.windowsServer){
     context.addIssue({code:z.ZodIssueCode.custom,path:["windowsServer"],message:"is supported only by schemaVersion 2 and newer"});
+  }
+  if(manifest.schemaVersion!==3&&manifest.nodePackage){
+    context.addIssue({code:z.ZodIssueCode.custom,path:["nodePackage"],message:"is supported only by schemaVersion 3"});
   }
   if(manifest.schemaVersion!==3&&manifest.windowsPortable){
     context.addIssue({code:z.ZodIssueCode.custom,path:["windowsPortable"],message:"is supported only by schemaVersion 3"});

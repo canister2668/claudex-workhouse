@@ -338,6 +338,22 @@ jobs:
           pattern: worker-*
           path: release-assets
           merge-multiple: true
+      - name: Build the application for the Node distribution
+        run: pnpm run build
+        working-directory: app
+      - name: Package the Node server distribution
+        id: node-package
+        run: |
+          set -eu
+          node app/scripts/pack-node-package.mjs --output "$GITHUB_WORKSPACE/release-assets" | tee node-package.txt
+          filename="$(sed -n 's/^filename=//p' node-package.txt)"
+          test -n "$filename"
+          rm -f node-package.txt
+          printf 'filename=%s\n' "$filename" >> "$GITHUB_OUTPUT"
+      - name: Attest the Node server distribution
+        uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
+        with:
+          subject-path: release-assets/${{ steps.node-package.outputs.filename }}
       - name: Package the Linux and NAS quick-start files
         run: |
           set -eu
@@ -453,6 +469,7 @@ jobs:
           CLAUDEX_WORKHOUSE_IMAGE_DIGEST: ${{ needs.image.outputs.digest }}
           CLAUDEX_WORKHOUSE_LINUX_X64_PACKAGE: ${{ github.workspace }}/release-assets/claudex-workhouse-worker-linux-x64.tar.gz
           CLAUDEX_WORKHOUSE_LINUX_ARM64_PACKAGE: ${{ github.workspace }}/release-assets/claudex-workhouse-worker-linux-arm64.tar.gz
+          CLAUDEX_WORKHOUSE_NODE_PACKAGE: ${{ github.workspace }}/release-assets/${{ steps.node-package.outputs.filename }}
           CLAUDEX_WORKHOUSE_RELEASE_OUTPUT_DIR: ${{ github.workspace }}/release-assets
         run: |
           set -eu
@@ -806,6 +823,7 @@ jobs:
             release-manifest.json \
             release-manifest.json.sig \
             "claudex-workhouse-installer-site-${{ needs.preflight.outputs.version }}.tar.gz" \
+            "claudex-workhouse-${{ needs.preflight.outputs.version }}.tgz" \
             claudex-workhouse-worker-linux-x64.tar.gz \
             claudex-workhouse-worker-linux-x64.tar.gz.spdx.json \
             claudex-workhouse-worker-linux-arm64.tar.gz \
@@ -983,3 +1001,75 @@ jobs:
             -H 'X-GitHub-Api-Version: 2026-03-10' \
             "repos/$GITHUB_REPOSITORY/releases/$release_id" \
             -f make_latest=true >/dev/null
+
+  # npm is a convenience channel, not the trust root: the tarball published here
+  # is byte-for-byte the release asset, and its digest is already bound into the
+  # signed manifest. The job runs only after the release is fully promoted, and
+  # it is skipped rather than failed when no registry token is configured, so a
+  # release does not depend on the registry being set up.
+  publish-npm:
+    needs: [preflight, prepare-release, finalize-stable]
+    runs-on: ubuntu-24.04
+    environment: release
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+      - name: Report a missing registry token instead of failing the release
+        id: token
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          set -eu
+          if [ -z "${NPM_TOKEN:-}" ]; then
+            printf '%s\n' 'No NPM_TOKEN is configured, so the npm publish is skipped.' >> "$GITHUB_STEP_SUMMARY"
+            printf 'configured=false\n' >> "$GITHUB_OUTPUT"
+          else
+            printf 'configured=true\n' >> "$GITHUB_OUTPUT"
+          fi
+      - name: Download the published tarball and its signed manifest
+        if: steps.token.outputs.configured == 'true'
+        env:
+          ASSET_BASE_URL: ${{ needs.preflight.outputs.asset-base-url }}
+          VERSION: ${{ needs.preflight.outputs.version }}
+        run: |
+          set -eu
+          mkdir -p npm-publish
+          for asset in "claudex-workhouse-$VERSION.tgz" release-manifest.json release-manifest.json.sig; do
+            curl \
+              --fail --silent --show-error --location \
+              --proto '=https' --proto-redir '=https' \
+              "$ASSET_BASE_URL/$asset" \
+              --output "npm-publish/$asset"
+          done
+      - name: Verify the tarball against the signed release manifest
+        if: steps.token.outputs.configured == 'true'
+        env:
+          VERSION: ${{ needs.preflight.outputs.version }}
+        run: |
+          set -eu
+          expected="$(node -e '
+            const fs = require("node:fs");
+            const manifest = JSON.parse(fs.readFileSync("npm-publish/release-manifest.json", "utf8"));
+            const record = manifest.nodePackage;
+            if (!record) { console.error("The signed manifest binds no Node package."); process.exit(1); }
+            if (record.filename !== `claudex-workhouse-${process.env.VERSION}.tgz`) { console.error("The manifest binds another filename."); process.exit(1); }
+            process.stdout.write(record.sha256);
+          ')"
+          actual="$(sha256sum "npm-publish/claudex-workhouse-$VERSION.tgz" | cut -d" " -f1)"
+          if [ "$expected" != "$actual" ]; then
+            printf '%s\n' "The published tarball does not match the signed manifest." >&2
+            exit 1
+          fi
+      - name: Publish to npm with provenance
+        if: steps.token.outputs.configured == 'true'
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          VERSION: ${{ needs.preflight.outputs.version }}
+        run: npm publish "npm-publish/claudex-workhouse-$VERSION.tgz" --provenance --access public

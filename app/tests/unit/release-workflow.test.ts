@@ -25,6 +25,28 @@ describe("release workflow Windows exclusion",()=>{
   });
 });
 
+describe("npm distribution contract",()=>{
+  it("publishes the release's own tarball, after promotion, only against the signed digest",()=>{
+    for(const value of[
+      "node app/scripts/pack-node-package.mjs --output",
+      "CLAUDEX_WORKHOUSE_NODE_PACKAGE:",
+      "publish-npm:",
+      "needs: [preflight, prepare-release, finalize-stable]",
+      "registry-url: https://registry.npmjs.org",
+      "--provenance --access public"
+    ])expect(workflow).toContain(value);
+    // The registry is a convenience channel, so a missing token skips the job
+    // rather than failing a release that is already published.
+    expect(workflow).toContain("No NPM_TOKEN is configured, so the npm publish is skipped.");
+    expect(workflow).toContain("steps.token.outputs.configured == 'true'");
+    // Publishing whatever the build produced would defeat the signature: the
+    // job downloads the published asset and checks it against the manifest.
+    expect(workflow).toContain("The published tarball does not match the signed manifest.");
+    expect(workflow).toContain("The signed manifest binds no Node package.");
+    expect(workflow).not.toMatch(/npm publish[^\n]*release-assets/);
+  });
+});
+
 describe("unsigned Windows test build workflow contract",()=>{
   it("creates a manually downloadable EXE and portable ZIP without certificate secrets",()=>{
     for(const value of["workflow_dispatch:","runs-on: windows-2022","SignatureStatus]::NotSigned","Start-MpScan","claudex-workhouse-server-windows-x64-portable.zip","test-windows-server-package.ps1","StatusGuideScreenshot","installed-status-guide.ko.png","Upload unsigned files to a private draft test release"])expect(windowsTestWorkflow).toContain(value);

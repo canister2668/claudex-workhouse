@@ -149,9 +149,10 @@ describe("release promotion guard", () => {
     for (const name of expectedReleaseAssetNames("1.1.0")) {
       fs.writeFileSync(path.join(directory, name), name);
     }
-    // Eight: the Windows EXE, portable ZIP, their checksums and SBOM, and the
-    // Windows Worker left the published set while those targets are in development.
-    expect(createReleaseAssetInventory(directory, "1.1.0")).toHaveLength(8);
+    // Nine: the Windows EXE, portable ZIP, their checksums and SBOM, and the
+    // Windows Worker left the published set while those targets are in
+    // development, and the npm tarball joined it.
+    expect(createReleaseAssetInventory(directory, "1.1.0")).toHaveLength(9);
     fs.writeFileSync(path.join(directory, "unexpected.exe"), "x");
     expect(() => createReleaseAssetInventory(directory, "1.1.0")).toThrow(/exactly/);
   });

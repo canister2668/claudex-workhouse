@@ -298,6 +298,9 @@ export function expectedReleaseAssetNames(version: string): readonly string[] {
   return [
     "SHA256SUMS",
     `claudex-workhouse-installer-site-${version}.tar.gz`,
+    // The npm tarball ships as a release asset too, so the bytes the registry
+    // serves can be checked against the signed manifest.
+    `claudex-workhouse-${version}.tgz`,
     "claudex-workhouse-worker-linux-arm64.tar.gz",
     "claudex-workhouse-worker-linux-arm64.tar.gz.spdx.json",
     "claudex-workhouse-worker-linux-x64.tar.gz",

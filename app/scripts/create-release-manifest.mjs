@@ -86,6 +86,18 @@ function verifyPortableExecutable(file){
     if(peOffset<64||peOffset>16*1024*1024||fs.readSync(fd,signature,0,4,peOffset)!==4||!signature.equals(Buffer.from([0x50,0x45,0,0])))throw new Error("Windows server artifact has an invalid PE signature.");
   }finally{fs.closeSync(fd);}
 }
+// The npm package is the same server the image runs, staged from this public
+// tree and packed by `app/scripts/pack-node-package.mjs`. Binding it here is
+// what lets an installer check the tarball it downloaded against a signature
+// rather than trusting the registry alone.
+function nodePackageRecord(environment,baseUrl,version){
+  if(!environment.CLAUDEX_WORKHOUSE_NODE_PACKAGE?.trim())return null;
+  const artifact=regularFile(required(environment,"CLAUDEX_WORKHOUSE_NODE_PACKAGE"),"CLAUDEX_WORKHOUSE_NODE_PACKAGE");
+  const filename=`claudex-workhouse-${version}.tgz`;
+  if(path.basename(artifact.path)!==filename)throw new Error(`CLAUDEX_WORKHOUSE_NODE_PACKAGE must use the official filename ${filename}.`);
+  return{registry:"https://registry.npmjs.org",name:"claudex-workhouse",format:"tgz",filename,url:`${baseUrl}/${filename}`,size:artifact.size,sha256:sha256File(artifact.path)};
+}
+
 // Windows targets are built but not released while their acceptance run is
 // outstanding, so a release simply omits them. Supplying the variable puts
 // the record back with every check it already had.
@@ -439,6 +451,7 @@ export function createReleaseManifest(environment=process.env){
       platforms:["linux/amd64","linux/arm64"],
       minimumUpdaterProtocolVersion:UPDATER_PROTOCOL_VERSION
     },
+    ...(nodePackageRecord(environment,assetBaseUrl,version)?{nodePackage:nodePackageRecord(environment,assetBaseUrl,version)}:{}),
     ...(windowsServerRecord(environment,assetBaseUrl)?{windowsServer:windowsServerRecord(environment,assetBaseUrl)}:{}),
     ...(windowsPortableRecord(environment,assetBaseUrl,version)?{windowsPortable:windowsPortableRecord(environment,assetBaseUrl,version)}:{}),
     workers:Object.fromEntries(
