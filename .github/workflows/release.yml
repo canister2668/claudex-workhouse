@@ -61,13 +61,13 @@ jobs:
             printf '%s\n' 'deploy/release-key-ring.json must pin the production public release key.' >&2
             exit 1
           }
-          gh api \
-            -H 'X-GitHub-Api-Version: 2026-03-10' \
-            "repos/$GITHUB_REPOSITORY/immutable-releases" \
-            --jq 'select(.enabled == true) | .enabled' | grep -qx true || {
-              printf '%s\n' 'GitHub immutable releases must be enabled before publishing.' >&2
-              exit 1
-            }
+          # Repository release immutability is verified on the published release
+          # itself, not probed here. GET /repos/*/immutable-releases needs the
+          # Administration scope, which GITHUB_TOKEN's permissions vocabulary
+          # does not offer, so this gate could only ever report its own missing
+          # scope as a disabled setting. Checking the setting before publishing
+          # also proves nothing about the release: the setting can change in the
+          # window between this job and publish-release.
           resume_draft=false
           if release_json="$(gh release view "$GITHUB_REF_NAME" \
             --repo "$GITHUB_REPOSITORY" \
@@ -923,6 +923,23 @@ jobs:
             --repo "$GITHUB_REPOSITORY" \
             --json isDraft \
             --jq 'select(.isDraft == false) | .isDraft' | grep -qx false
+      - name: Verify the published release is immutable
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -eu
+          # The release object carries immutability directly and is readable
+          # with contents access, so this proves the published artifact is
+          # frozen rather than that a setting looked right beforehand.
+          immutable="$(gh api \
+            -H 'X-GitHub-Api-Version: 2026-03-10' \
+            "repos/$GITHUB_REPOSITORY/releases/tags/$GITHUB_REF_NAME" \
+            --jq '.immutable')"
+          if [ "$immutable" != true ]; then
+            printf '%s\n' "Published release $GITHUB_REF_NAME is not immutable (immutable=$immutable). Enable release immutability in the repository settings." >&2
+            exit 1
+          fi
+          printf '%s\n' "Published release $GITHUB_REF_NAME is immutable."
       - name: Re-download and verify every public release asset
         env:
           ASSET_BASE_URL: ${{ needs.preflight.outputs.asset-base-url }}

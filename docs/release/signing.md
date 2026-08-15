@@ -21,7 +21,11 @@ artifact에 포함하지 않습니다. 보호된 CI 환경 또는 별도 서명
 
 중간 단계가 실패하면 기존 stable manifest를 변경하지 않습니다.
 동일 버전 자산 덮어쓰기와 서명된 tag 재사용을 허용하지 않습니다.
-저장소의 **Settings → Releases → Enable release immutability**가 꺼져
-있으면 릴리스 workflow는 게시를 시작하지 않습니다. 채널 단위
+저장소의 **Settings → Releases → Enable release immutability**를 켠 상태로
+유지해야 합니다. workflow는 이 설정을 미리 조회하지 않고, 게시된 릴리스
+객체의 `immutable` 값을 확인해 실제로 고정되었는지 검증합니다. 설정을
+조회하려면 GITHUB_TOKEN이 가질 수 없는 Administration 권한이 필요하고,
+게시 전에 확인한 설정은 게시 시점의 상태를 보장하지도 않기 때문입니다.
+설정이 꺼진 채 게시되면 이 검증에서 실패합니다. 채널 단위
 concurrency와 직전 서명 manifest의 version·sequence 검증으로 느린
 구버전 workflow가 stable을 되돌리지 못하게 합니다.
