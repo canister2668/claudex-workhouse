@@ -173,6 +173,9 @@ export function assertPromotionState(input: PromotionGuardInput): PromotionGuard
   const previous = validState(input.expectedPrevious, "Expected previous");
   const next = validState(input.next, "Next");
   const live = validState(input.live, "Live");
+  // A promotion without a next state has nothing to guard, and reading through
+  // it would have thrown a less useful error further down.
+  if (next === null) throw new Error("Next release state is required.");
   stableVersionParts(next.version);
   if (input.currentTag !== `v${next.version}`) {
     throw new Error("Release tag does not exactly match the next stable version.");
@@ -492,7 +495,9 @@ async function fetchStableRelease(input: {
     manifestUrl: input.manifestUrl,
     signatureUrl: input.signatureUrl,
     keyRing,
-    policy,
+    // `policy` lives on the input; the shorthand read an identifier that does
+    // not exist in this scope and would have thrown at runtime.
+    policy: input.policy,
     now: new Date()
   });
 }

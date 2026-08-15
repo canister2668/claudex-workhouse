@@ -109,8 +109,11 @@ if (verified.manifest.server.digest !== expectedImageDigest) {
   throw new Error("Signed manifest image digest does not match the built multi-architecture image.");
 }
 
-for (const key of workerKeys) {
-  const artifact = verified.manifest.workers[key];
+// A release that ships no Windows Worker carries no record for it, so the
+// absent ones are skipped rather than demanded.
+const presentWorkerKeys = workerKeys.filter(key => verified.manifest.workers[key]);
+for (const key of presentWorkerKeys) {
+  const artifact = verified.manifest.workers[key]!;
   if (artifact.url !== expectedUrl(assetBaseUrl, artifact.filename)) {
     throw new Error(`Signed ${key} artifact URL does not match the immutable release location.`);
   }
@@ -124,8 +127,9 @@ for (const key of workerKeys) {
   }
 }
 const windowsServer=verified.manifest.windowsServer;
-if(verified.manifest.schemaVersion>=2){
-  if(!windowsServer)throw new Error("Signed release manifest does not contain the Windows server EXE.");
+// Windows targets are in development and a release ships none of them, so the
+// records are optional. When one is present it is checked exactly as before.
+if(windowsServer){
   if(windowsServer.url!==expectedUrl(assetBaseUrl,windowsServer.filename))throw new Error("Signed Windows server artifact URL does not match the immutable release location.");
   const windowsServerFile=path.join(directory,windowsServer.filename),windowsServerStatus=fs.lstatSync(windowsServerFile);
   if(!windowsServerStatus.isFile()||windowsServerStatus.size!==windowsServer.size)throw new Error("Windows server EXE size does not match the signed manifest.");
@@ -146,6 +150,15 @@ if(verified.manifest.schemaVersion>=2){
   }
   verifySha256Sidecar(directory,portableName,portableSha256);
 }
+// The npm tarball is published as an asset, so the bytes the registry will
+// serve are checked against the signature here like every other artifact.
+const nodePackage=verified.manifest.nodePackage;
+if(nodePackage){
+  if(nodePackage.url!==expectedUrl(assetBaseUrl,nodePackage.filename))throw new Error("Signed Node package URL does not match the immutable release location.");
+  const nodeFile=path.join(directory,nodePackage.filename),nodeStatus=fs.lstatSync(nodeFile);
+  if(!nodeStatus.isFile()||nodeStatus.size!==nodePackage.size)throw new Error("Node package size does not match the signed manifest.");
+  if(fileSha256(nodeFile)!==nodePackage.sha256)throw new Error("Node package SHA-256 does not match the signed manifest.");
+}
 verifyUnifiedChecksums(directory);
 
 process.stdout.write(`${JSON.stringify({
@@ -154,7 +167,8 @@ process.stdout.write(`${JSON.stringify({
   releaseSequence: verified.manifest.releaseSequence,
   manifestSha256: verified.manifestSha256,
   imageDigest: verified.manifest.server.digest,
-  workers: workerKeys,
+  workers: presentWorkerKeys,
   windowsServer:windowsServer?.filename??null,
-  windowsPortable:verified.manifest.windowsPortable?.filename??(windowsServer?"claudex-workhouse-server-windows-x64-portable.zip":null)
+  windowsPortable:verified.manifest.windowsPortable?.filename??(windowsServer?"claudex-workhouse-server-windows-x64-portable.zip":null),
+  nodePackage:nodePackage?.filename??null
 })}\n`);

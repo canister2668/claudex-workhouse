@@ -1,0 +1,12 @@
+// The release scripts were the one part of the server-side TypeScript nothing
+// typechecked: `tsconfig.server.json` is pinned to `rootDir: src/server` so it
+// cannot reach them, and they have no build step of their own. That gap let a
+// release fail thirteen minutes in on a property read that had become optional.
+{
+  "extends": "./tsconfig.server.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "rootDir": "."
+  },
+  "include": ["scripts/**/*.ts", "scripts/**/*.mts", "src/server/**/*.ts", "src/server/**/*.mts"]
+}
