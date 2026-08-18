@@ -53,6 +53,27 @@ describe("application update contract",()=>{
     expect(evaluateApplicationUpdate(installed({version:"1.1.0"}),release())).toMatchObject({state:"failed",reason:"installed-artifact-mismatch"});
     expect(evaluateApplicationUpdate(installed({installMethod:"source-checkout"}),release())).toMatchObject({state:"unconfigured",reason:"source-checkout-not-updatable"});
   });
+  it("binds an npm installation to the signed node package", ()=>{
+    const node=(overrides:Record<string,unknown>={})=>installed({installMethod:"node-package",imageDigest:null,packageSha256:"d".repeat(64),...overrides});
+    const withPackage=(record:Record<string,unknown>|undefined)=>{
+      const value=release();
+      return{...value,manifest:{...value.manifest,...(record?{nodePackage:record}:{})}} as ReturnType<typeof release>;
+    };
+    const record={registry:"https://registry.npmjs.org",name:"claudex-workhouse",format:"tgz",filename:"claudex-workhouse-1.1.0.tgz",url:"https://example.test/claudex-workhouse-1.1.0.tgz",size:10,sha256:"e".repeat(64),minimumUpdaterProtocolVersion:1};
+    // A newer stable is offered whatever the platform, because one tarball
+    // serves every platform and architecture.
+    expect(evaluateApplicationUpdate(node(),withPackage(record)).state).toBe("available");
+    expect(evaluateApplicationUpdate(node({platform:"win32",architecture:"arm64"}),withPackage(record)).state).toBe("available");
+    // At the same version the tarball digest decides, exactly as the image
+    // digest does for a container.
+    expect(evaluateApplicationUpdate(node({version:"1.1.0",packageSha256:"e".repeat(64)}),withPackage(record)).state).toBe("up-to-date");
+    expect(evaluateApplicationUpdate(node({version:"1.1.0"}),withPackage(record))).toMatchObject({state:"failed",reason:"installed-artifact-mismatch"});
+    // A release published before the record carried its protocol floor, or one
+    // without the record at all, states no contract and is refused.
+    const {minimumUpdaterProtocolVersion:_omitted,...legacy}=record;
+    expect(evaluateApplicationUpdate(node(),withPackage(legacy))).toMatchObject({state:"unconfigured",reason:"manifest-updater-contract-missing"});
+    expect(evaluateApplicationUpdate(node(),withPackage(undefined))).toMatchObject({state:"unconfigured",reason:"manifest-updater-contract-missing"});
+  });
   it("coalesces checks and reports active work as a blocker",async()=>{
     const store=new Store(),fetchRelease=vi.fn(async()=>release()),coordinator=new ApplicationUpdateCoordinator({current:installed(),release:fetchRelease,store,blockers:async()=>[{kind:"provider-task",id:"task",status:"running"}],snapshot:async()=>({id:"snapshot",directory:"/snapshot"}),writeRequest:async()=>"/request"});
     const [left,right]=await Promise.all([coordinator.check(),coordinator.check()]);

@@ -93,7 +93,11 @@ const nodePackageArtifactSchema=z.object({
   filename:z.string().regex(/^claudex-workhouse-\d+\.\d+\.\d+\.tgz$/),
   url:strictHttpsUrl("Node package URL"),
   size:z.number().int().positive().max(2*1024*1024*1024),
-  sha256:z.string().regex(SHA256)
+  sha256:z.string().regex(SHA256),
+  // Optional so a manifest published before the npm distribution became
+  // updatable still parses. The updater refuses the target when it is absent
+  // rather than guessing that an older contract is compatible.
+  minimumUpdaterProtocolVersion:updaterProtocolSchema.optional()
 }).strict();
 const windowsPortableArtifactSchema=z.object({
   platform:z.literal("windows"),

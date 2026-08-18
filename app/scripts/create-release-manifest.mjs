@@ -95,7 +95,7 @@ function nodePackageRecord(environment,baseUrl,version){
   const artifact=regularFile(required(environment,"CLAUDEX_WORKHOUSE_NODE_PACKAGE"),"CLAUDEX_WORKHOUSE_NODE_PACKAGE");
   const filename=`claudex-workhouse-${version}.tgz`;
   if(path.basename(artifact.path)!==filename)throw new Error(`CLAUDEX_WORKHOUSE_NODE_PACKAGE must use the official filename ${filename}.`);
-  return{registry:"https://registry.npmjs.org",name:"claudex-workhouse",format:"tgz",filename,url:`${baseUrl}/${filename}`,size:artifact.size,sha256:sha256File(artifact.path)};
+  return{registry:"https://registry.npmjs.org",name:"claudex-workhouse",format:"tgz",filename,url:`${baseUrl}/${filename}`,size:artifact.size,sha256:sha256File(artifact.path),minimumUpdaterProtocolVersion:UPDATER_PROTOCOL_VERSION};
 }
 
 // Windows targets are built but not released while their acceptance run is

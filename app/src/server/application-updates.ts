@@ -8,7 +8,7 @@ const SHA256=/^[a-f0-9]{64}$/;
 const IMAGE_DIGEST=/^sha256:[a-f0-9]{64}$/;
 
 export type ApplicationUpdateState="unconfigured"|"checking"|"up-to-date"|"available"|"blocked-active-tasks"|"staging"|"applying"|"verifying"|"completed"|"rollback-running"|"rolled-back"|"failed";
-export type ApplicationInstallMethod="source-checkout"|"docker-compose"|"windows-portable"|"unknown";
+export type ApplicationInstallMethod="source-checkout"|"docker-compose"|"windows-portable"|"node-package"|"unknown";
 
 export interface ApplicationInstallMetadata{
   readonly schemaVersion:1;
@@ -51,12 +51,12 @@ export interface ApplicationUpdateSnapshot{readonly id:string;readonly directory
 export interface ApplicationUpdateRequest{
   readonly schemaVersion:1;
   readonly attemptId:string;
-  readonly installMethod:"docker-compose"|"windows-portable";
+  readonly installMethod:"docker-compose"|"windows-portable"|"node-package";
   readonly sourceVersion:string;
   readonly targetVersion:string;
   readonly manifestSha256:string;
   readonly snapshotId:string;
-  readonly artifact:{readonly repository?:string;readonly digest?:string;readonly url?:string;readonly filename?:string;readonly size?:number;readonly sha256?:string};
+  readonly artifact:{readonly repository?:string;readonly digest?:string;readonly url?:string;readonly filename?:string;readonly size?:number;readonly sha256?:string;readonly registry?:string;readonly name?:string};
   readonly manifest:{readonly url:string;readonly signatureUrl:string;readonly signingPublicKeyPem:string;readonly signingPublicKeySha256:string;readonly keyId:string};
   readonly createdAt:string;
 }
@@ -106,7 +106,7 @@ export function compareApplicationVersions(left:string,right:string){
 function architecture(value:string):"x64"|"arm64"{if(value==="x64"||value==="amd64")return"x64";if(value==="arm64"||value==="aarch64")return"arm64";throw Object.assign(new Error(`Unsupported application architecture: ${value}`),{code:"APPLICATION_ARCHITECTURE_UNSUPPORTED"});}
 export function normalizeApplicationInstallMetadata(input:{version:string;installMethod:string;platform:string;architecture:string;imageDigest?:string|null;packageSha256?:string|null;updaterProtocolVersion?:number}):ApplicationInstallMetadata{
   semverParts(input.version);
-  const method=(["source-checkout","docker-compose","windows-portable","unknown"] as const).includes(input.installMethod as ApplicationInstallMethod)?input.installMethod as ApplicationInstallMethod:"unknown";
+  const method=(["source-checkout","docker-compose","windows-portable","node-package","unknown"] as const).includes(input.installMethod as ApplicationInstallMethod)?input.installMethod as ApplicationInstallMethod:"unknown";
   const platform=input.platform==="win32"||input.platform==="windows"?"windows":input.platform==="linux"?"linux":null;if(!platform)throw Object.assign(new Error(`Unsupported application platform: ${input.platform}`),{code:"APPLICATION_PLATFORM_UNSUPPORTED"});
   const imageDigest=input.imageDigest?.trim().toLowerCase()||null,packageSha256=input.packageSha256?.trim().toLowerCase()||null;
   if(imageDigest&&!IMAGE_DIGEST.test(imageDigest))throw Object.assign(new Error("Installed image digest is invalid."),{code:"APPLICATION_METADATA_INVALID"});
@@ -119,6 +119,11 @@ function targetBinding(current:ApplicationInstallMetadata,release:VerifiedReleas
   if(release.manifest.schemaVersion!==3)return{supported:false,reason:"manifest-updater-contract-missing",protocol:null,identity:null};
   if(current.installMethod==="docker-compose")return current.platform==="linux"?{supported:true,reason:null,protocol:release.manifest.server.minimumUpdaterProtocolVersion??null,identity:release.manifest.server.digest}:{supported:false,reason:"install-platform-mismatch",protocol:null,identity:null};
   if(current.installMethod==="windows-portable")return current.platform==="windows"&&current.architecture==="x64"&&release.manifest.windowsPortable?{supported:true,reason:null,protocol:release.manifest.windowsPortable.minimumUpdaterProtocolVersion,identity:release.manifest.windowsPortable.sha256}:{supported:false,reason:"install-platform-mismatch",protocol:null,identity:null};
+  // The npm distribution is platform independent: one signed tarball serves
+  // every platform and architecture, so only the artifact identity matters.
+  // A manifest published before the record carried its own protocol floor
+  // cannot state the contract, and is refused rather than assumed compatible.
+  if(current.installMethod==="node-package")return release.manifest.nodePackage?.minimumUpdaterProtocolVersion===undefined?{supported:false,reason:"manifest-updater-contract-missing",protocol:null,identity:null}:{supported:true,reason:null,protocol:release.manifest.nodePackage.minimumUpdaterProtocolVersion,identity:release.manifest.nodePackage.sha256};
   return{supported:false,reason:current.installMethod==="source-checkout"?"source-checkout-not-updatable":"install-method-unsupported",protocol:null,identity:null};
 }
 
@@ -176,8 +181,8 @@ export class ApplicationUpdateCoordinator{
       attempt={id,state:"staging",sourceVersion:this.options.current.version,targetVersion:release.manifest.version,manifestSha256:release.manifestSha256,installMethod:this.options.current.installMethod,platform:this.options.current.platform,architecture:this.options.current.architecture,snapshotId:null,requestPath:null,rollbackPerformed:false,error:null,createdAt:now,updatedAt:now,completedAt:null};
       attempt=await this.options.store.createApplicationUpdateAttempt(attempt);
       const snapshot=await this.options.snapshot(id,this.options.current);
-      const artifact=this.options.current.installMethod==="docker-compose"?{repository:release.manifest.server.image,digest:release.manifest.server.digest}:{url:release.manifest.windowsPortable!.url,filename:release.manifest.windowsPortable!.filename,size:release.manifest.windowsPortable!.size,sha256:release.manifest.windowsPortable!.sha256};
-      const request:ApplicationUpdateRequest={schemaVersion:1,attemptId:id,installMethod:this.options.current.installMethod as "docker-compose"|"windows-portable",sourceVersion:this.options.current.version,targetVersion:release.manifest.version,manifestSha256:release.manifestSha256,snapshotId:snapshot.id,artifact,manifest:{url:release.manifestUrl,signatureUrl:release.signatureUrl,signingPublicKeyPem:release.signingPublicKeyPem,signingPublicKeySha256:release.signingPublicKeySha256,keyId:release.keyId},createdAt:new Date().toISOString()};
+      const artifact=this.options.current.installMethod==="docker-compose"?{repository:release.manifest.server.image,digest:release.manifest.server.digest}:this.options.current.installMethod==="node-package"?{registry:release.manifest.nodePackage!.registry,name:release.manifest.nodePackage!.name,url:release.manifest.nodePackage!.url,filename:release.manifest.nodePackage!.filename,size:release.manifest.nodePackage!.size,sha256:release.manifest.nodePackage!.sha256}:{url:release.manifest.windowsPortable!.url,filename:release.manifest.windowsPortable!.filename,size:release.manifest.windowsPortable!.size,sha256:release.manifest.windowsPortable!.sha256};
+      const request:ApplicationUpdateRequest={schemaVersion:1,attemptId:id,installMethod:this.options.current.installMethod as "docker-compose"|"windows-portable"|"node-package",sourceVersion:this.options.current.version,targetVersion:release.manifest.version,manifestSha256:release.manifestSha256,snapshotId:snapshot.id,artifact,manifest:{url:release.manifestUrl,signatureUrl:release.signatureUrl,signingPublicKeyPem:release.signingPublicKeyPem,signingPublicKeySha256:release.signingPublicKeySha256,keyId:release.keyId},createdAt:new Date().toISOString()};
       const requestPath=await this.options.writeRequest(request);attempt={...attempt,state:"applying",snapshotId:snapshot.id,requestPath,updatedAt:new Date().toISOString()};
       return await this.options.store.updateApplicationUpdateAttempt(attempt);
     }catch(error){

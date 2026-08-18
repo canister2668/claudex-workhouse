@@ -206,7 +206,10 @@ describe("release manifest publishing script",()=>{
       name:"claudex-workhouse",
       format:"tgz",
       filename:"claudex-workhouse-1.0.1.tgz",
-      sha256:sha256(fs.readFileSync(value.environment.CLAUDEX_WORKHOUSE_NODE_PACKAGE))
+      sha256:sha256(fs.readFileSync(value.environment.CLAUDEX_WORKHOUSE_NODE_PACKAGE)),
+      // Without its own protocol floor the updater cannot tell whether the
+      // installed host can apply this tarball, so it refuses the target.
+      minimumUpdaterProtocolVersion:1
     });
     expect(result.manifest.nodePackage.url).toBe(`${value.environment.CLAUDEX_WORKHOUSE_RELEASE_ASSET_BASE_URL}/claudex-workhouse-1.0.1.tgz`);
     // A tarball named for another version would let a release publish bytes its

@@ -4,6 +4,7 @@
 import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
+import url from "node:url";
 import os from "node:os";
 import { spawn } from "node:child_process";
 import { Readable } from "node:stream";
@@ -194,7 +195,20 @@ function installMethod(){
   if(configured)return configured;
   const root=process.env.CLAUDEX_WORKHOUSE_APP_ROOT?.trim()||process.env.CLAUDEX_WORKHOUSE_ROOT?.trim()||process.cwd();
   if(fs.existsSync(path.join(root,".git")))return"source-checkout";
-  return fs.existsSync("/.dockerenv")||fs.existsSync("/run/.containerenv")?"docker-compose":"unknown";
+  // A container swaps its own image, so the container check wins even when the
+  // server inside it was installed from the registry.
+  if(fs.existsSync("/.dockerenv")||fs.existsSync("/run/.containerenv"))return"docker-compose";
+  return isNodePackageInstall()?"node-package":"unknown";
+}
+// `npm install -g claudex-workhouse` places this module under a node_modules
+// directory owned by the package. Reading the running module's own path keeps
+// the detection independent of the working directory the service was started
+// from, which for a global install is wherever the user happened to be.
+function isNodePackageInstall(){
+  try{
+    const parts=path.dirname(url.fileURLToPath(import.meta.url)).split(path.sep);
+    return parts.some((part,index)=>part==="node_modules"&&parts[index+1]==="claudex-workhouse");
+  }catch{return false;}
 }
 function deploymentPlatform(){
   const configured=process.env.CLAUDEX_WORKHOUSE_DEPLOYMENT_PLATFORM?.trim();

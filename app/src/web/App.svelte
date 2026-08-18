@@ -1327,7 +1327,16 @@
   }
   async function loadRuntimes(){try{const data=await api("/api/runtime-updates");runtimes=data.runtimes??[];if(data.autoUpdate)runtimeAutoUpdate=data.autoUpdate;}catch(e){runtimeNotice=e instanceof Error?e.message:String(e)}}
   async function loadApplicationUpdate(){try{applicationUpdate=await api("/api/application-updates");}catch(e){applicationUpdateNotice=e instanceof Error?e.message:String(e)}}
-  async function checkApplicationUpdate(){if(applicationUpdateBusy)return;applicationUpdateBusy="check";applicationUpdateNotice="";try{applicationUpdate=await api("/api/application-updates/check",{method:"POST",body:"{}"});applicationUpdateNotice=$t(applicationUpdate?.updateAvailable?"applicationUpdate.available":"applicationUpdate.current");}catch(e){applicationUpdateNotice=e instanceof Error?e.message:String(e)}finally{applicationUpdateBusy=false;}}
+  // "Up to date" and "this install is not updatable at all" are different
+  // answers. Branching on updateAvailable alone reported a source checkout,
+  // which the updater deliberately never touches, as already current.
+  function applicationUpdateNoticeKey(status:any){
+    if(status?.updateAvailable)return"applicationUpdate.available";
+    if(status?.reason==="source-checkout-not-updatable")return"applicationUpdate.sourceCheckout";
+    if(status?.state==="unconfigured")return"applicationUpdate.notUpdatable";
+    return"applicationUpdate.current";
+  }
+  async function checkApplicationUpdate(){if(applicationUpdateBusy)return;applicationUpdateBusy="check";applicationUpdateNotice="";try{applicationUpdate=await api("/api/application-updates/check",{method:"POST",body:"{}"});applicationUpdateNotice=$t(applicationUpdateNoticeKey(applicationUpdate));}catch(e){applicationUpdateNotice=e instanceof Error?e.message:String(e)}finally{applicationUpdateBusy=false;}}
   async function applyApplicationUpdate(){const status=applicationUpdate;if(applicationUpdateBusy||!status?.updateAvailable||!status.target||status.blockers.length)return;if(!confirm($t("applicationUpdate.confirm",{current:status.current.version,target:status.target.version})))return;applicationUpdateBusy="apply";applicationUpdateNotice=$t("applicationUpdate.applying");try{const data=await api("/api/application-updates/apply",{method:"POST",headers:{"Idempotency-Key":uuid()},body:JSON.stringify({targetVersion:status.target.version,manifestSha256:status.target.manifestSha256,confirm:true})});applicationUpdate=data.status;applicationUpdateNotice=$t("applicationUpdate.restart");}catch(e){applicationUpdateNotice=e instanceof Error?e.message:String(e)}finally{applicationUpdateBusy=false;}}
   async function loadSystemDiagnostic(){diagnosticBusy=true;try{systemDiagnostic=(await api("/api/system/diagnostics")).report;}catch(e){runtimeNotice=e instanceof Error?e.message:String(e)}finally{diagnosticBusy=false;}}
   async function copySystemDiagnostic(){if(systemDiagnostic)await navigator.clipboard.writeText(JSON.stringify(systemDiagnostic,null,2));}
