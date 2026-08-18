@@ -12,6 +12,12 @@ import {
 export const RELEASE_STATE_SETTING_KEY = "deployment.release-state.v1";
 const DEFAULT_IMAGE_REPOSITORY = "ghcr.io/canister2668/claudex-workhouse";
 const DEFAULT_RELEASE_ORIGIN = "https://canister2668.github.io";
+// The manifest is served from Pages, but the artifacts it names live on the
+// release itself. Trusting only the manifest origin rejected every artifact a
+// release actually publishes, which only the compose bundle avoided because it
+// writes this explicitly. Both are defaults; naming the variable still replaces
+// them outright.
+const DEFAULT_ARTIFACT_ORIGIN = "https://github.com";
 const DEFAULT_RELEASE_PATH = "/claudex-workhouse/releases/stable/release-manifest.json";
 const MAX_KEY_RING_BYTES = 256 * 1024;
 const MAX_MANIFEST_BYTES = 1024 * 1024;
@@ -104,9 +110,9 @@ function commaValues(value: string | undefined): string[] {
   return (value ?? "").split(",").map((item) => item.trim()).filter(Boolean);
 }
 
-function originValues(value: string | undefined, fallback: string): string[] {
+function originValues(value: string | undefined, ...fallback: string[]): string[] {
   const configured = commaValues(value);
-  const values = configured.length ? configured : [fallback];
+  const values = configured.length ? configured : fallback;
   return values.map((item) => {
     let url: URL;
     try {
@@ -176,7 +182,8 @@ export function releaseServiceConfigFromEnvironment(
       allowedManifestOrigins: [manifestUrl.origin],
       allowedWorkerOrigins: originValues(
         environment.CLAUDEX_WORKHOUSE_RELEASE_WORKER_ORIGINS,
-        manifestUrl.origin
+        manifestUrl.origin,
+        DEFAULT_ARTIFACT_ORIGIN
       ),
       allowedImageRepositories
     }
