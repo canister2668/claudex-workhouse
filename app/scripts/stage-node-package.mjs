@@ -26,7 +26,7 @@ export const PACKAGE_NAME = "claudex-workhouse";
 export const ROOT_FILES = ["LICENSE", "LICENSE.ko.md", "LICENSE.ja.md", "NOTICE.md", "NOTICE.ko.md", "NOTICE.ja.md", "THIRD_PARTY_NOTICES.md", "THIRD_PARTY_NOTICES.ko.md", "THIRD_PARTY_NOTICES.ja.md", "README.md"];
 // `boot-start.sh` and `container-init.mjs` belong to the Docker image, not to a
 // Node install, and the worker entry points ship from their own package.
-export const BIN_FILES = ["claudex-workhouse.mjs", "runtime-bootstrap.mjs", "claude-runtime.mjs", "codex-runtime.mjs", "claude-auth-pty.py", "claude-models.py", "claude-usage.py", "antigravity-auth-pty.py", "grok-usage.py"];
+export const BIN_FILES = ["claudex-workhouse.mjs", "claudex-workhouse-updater.mjs", "runtime-bootstrap.mjs", "claude-runtime.mjs", "codex-runtime.mjs", "claude-auth-pty.py", "claude-models.py", "claude-usage.py", "antigravity-auth-pty.py", "grok-usage.py"];
 
 function copy(source, target, options = {}) {
   fs.mkdirSync(path.dirname(target), { recursive: true });
@@ -93,7 +93,7 @@ export function stageNodePackage({ publicRoot, stage, fail }) {
       license: "AGPL-3.0-only",
       repository: manifest.repository,
       type: "module",
-      bin: { [PACKAGE_NAME]: "bin/claudex-workhouse.mjs" },
+      bin: { [PACKAGE_NAME]: "bin/claudex-workhouse.mjs", [`${PACKAGE_NAME}-updater`]: "bin/claudex-workhouse-updater.mjs" },
       engines: { node: ">=20" },
       // Linux only, and deliberately not darwin: the emotion state lock spawns
       // `/bin/flock`, which is util-linux and absent on macOS. Claiming a
