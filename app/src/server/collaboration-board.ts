@@ -21,26 +21,39 @@ export const boardAutomationStartSchema=boardRevisionSchema.extend({stopAfter:z.
 export const boardAutomationDecisionSchema=boardRevisionSchema.extend({decision:z.enum(["approve","revise"])}).strict();
 export const boardAttachSchema=boardRevisionSchema.extend({taskId:z.string().min(1).max(200).optional(),collaborationSessionId:z.string().uuid().optional()}).strict().refine(value=>Boolean(value.taskId)!==Boolean(value.collaborationSessionId),"Exactly one session identifier is required.");
 
-const activeStatuses=new Set(["pending","queued","starting","running","waiting","waiting-user","cancel-requested","unknown"]);
+const activeStatuses=new Set(["pending","queued","starting","running","waiting","waiting-user","waiting-approval","cancel-requested","unknown"]);
 const error=(message:string,statusCode:number,code:string)=>Object.assign(new Error(message),{statusCode,code});
 const now=()=>new Date().toISOString();
+export function isBoardWorkTask(task:{metadata?:{boardRole?:unknown;collaborationSessionId?:unknown;collaborationMode?:unknown}|null}):boolean{
+  const role=task.metadata?.boardRole;
+  if(role==="implementer"||role==="revision")return true;
+  if(role==="review")return false;
+  return !task.metadata?.collaborationSessionId&&!task.metadata?.collaborationMode;
+}
+export function selectBoardResumeTask<T extends {updatedAt:string;metadata?:{boardRole?:unknown;collaborationSessionId?:unknown;collaborationMode?:unknown}|null}>(tasks:T[]):T|undefined{
+  return tasks.filter(isBoardWorkTask).sort((a,b)=>b.updatedAt.localeCompare(a.updatedAt))[0];
+}
+export function boardResumeUsesWorkerHost(task:{executionHostId?:string|null},usesWorker:(hostId:string)=>boolean){
+  return Boolean(task.executionHostId&&usesWorker(task.executionHostId));
+}
 export const defaultBoardAutomation=():CollaborationBoardAutomation=>({mode:"manual",state:"idle",stage:null,stopAfter:null,round:0,approvedProviders:[],fullAccessAcknowledged:false,pauseReason:null,lastSessionId:null,startedAt:null});
 export const normalizeBoardAutomation=(value:Partial<CollaborationBoardAutomation>|null|undefined):CollaborationBoardAutomation=>({...defaultBoardAutomation(),...(value??{}),approvedProviders:Array.isArray(value?.approvedProviders)?value!.approvedProviders.filter((item):item is ProviderId=>providerSchema.safeParse(item).success):[]});
 
 type Actor={type:string;id:string|null};
-type BoardDb=Pick<DeckDatabase,"getWorkChain"|"createWorkChain"|"listBoardCards"|"updateBoardCard"|"appendWorkChainEvent"|"listWorkChainEvents"|"attachBoardSession"|"getWorkspace"|"getTask"|"listTasks"|"getCollaborationSession"|"listCollaborationSessions">;
+type BoardDb=Pick<DeckDatabase,"getWorkChain"|"createWorkChain"|"listBoardCards"|"updateBoardCard"|"appendWorkChainEvent"|"listWorkChainEvents"|"attachBoardSession"|"getWorkspace"|"getTask"|"listTasksByWorkChainIds"|"getCollaborationSession"|"listCollaborationSessionsByWorkChainIds">;
 
 export class CollaborationBoardService{
   constructor(private db:BoardDb){}
 
   private async requireCard(id:string,includeHidden=false){const raw=await this.db.getWorkChain(id) as WorkChain|null;if(!raw||(raw.boardVisible!==true&&!includeHidden))throw error("Collaboration board card not found.",404,"BOARD_CARD_NOT_FOUND");return{...raw,automation:normalizeBoardAutomation(raw.automation)};}
   private event(chainId:string,eventType:string,actor:Actor,extra:Partial<WorkChainEvent>={}):WorkChainEvent{return{id:crypto.randomUUID(),chainId,eventType,taskId:null,collaborationSessionId:null,actorType:actor.type,actorId:actor.id,dedupeKey:null,payload:{},createdAt:now(),...extra};}
-  private decorateRows(card:WorkChain,tasks:Awaited<ReturnType<BoardDb["listTasks"]>>,collaborations:Awaited<ReturnType<BoardDb["listCollaborationSessions"]>>){
-    const sessions=[...tasks.filter(item=>item.workChainId===card.id).map(item=>({id:item.id,kind:"task" as const,title:item.title,provider:item.provider,role:(item.metadata?.boardRole as string|undefined)??null,status:item.status,executionHostId:item.executionHostId??null,permissionProfile:item.permissionProfile??null,createdAt:item.createdAt,updatedAt:item.updatedAt,result:item.result,error:item.error})),...collaborations.filter(item=>item.workChainId===card.id).map(item=>({id:item.id,kind:"collaboration" as const,title:item.title,provider:null,role:(item.metadata?.boardRole as string|undefined)??"review",status:item.status,executionHostId:null,permissionProfile:null,createdAt:item.createdAt,updatedAt:item.updatedAt,result:item.outcome??null,error:null}))];
+  private decorateRows(card:WorkChain,tasks:Awaited<ReturnType<BoardDb["listTasksByWorkChainIds"]>>,collaborations:Awaited<ReturnType<BoardDb["listCollaborationSessionsByWorkChainIds"]>>){
+    const sessions=[...tasks.filter(item=>item.workChainId===card.id).map(item=>({id:item.id,kind:"task" as const,title:item.title,provider:item.provider,role:(item.metadata?.boardRole as string|undefined)??null,status:item.status,executionHostId:item.executionHostId??null,permissionProfile:item.permissionProfile??null,remoteState:typeof item.metadata?.remoteState==="string"?item.metadata.remoteState:null,createdAt:item.createdAt,updatedAt:item.updatedAt,result:item.result,error:item.error})),...collaborations.filter(item=>item.workChainId===card.id).map(item=>({id:item.id,kind:"collaboration" as const,title:item.title,provider:null,role:(item.metadata?.boardRole as string|undefined)??"review",status:item.status,executionHostId:null,permissionProfile:null,remoteState:null,createdAt:item.createdAt,updatedAt:item.updatedAt,result:item.outcome??null,error:null}))];
     return{...card,automation:normalizeBoardAutomation(card.automation),sessions,activeSessionCount:sessions.filter(item=>activeStatuses.has(item.status)).length};
   }
-  private async decorate(card:WorkChain){const[tasks,collaborations]=await Promise.all([this.db.listTasks(),this.db.listCollaborationSessions(true)]);return this.decorateRows(card,tasks,collaborations);}
-  async list(filters:{projectId?:string;workspaceId?:string;includeArchived?:boolean}={}){const cards=await this.db.listBoardCards(filters);if(!cards.length)return[];const[tasks,collaborations]=await Promise.all([this.db.listTasks(),this.db.listCollaborationSessions(true)]);return cards.map(card=>this.decorateRows(card,tasks,collaborations));}
+  private async loadLinked(chainIds:string[]){if(!chainIds.length)return{tasks:[],collaborations:[]};const[tasks,collaborations]=await Promise.all([this.db.listTasksByWorkChainIds(chainIds),this.db.listCollaborationSessionsByWorkChainIds(chainIds,true)]);return{tasks,collaborations};}
+  private async decorate(card:WorkChain){const{tasks,collaborations}=await this.loadLinked([card.id]);return this.decorateRows(card,tasks,collaborations);}
+  async list(filters:{projectId?:string;workspaceId?:string;includeArchived?:boolean}={}){const cards=await this.db.listBoardCards(filters);if(!cards.length)return[];const{tasks,collaborations}=await this.loadLinked(cards.map(card=>card.id));return cards.map(card=>this.decorateRows(card,tasks,collaborations));}
   async listAutomationCards(){return(await this.db.listBoardCards()).map(card=>({...card,automation:normalizeBoardAutomation(card.automation)}));}
   async detail(id:string){return this.decorate(await this.requireCard(id));}
   async create(input:z.infer<typeof boardCardCreateSchema>,actor:Actor){
@@ -55,7 +68,7 @@ export class CollaborationBoardService{
   private async update(id:string,revision:number,patch:Partial<WorkChain>,eventType:string,actor:Actor,payload:Record<string,unknown>={}){
     const current=await this.requireCard(id);if(current.revision!==revision)throw error("Collaboration board card changed in another session. Reload before saving.",409,"BOARD_REVISION_CONFLICT");
     if(patch.workspaceId!==undefined&&patch.workspaceId!==null){const workspace=await this.db.getWorkspace(patch.workspaceId);if(!workspace||workspace.archivedAt||workspace.projectId!==current.projectId)throw error("Workspace is unavailable or belongs to another project.",409,"BOARD_WORKSPACE_PROJECT_MISMATCH");}
-    const timestamp=now(),next={...current,...patch,updatedAt:timestamp,completedAt:patch.boardStatus==="completed"?(current.completedAt??timestamp):patch.boardStatus?null:current.completedAt,revision:current.revision+1};const result=await this.db.updateBoardCard(next,current.revision);if(!result.updated)throw error("Collaboration board card changed in another session. Reload before saving.",409,"BOARD_REVISION_CONFLICT");
+    const timestamp=now(),baseAutomation=normalizeBoardAutomation(("automation" in patch?patch.automation:current.automation)??current.automation),automation=patch.boardStatus==="completed"?{...baseAutomation,mode:"manual" as const,state:"idle" as const,stage:null,pauseReason:null}:baseAutomation,next={...current,...patch,automation,updatedAt:timestamp,completedAt:patch.boardStatus==="completed"?(current.completedAt??timestamp):patch.boardStatus?null:current.completedAt,revision:current.revision+1};const result=await this.db.updateBoardCard(next,current.revision);if(!result.updated)throw error("Collaboration board card changed in another session. Reload before saving.",409,"BOARD_REVISION_CONFLICT");
     await this.db.appendWorkChainEvent(this.event(id,eventType,actor,{dedupeKey:`chain:${id}:${eventType}:r${next.revision}`,payload}));return this.decorate((await this.db.getWorkChain(id))??next);
   }
   patch(id:string,input:z.infer<typeof boardCardPatchSchema>,actor:Actor){const{revision,...patch}=input;return this.update(id,revision,patch,"card_updated",actor,{fields:Object.keys(patch)});}

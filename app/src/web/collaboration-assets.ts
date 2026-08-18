@@ -141,6 +141,7 @@ function technicalSignalCount(output:string){return TECHNICAL_SIGNALS.reduce((co
 function toneGroups(tonePreset:string,strongAffection:boolean){
   if(tonePreset==="secretary")return["neutral","thinking","proud"];
   if(tonePreset==="tsundere")return["smug","pout","embarrassed","neutral",...(strongAffection?["love"]:[])];
+  if(tonePreset==="whale-girl")return["smug","pout","embarrassed","laughing","neutral",...(strongAffection?["love"]:[])];
   if(tonePreset==="flirty-friend")return["embarrassed","happy","wink","neutral",...(strongAffection?["love"]:[])];
   if(tonePreset==="coy-affection")return["embarrassed","smug","happy","wink","neutral",...(strongAffection?["love"]:[])];
   if(tonePreset==="sharp-tongue")return["smug","facepalm","speechless","disappointed","angry","neutral"];

@@ -283,7 +283,7 @@
   function openSessions(){closeCurrentDetail();closeOverlayView();collaborationBoardOpen=false;overviewOpen=false;resetPageScroll();if(engine==="conversation")selectEngine("all");}
   function openConversations(){closeCurrentDetail();closeOverlayView();collaborationBoardOpen=false;selectEngine("conversation");}
   function openCollaborationBoard(card?:CollaborationBoardCard){exitTaskBulkMode();exitConversationBulkMode();closeCurrentDetail();closeOverlayView();overviewOpen=false;collaborationBoardInitialCardId=card?.id??null;collaborationBoardOpen=true;resetPageScroll();}
-  async function promoteSelectedToBoard(){if(!selected)return;const source=selected;try{const card=await createBoardCard(api,{title:source.title||$t("session.untitled"),description:source.prompt??"",boardStatus:"in_progress",priority:"normal",workspaceId:source.workspaceId??null,targetBranch:"",roles:{implementer:{provider:source.provider,permissionProfile:source.permissionProfile??"workspace-write"},reviewer:{provider:source.provider==="claude"?"codex":"claude",permissionProfile:"read-only"}},sourceTaskId:source.id});openCollaborationBoard(card)}catch(error){window.alert(error instanceof Error?error.message:String(error))}}
+  async function promoteSelectedToBoard(){if(!selected)return;const source=selected;try{const card=await createBoardCard(api,{title:source.title||$t("session.untitled"),description:source.prompt??"",boardStatus:"in_progress",priority:"normal",workspaceId:source.workspaceId??null,targetBranch:"",roles:{implementer:{provider:source.provider,permissionProfile:source.permissionProfile??(source.provider==="codex"?":workspace":":workspace-write")},reviewer:{provider:source.provider==="claude"?"codex":"claude",permissionProfile:":read-only"}},sourceTaskId:source.id});openCollaborationBoard(card)}catch(error){window.alert(error instanceof Error?error.message:String(error))}}
   async function openOrPromoteSelectedBoard(){if(!selected?.workChainId)return promoteSelectedToBoard();try{openCollaborationBoard(await getBoardCard(api,selected.workChainId))}catch{await promoteSelectedToBoard()}}
   function selectEngine(value:typeof engine){closeOverlayView();overviewOpen=false;if(engine===value)return;exitTaskBulkMode();exitConversationBulkMode();if(value!=="codex"){codexRef?.closeDetail();codexDetailOpen=false;}engine=value;applyCreateDefaultsForTab(value);if(value!=="codex")void refresh();}
   const codexStatusFor=(value:typeof statusFilter):typeof codexStatus=>value==="active"?"running":value==="done"?"completed":value;
@@ -468,7 +468,8 @@
   let antigravityUsesVertex=false;
   $: antigravityUsesVertex=antigravityExecution.backend==="vertex"||antigravityExecution.backend==="vertex-agent";
   type CreditConsentChoice="cancel"|"once"|"always";
-  type CreditConsentPrompt={providers:Array<"codex"|"claude">;reasons:Partial<Record<"codex"|"claude","exhausted"|"unknown">>;waiters:Array<(choice:CreditConsentChoice)=>void>};
+  type PaidCreditProvider="codex"|"claude"|"grok";
+  type CreditConsentPrompt={providers:PaidCreditProvider[];reasons:Partial<Record<PaidCreditProvider,"exhausted"|"unknown">>;waiters:Array<(choice:CreditConsentChoice)=>void>};
   let allowPaidCredits=globalPrefs.allowPaidCredits===true,creditUsageLoaded=false,creditUsageLoading=false,creditConsentPrompt:CreditConsentPrompt|null=null;
   let customModelDraft:Record<"claude"|"codex",{id:string;displayName:string}>={claude:{id:"",displayName:""},codex:{id:"",displayName:""}};let modelValidation:Partial<Record<"claude"|"codex",{busy:boolean;valid?:boolean;detail?:string}>>={};
   let showAvatars=globalPrefs.showAvatars!==false;let showSpeech=globalPrefs.showSpeech!==false;let collapseCompleted=globalPrefs.collapseCompleted!==false;let notifications=globalPrefs.notifications===true;let vibration=globalPrefs.vibration===true;let rememberLast=globalPrefs.rememberLast!==false;let enterToSend=globalPrefs.enterToSend!==false;let hideLocalPaths=globalPrefs.hideLocalPaths===true;
@@ -1238,7 +1239,7 @@
     try{const baseline=JSON.parse(globalBaseline.characters);baseline.providers[provider].avatarOutfit=outfit;globalBaseline.characters=JSON.stringify(baseline);}catch{}
   }
 
-  function requestCreditConsent(providers:Array<"codex"|"claude">,reasons:Partial<Record<"codex"|"claude","exhausted"|"unknown">>={}){
+  function requestCreditConsent(providers:PaidCreditProvider[],reasons:Partial<Record<PaidCreditProvider,"exhausted"|"unknown">>={}){
     return new Promise<CreditConsentChoice>((resolve)=>{
       const unique=[...new Set(providers)];
       if(creditConsentPrompt){creditConsentPrompt={providers:[...new Set([...creditConsentPrompt.providers,...unique])],reasons:{...creditConsentPrompt.reasons,...reasons},waiters:[...creditConsentPrompt.waiters,resolve]};return;}
@@ -1246,15 +1247,15 @@
     });
   }
   function settleCreditConsent(choice:CreditConsentChoice){const prompt=creditConsentPrompt;if(!prompt)return;creditConsentPrompt=null;for(const resolve of prompt.waiters)resolve(choice);}
-  const creditProviderLabel=(providers:Array<"codex"|"claude">)=>providers.map(provider=>providerName(provider)).join(" · ");
+  const creditProviderLabel=(providers:PaidCreditProvider[])=>providers.map(provider=>providerName(provider)).join(" · ");
   async function api(path:string, init:RequestInit={}, options:ApiRequestOptions={}) {
     let nextInit=init;
     for(let attempt=0;attempt<3;attempt++){
       try{return await requestJson(path,nextInit,options);}
       catch(error){
-        const details=(error as any)?.details,blocked:Array<"codex"|"claude">=Array.isArray(details?.providers)?details.providers.filter((item:unknown):item is "codex"|"claude"=>item==="codex"||item==="claude"):[];
+        const details=(error as any)?.details,blocked:PaidCreditProvider[]=Array.isArray(details?.providers)?details.providers.filter((item:unknown):item is PaidCreditProvider=>item==="codex"||item==="claude"||item==="grok"):[];
         const headers=new Headers(nextInit.headers);
-        const approved=new Set(String(headers.get("X-Claudex-Workhouse-Paid-Credits")??"").split(",").filter(item=>item==="codex"||item==="claude")),newlyBlocked=blocked.filter(provider=>!approved.has(provider));
+        const approved=new Set(String(headers.get("X-Claudex-Workhouse-Paid-Credits")??"").split(",").filter((item):item is PaidCreditProvider=>item==="codex"||item==="claude"||item==="grok")),newlyBlocked=blocked.filter(provider=>!approved.has(provider));
         if((error as any)?.code!=="PAID_CREDITS_CONFIRMATION_REQUIRED"||!newlyBlocked.length)throw error;
         const reasons=details?.creditReasons&&typeof details.creditReasons==="object"?details.creditReasons:{};
         const choice=await requestCreditConsent(newlyBlocked,reasons);

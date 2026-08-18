@@ -4,28 +4,47 @@
 import type { CollaborationBoardAutomation, CollaborationBoardAutomationStage, ProviderId, WorkChain } from "./types.js";
 import { CollaborationBoardService, normalizeBoardAutomation } from "./collaboration-board.js";
 
-type BoardSession={id:string;kind:"task"|"collaboration";role:string|null;status:string;provider:ProviderId|null;createdAt:string|null;updatedAt:string|null;result:string|null;error:string|null};
+type BoardSession={id:string;kind:"task"|"collaboration";role:string|null;status:string;provider:ProviderId|null;executionHostId?:string|null;remoteState?:string|null;createdAt:string|null;updatedAt:string|null;result:string|null;error:string|null};
 type DecoratedCard=WorkChain&{sessions:BoardSession[];activeSessionCount:number};
 type ActionResult={task?:{id:string};collaboration?:{session:{id:string}}};
 type ActionName="start-work"|"request-review"|"start-revision";
 type ActionRunner=(action:ActionName,chainId:string,context:{approvedProviders:Set<ProviderId>;fullAccessAcknowledged:boolean})=>Promise<ActionResult>;
 
-const active=new Set(["pending","queued","starting","running","cancel-requested","unknown"]);
+const active=new Set(["pending","queued","starting","running","waiting","waiting-user","waiting-approval","cancel-requested","unknown"]);
+const waiting=new Set(["waiting","waiting-user","waiting-approval"]);
 const failed=new Set(["failed","partial","timed-out","cancelled","stop-unconfirmed"]);
 const roleForStage=(stage:CollaborationBoardAutomationStage)=>stage==="review"?"review":stage==="revision"?"revision":"implementer";
 const actionForStage=(stage:CollaborationBoardAutomationStage):ActionName|null=>stage==="work"?"start-work":stage==="review"?"request-review":stage==="revision"?"start-revision":null;
 const sessionId=(result:ActionResult)=>result.task?.id??result.collaboration?.session.id??null;
 const excerpt=(value:string|null|undefined)=>String(value??"").trim().slice(0,2000);
 export function boardAutomationOutcome(input:{stage:CollaborationBoardAutomationStage;sessionStatus:string;automationState:CollaborationBoardAutomation["state"];stopAfter:"work"|"review"|null}){
-  if(active.has(input.sessionStatus))return"wait" as const;
-  if(failed.has(input.sessionStatus)||input.sessionStatus==="waiting"||input.sessionStatus==="waiting-user")return"block" as const;
+  if(active.has(input.sessionStatus)){
+    if(input.automationState==="stopping"&&waiting.has(input.sessionStatus))return"pause" as const;
+    return"wait" as const;
+  }
+  if(failed.has(input.sessionStatus))return"block" as const;
   if(input.automationState==="stopping"||input.stopAfter===input.stage)return"pause" as const;
   return input.stage==="review"?"approval" as const:"review" as const;
 }
 
+export function boardWaitingPauseReason(status:string){
+  if(status==="waiting-approval")return"session:waiting-approval";
+  if(waiting.has(status))return"session:waiting-user";
+  return null;
+}
+export function boardSessionIsLive(session:{status:string;executionHostId?:string|null;remoteState?:string|null},options:{usesWorker:(hostId:string)=>boolean;isHostOnline:(hostId:string)=>boolean}){
+  if(session.remoteState==="host-offline")return false;
+  const hostId=session.executionHostId;
+  if(hostId&&options.usesWorker(hostId)&&!options.isHostOnline(hostId))return false;
+  return true;
+}
+export function boardShouldKeepSession(session:{status:string;executionHostId?:string|null;remoteState?:string|null}|undefined,isLive:(session:{status:string;executionHostId?:string|null;remoteState?:string|null})=>boolean){
+  return Boolean(session&&active.has(session.status)&&isLive(session));
+}
+
 export class CollaborationBoardAutomationEngine{
   private running=new Set<string>();
-  constructor(private service:CollaborationBoardService,private runAction:ActionRunner){}
+  constructor(private service:CollaborationBoardService,private runAction:ActionRunner,private isSessionLive:(session:BoardSession)=>boolean=()=>true){}
 
   async start(id:string,revision:number,input:{stopAfter:"work"|"review"|null;approvedProviders:Set<ProviderId>;fullAccessAcknowledged:boolean}){
     await this.service.verifyRevision(id,revision);const card=await this.service.detail(id) as DecoratedCard;
@@ -39,12 +58,24 @@ export class CollaborationBoardAutomationEngine{
 
   async pause(id:string,revision:number){await this.service.verifyRevision(id,revision);const card=await this.service.detail(id) as DecoratedCard,automation=normalizeBoardAutomation(card.automation);if(automation.mode!=="auto")return card;const stopping=card.activeSessionCount>0;return this.service.setAutomation(id,revision,{...automation,state:stopping?"stopping":"paused",pauseReason:"user"},stopping?"automation_stop_requested":"automation_paused",{stage:automation.stage});}
 
-  async resume(id:string,revision:number){const card=await this.service.verifyRevision(id,revision) as DecoratedCard,automation=normalizeBoardAutomation(card.automation);if(automation.mode!=="auto"||!["paused","blocked"].includes(automation.state))throw Object.assign(new Error("This automation is not paused or blocked."),{statusCode:409,code:"BOARD_AUTOMATION_NOT_PAUSED"});if(automation.stage==="approval")throw Object.assign(new Error("Choose approve or revise at the approval stage."),{statusCode:409,code:"BOARD_AUTOMATION_DECISION_REQUIRED"});if(automation.state==="paused"&&automation.stage==="review"){const next=await this.service.setAutomation(id,revision,{...automation,state:"paused",stage:"approval",pauseReason:"decision-required",lastSessionId:null},"automation_approval_required",{round:automation.round});return this.service.setStatus(id,next.revision,"approval",{type:"system",id:"board-automation"});}const nextStage=automation.state==="blocked"?(automation.stage??"work"):automation.stage==="work"?"review":automation.stage??"work",next=await this.service.setAutomation(id,revision,{...automation,state:"running",stage:nextStage,pauseReason:null,lastSessionId:null,startedAt:new Date().toISOString()},"automation_resumed",{stage:nextStage});void this.tickCard(id);return next;}
+  async resume(id:string,revision:number){
+    await this.service.verifyRevision(id,revision);const card=await this.service.detail(id) as DecoratedCard,automation=normalizeBoardAutomation(card.automation);
+    if(automation.mode!=="auto"||!["paused","blocked"].includes(automation.state))throw Object.assign(new Error("This automation is not paused or blocked."),{statusCode:409,code:"BOARD_AUTOMATION_NOT_PAUSED"});
+    if(automation.stage==="approval")throw Object.assign(new Error("Choose approve or revise at the approval stage."),{statusCode:409,code:"BOARD_AUTOMATION_DECISION_REQUIRED"});
+    if(automation.state==="paused"&&automation.stage==="review"){const next=await this.service.setAutomation(id,revision,{...automation,state:"paused",stage:"approval",pauseReason:"decision-required",lastSessionId:null},"automation_approval_required",{round:automation.round});return this.service.setStatus(id,next.revision,"approval",{type:"system",id:"board-automation"});}
+    const last=automation.lastSessionId?(card.sessions??[]).find(item=>item.id===automation.lastSessionId):undefined;
+    const keepSession=boardShouldKeepSession(last,session=>this.isSessionLive(session as BoardSession));
+    if(keepSession){const next=await this.service.setAutomation(id,revision,{...automation,state:"running",pauseReason:boardWaitingPauseReason(last!.status)},"automation_resumed",{stage:automation.stage,sessionId:last?.id});void this.tickCard(id);return next;}
+    const retryStage=Boolean(last&&active.has(last.status));
+    const nextStage=automation.state==="blocked"||retryStage?(automation.stage??"work"):automation.stage==="work"?"review":automation.stage??"work";
+    const next=await this.service.setAutomation(id,revision,{...automation,state:"running",stage:nextStage,pauseReason:null,lastSessionId:null,startedAt:new Date().toISOString()},"automation_resumed",{stage:nextStage});
+    void this.tickCard(id);return next;
+  }
 
   async decide(id:string,revision:number,decision:"approve"|"revise"){
     const card=await this.service.verifyRevision(id,revision) as DecoratedCard,automation=normalizeBoardAutomation(card.automation);if(automation.mode!=="auto"||automation.stage!=="approval"||automation.state!=="paused")throw Object.assign(new Error("The card is not awaiting an automation decision."),{statusCode:409,code:"BOARD_AUTOMATION_DECISION_UNAVAILABLE"});
     if(decision==="approve"){let next=await this.service.setAutomation(id,revision,{...automation,mode:"manual",state:"idle",stage:null,pauseReason:null,lastSessionId:null},"automation_approved",{round:automation.round});next=await this.service.setStatus(id,next.revision,"completed",{type:"system",id:"board-automation"});return next;}
-    const next=await this.service.setAutomation(id,revision,{...automation,state:"running",stage:"revision",round:automation.round+1,pauseReason:null,lastSessionId:null,startedAt:new Date().toISOString()},"automation_revision_requested",{round:automation.round+1});void this.tickCard(id);return next;
+    let next=await this.service.setAutomation(id,revision,{...automation,state:"running",stage:"revision",round:automation.round+1,pauseReason:null,lastSessionId:null,startedAt:new Date().toISOString()},"automation_revision_requested",{round:automation.round+1});next=await this.service.setStatus(id,next.revision,"in_progress",{type:"system",id:"board-automation"});void this.tickCard(id);return next;
   }
 
   async tick(){const cards=await this.service.listAutomationCards();await Promise.all(cards.filter(card=>card.automation.mode==="auto"&&["running","stopping"].includes(card.automation.state)).map(card=>this.tickCard(card.id)));}
@@ -61,7 +92,10 @@ export class CollaborationBoardAutomationEngine{
       if(automation.state==="stopping"){await this.service.setAutomation(id,card.revision,{...automation,state:"paused",pauseReason:"user"},"automation_paused",{stage:automation.stage});return;}
       const action=actionForStage(stage);if(!action)return;
       const claim=await this.service.automationEvent(id,"automation_dispatch",`automation:dispatch:${automation.startedAt}:${automation.round}:${automation.stage}`,{stage:automation.stage,round:automation.round});if(!claim.inserted)throw new Error("A previously claimed automation dispatch has no linked session; manual verification is required.");
-      const result=await this.runAction(action,id,{approvedProviders:new Set(automation.approvedProviders),fullAccessAcknowledged:automation.fullAccessAcknowledged}),kind=automation.stage==="review"?"review":automation.stage==="revision"?"revision":"work";
+      let result:ActionResult;
+      try{result=await this.runAction(action,id,{approvedProviders:new Set(automation.approvedProviders),fullAccessAcknowledged:automation.fullAccessAcknowledged});}
+      catch(error){await this.service.setAutomation(id,card.revision,{...automation,startedAt:new Date().toISOString()},"automation_dispatch_failed",{stage:automation.stage,round:automation.round,error:excerpt(error instanceof Error?error.message:String(error))}).catch(()=>{});throw error;}
+      const kind=automation.stage==="review"?"review":automation.stage==="revision"?"revision":"work";
       card=await this.service.detail(id) as DecoratedCard;await this.service.recordStarted(id,card.revision,kind,result,{type:"system",id:"board-automation"});card=await this.service.detail(id) as DecoratedCard;await this.service.setAutomation(id,card.revision,{...normalizeBoardAutomation(card.automation),lastSessionId:sessionId(result)},"automation_stage_started",{stage:automation.stage,round:automation.round});return;
     }
     const outcome=boardAutomationOutcome({stage,sessionStatus:session.status,automationState:automation.state,stopAfter:automation.stopAfter});if(outcome==="wait")return;

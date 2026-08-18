@@ -1033,6 +1033,10 @@ def task_recovery_row(row):
 def handle(op, p):
     if op == "ping": return {"journalMode": db.execute("PRAGMA journal_mode").fetchone()[0],"synchronous":db.execute("PRAGMA synchronous").fetchone()[0],"walAutocheckpoint":db.execute("PRAGMA wal_autocheckpoint").fetchone()[0]}
     if op == "list_tasks": return [task_row(r) for r in db.execute("SELECT * FROM tasks ORDER BY updated_at DESC LIMIT ?", (p.get("limit",500),))]
+    if op == "list_tasks_by_work_chain_ids":
+        ids=[item for item in (p.get("chainIds") or []) if isinstance(item,str) and item][:200]
+        if not ids: return []
+        return [task_row(r) for r in db.execute("SELECT * FROM tasks WHERE work_chain_id IN (%s) ORDER BY updated_at DESC"%(",".join("?"*len(ids))), ids)]
     if op == "search_history_local":
         query=str(p.get("query","")).strip()
         if not query: return {"results":[],"nextCursor":None}
@@ -1809,6 +1813,11 @@ def handle(op, p):
     if op == "list_collaboration_sessions":
         sql="SELECT * FROM collaboration_sessions"+("" if p.get("includeArchived") else " WHERE archived_at IS NULL")+" ORDER BY updated_at DESC"
         return [object_row(r,{"current_turn_counts_json","metadata_json"}) for r in db.execute(sql)]
+    if op == "list_collaboration_sessions_by_work_chain_ids":
+        ids=[item for item in (p.get("chainIds") or []) if isinstance(item,str) and item][:200]
+        if not ids: return []
+        sql="SELECT * FROM collaboration_sessions WHERE work_chain_id IN (%s)%s ORDER BY updated_at DESC"%(",".join("?"*len(ids)),"" if p.get("includeArchived") else " AND archived_at IS NULL")
+        return [object_row(r,{"current_turn_counts_json","metadata_json"}) for r in db.execute(sql,ids)]
     if op == "delete_collaboration_session":
         try:
             db.execute("BEGIN IMMEDIATE")

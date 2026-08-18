@@ -4,7 +4,7 @@
   import { providerDisplayName } from "./provider-display";
   import { modelLabel } from "./session-ui";
   import { permissionForAutomation } from "./automation-level";
-  import { COLLABORATION_BOARD_PRIORITIES, COLLABORATION_BOARD_STATUSES, boardDefaultRole, boardProviderExecution, normalizeBoardRole, type CollaborationBoardAutomation, type CollaborationBoardDraft, type CollaborationBoardExecutionConfig, type CollaborationBoardProvider, type CollaborationBoardRole } from "./collaboration-board";
+  import { BOARD_BRANCH_MAX, BOARD_DESCRIPTION_MAX, BOARD_TITLE_MAX, COLLABORATION_BOARD_PRIORITIES, COLLABORATION_BOARD_STATUSES, boardDefaultRole, boardProviderExecution, normalizeBoardRole, type CollaborationBoardAutomation, type CollaborationBoardDraft, type CollaborationBoardExecutionConfig, type CollaborationBoardProvider, type CollaborationBoardRole } from "./collaboration-board";
   export let initial:CollaborationBoardDraft={title:"",description:"",boardStatus:"queued",priority:"normal",workspaceId:null,targetBranch:"",roles:{}};
   export let workspaces:Array<{id:string;displayName:string}>=[];
   export let executionConfig:CollaborationBoardExecutionConfig;
@@ -33,12 +33,12 @@
   <form class="modal create-panel board-editor" aria-labelledby="board-editor-title" onsubmit={(event)=>{event.preventDefault();onsave(draft)}}>
     <header><h2 id="board-editor-title">{$t(initial.title?"collaborationBoard.editTitle":"collaborationBoard.newTitle")}</h2><button type="button" class="icon-button" onclick={onclose} aria-label={$t("a11y.closeDialog")}><X size={20}/></button></header>
     <section class="cblk board-basics">
-      <label class="cf board-wide"><span class="cf-n">{$t("collaborationBoard.field.title")}</span><input required maxlength="160" bind:value={draft.title}/></label>
-      <label class="cf board-wide"><span class="cf-n">{$t("collaborationBoard.field.description")}</span><textarea rows="3" maxlength="4000" bind:value={draft.description}></textarea></label>
+      <label class="cf board-wide"><span class="cf-n">{$t("collaborationBoard.field.title")}</span><input required maxlength={BOARD_TITLE_MAX} bind:value={draft.title}/></label>
+      <label class="cf board-wide"><span class="cf-n">{$t("collaborationBoard.field.description")}</span><textarea rows="3" maxlength={BOARD_DESCRIPTION_MAX} bind:value={draft.description}></textarea></label>
       <label class="cf"><span class="cf-n">{$t("common.status")}</span><select bind:value={draft.boardStatus}>{#each COLLABORATION_BOARD_STATUSES as value}<option {value}>{$t(`collaborationBoard.status.${value}`)}</option>{/each}</select></label>
       <label class="cf"><span class="cf-n">{$t("collaborationBoard.field.priority")}</span><select bind:value={draft.priority}>{#each COLLABORATION_BOARD_PRIORITIES as value}<option {value}>{$t(`collaborationBoard.priority.${value}`)}</option>{/each}</select></label>
       <label class="cf"><span class="cf-n">{$t("workspace.label")}</span><select bind:value={draft.workspaceId}><option value={null}>{$t("workspace.noWorkspace")}</option>{#each workspaces as workspace}<option value={workspace.id}>{workspace.displayName}</option>{/each}</select></label>
-      <label class="cf"><span class="cf-n">{$t("collaborationBoard.field.branch")}</span><input maxlength="240" placeholder={$t("collaborationBoard.branchPlaceholder")} bind:value={draft.targetBranch}/></label>
+      <label class="cf"><span class="cf-n">{$t("collaborationBoard.field.branch")}</span><input maxlength={BOARD_BRANCH_MAX} placeholder={$t("collaborationBoard.branchPlaceholder")} bind:value={draft.targetBranch}/></label>
     </section>
     <section class="cblk"><h4 class="cover">{$t("collaborationBoard.roles")}<span class="r">{$t("collaborationBoard.globalDefaultsHelp")}</span></h4>
       {#each roleKeys as key}{@const assigned=draft.roles[key]}{@const execution=assigned?boardProviderExecution(executionConfig,assigned.provider):null}{@const model=execution?.models.find(item=>item.id===assigned?.model)}{@const efforts=model?.supportedReasoningEfforts??execution?.efforts??[]}

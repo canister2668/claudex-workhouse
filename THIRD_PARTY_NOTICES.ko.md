@@ -52,8 +52,12 @@ Claudex Workhouse는 별도로 설치된 Codex 및 Claude Code 런타임과 연�
 ## 프로젝트 아트워크
 
 `app/public` 아래의 감정 아바타와 애플리케이션 아이콘은 Canister가 Claudex
-Workhouse를 위해 만든 원저작물입니다. 제3자 구성요소가 아니며 Claudex Workhouse
-프로젝트 라이선스가 적용됩니다.
+Workhouse를 위해 만든 원저작물입니다. 제3자 구성요소가 아닙니다.
+
+이 아트워크는 프로젝트 소스에 적용되는 AGPL-3.0-only와 별개로 크리에이티브 커먼즈
+저작자표시 4.0 국제 라이선스(CC BY 4.0)로 제공됩니다. Canister를 출처로 표시하면
+누구나 상업적 이용을 포함해 자유롭게 사용, 수정, 재배포할 수 있습니다.
+<https://creativecommons.org/licenses/by/4.0/deed.ko>
 
 `@lucide/svelte`가 제공하는 인터페이스 아이콘은 위 표의 ISC 라이선스가 적용되는
 제3자 저작물입니다.

@@ -77,6 +77,23 @@ describe("Grok worker CLI contract",()=>{
 
   it("maps explicit full access to bypassPermissions",()=>{const{args}=runWorker({permission:":danger-full-access",automation:"full"});expect(args[args.indexOf("--permission-mode")+1]).toBe("bypassPermissions");expect(args[args.indexOf("--rules")+1]).toContain("explicit full access");});
 
+  it("removes the plan tools that cancel a headless session",()=>{
+    for(const options of [{permission:":workspace-write",automation:"auto"},{permission:":danger-full-access",automation:"full"}]){
+      const{args}=runWorker(options);
+      expect(args[args.indexOf("--disallowed-tools")+1]).toBe("enter_plan_mode,exit_plan_mode");
+    }
+    expect(runWorker({}).args).not.toContain("--disallowed-tools");
+    expect(runWorker({runtimeProfile:"conversation"}).args).not.toContain("--disallowed-tools");
+  });
+
+  it("reports an unanswerable plan approval instead of a bare failure",()=>{
+    const{state}=runWorker({permission:":danger-full-access",automation:"full",events:[
+      {type:"user",message:{role:"user",content:[{type:"tool_result",tool_use_id:"call-1",is_error:true,content:"[{\"type\":\"content\",\"content\":{\"type\":\"text\",\"text\":\"Plan approval could not be completed because the client disconnected. Plan mode remains active; the approval will reappear on reconnect.\"}}]"}]}},
+      {type:"result",subtype:"error_during_execution",is_error:true}
+    ]});
+    expect(state).toMatchObject({status:"failed",error:"Grok plan approval was unavailable in the headless session."});
+  });
+
   it("keeps conversation built-ins restricted while retaining the measured MCP meta-tools",()=>{const{args}=runWorker({runtimeProfile:"conversation"}),tools=args[args.indexOf("--tools")+1],rules=args[args.indexOf("--rules")+1];expect(tools).toBe("search_tool,use_tool");expect(rules).toContain("call set_emotion exactly once");expect(rules).toContain("뽀뽀쪽");expect(rules).toContain("Do not call express_emotion");});
 
   it("does not let mismatched full metadata upgrade workspace access",()=>{const{args}=runWorker({permission:":workspace-write",automation:"full"});expect(args[args.indexOf("--permission-mode")+1]).toBe("auto");expect(args[args.indexOf("--rules")+1]).toContain("- Automation: auto");});

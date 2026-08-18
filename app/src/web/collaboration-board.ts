@@ -1,5 +1,8 @@
 export const COLLABORATION_BOARD_STATUSES = ["queued","in_progress","review","approval","completed"] as const;
 export const COLLABORATION_BOARD_PRIORITIES = ["low","normal","high","urgent"] as const;
+export const BOARD_TITLE_MAX=100;
+export const BOARD_DESCRIPTION_MAX=10_000;
+export const BOARD_BRANCH_MAX=200;
 
 export type CollaborationBoardStatus = typeof COLLABORATION_BOARD_STATUSES[number];
 export type CollaborationBoardPriority = typeof COLLABORATION_BOARD_PRIORITIES[number];
@@ -61,9 +64,14 @@ export function normalizeBoardRole(config:CollaborationBoardExecutionConfig,valu
   return{...defaults,...value,model,reasoningEffort:value.reasoningEffort??defaults.reasoningEffort,serviceTier:value.serviceTier??defaults.serviceTier,workMode:value.workMode??defaults.workMode,automationLevel,permissionProfile:validPermission?value.permissionProfile:permissionForAutomation(value.provider,automationLevel)};
 }
 
-const activeStatuses = new Set(["pending","queued","starting","running","waiting","waiting-user","cancel-requested"]);
+const activeStatuses = new Set(["pending","queued","starting","running","waiting","waiting-user","waiting-approval","cancel-requested"]);
 export function isBoardSessionActive(session:CollaborationBoardSession){return activeStatuses.has(session.status);}
-export function cardNeedsAttention(card:CollaborationBoardCard){return card.sessions.some(item=>["failed","partial","waiting","waiting-user","stop-unconfirmed"].includes(item.status));}
+export function cardNeedsAttention(card:CollaborationBoardCard){return card.automation.state==="blocked"||card.automation.stage==="approval"||card.boardStatus==="approval"||card.sessions.some(item=>["failed","partial","waiting","waiting-user","waiting-approval","stop-unconfirmed"].includes(item.status));}
+export function awaitingBoardApproval(card:Pick<CollaborationBoardCard,"automation">){return card.automation.mode==="auto"&&card.automation.stage==="approval"&&card.automation.state==="paused";}
+export function boardDecisionSessions(card:CollaborationBoardCard){return card.sessions.filter(item=>item.kind==="task"&&item.provider&&["waiting","waiting-user","waiting-approval"].includes(item.status));}
+export function boardWaitingCollaborationSessions(card:CollaborationBoardCard){return card.sessions.filter(item=>item.kind==="collaboration"&&["waiting","waiting-user","waiting-approval"].includes(item.status));}
+export function boardCollaborationWaitingKey(status:string){return status==="waiting-approval"?"collaborationBoard.collaborationWaitingApproval":"collaborationBoard.collaborationWaitingUser";}
+export function boardAutomationReasonKey(reason:string|null|undefined){if(!reason)return null;if(reason==="decision-required")return"decisionRequired";if(reason==="session:waiting-user"||reason==="session:waiting")return"waitingUser";if(reason==="session:waiting-approval")return"waitingApproval";if(reason==="user")return"userPause";if(reason==="stop-point")return"stopPoint";if(/reasoning effort|Unknown compatible-runtime/i.test(reason))return"executionSettings";return"dispatchFailed";}
 export function cardSearchText(card:CollaborationBoardCard,workspaceName=""){return [card.title,card.description,workspaceName,card.targetBranch,...card.sessions.map(item=>item.title)].filter(Boolean).join(" ").toLocaleLowerCase();}
 
 function parseRoles(value:unknown):CollaborationBoardRoles{

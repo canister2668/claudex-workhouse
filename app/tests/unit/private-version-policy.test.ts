@@ -5,17 +5,17 @@ import {
 } from "../../scripts/verify-private-version.mjs";
 
 describe("private version policy", () => {
-  it("allows versions up to and including 1.0.0 while private", () => {
-    expect(PRIVATE_VERSION_MAX).toBe("1.0.0");
+  it("allows versions up to and including 1.0.1 while private", () => {
+    expect(PRIVATE_VERSION_MAX).toBe("1.0.1");
     expect(() => assertPrivateVersionPolicy({ private: true, version: "0.1.0" })).not.toThrow();
-    expect(() => assertPrivateVersionPolicy({ private: true, version: "1.0.0" })).not.toThrow();
+    expect(() => assertPrivateVersionPolicy({ private: true, version: "1.0.1" })).not.toThrow();
   });
 
-  it("blocks versions above 1.0.0 while private", () => {
-    expect(() => assertPrivateVersionPolicy({ private: true, version: "1.0.1" }))
-      .toThrow(/must not exceed 1\.0\.0/);
+  it("blocks versions above 1.0.1 while private", () => {
+    expect(() => assertPrivateVersionPolicy({ private: true, version: "1.0.2" }))
+      .toThrow(/must not exceed 1\.0\.1/);
     expect(() => assertPrivateVersionPolicy({ private: true, version: "1.1.0-beta.1" }))
-      .toThrow(/must not exceed 1\.0\.0/);
+      .toThrow(/must not exceed 1\.0\.1/);
   });
 
   it("does not impose the private cap after the package is made public", () => {

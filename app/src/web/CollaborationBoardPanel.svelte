@@ -11,10 +11,10 @@
   export let onopenall:()=>void=()=>{};
   let cards:CollaborationBoardCard[]=[];let loading=true;let error="";let status="all";let editor=false;let saving=false;
   const workspaceName=(id?:string|null)=>workspaces.find(item=>item.id===id)?.displayName??"";
-  async function load(){loading=true;try{cards=await listBoardCards(api)}catch(value){error=value instanceof Error?value.message:String(value)}finally{loading=false}}
+  async function load(){loading=true;error="";try{cards=await listBoardCards(api)}catch(value){error=value instanceof Error?value.message:String(value)}finally{loading=false}}
   async function save(draft:CollaborationBoardDraft){saving=true;try{const card=await createBoardCard(api,draft);cards=[card,...cards];editor=false;onopen(card)}catch(value){error=value instanceof Error?value.message:String(value)}finally{saving=false}}
   function showAll(){status="all"}
-  $: activeCards=cards.filter(card=>card.boardStatus!=="completed");
+  $: activeCards=cards.filter(card=>card.boardStatus!=="completed"||cardNeedsAttention(card));
   $: visible=activeCards.filter(card=>status==="all"||card.boardStatus===status).sort((a,b)=>Number(cardNeedsAttention(b))-Number(cardNeedsAttention(a))||String(b.lastActivityAt??"").localeCompare(String(a.lastActivityAt??""))).slice(0,5);
   load();
 </script>

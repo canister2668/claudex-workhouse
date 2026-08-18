@@ -38,7 +38,7 @@ function createWorkerArchive(
     "licenses/THIRD_PARTY_NOTICES.ko.md":"test Korean third-party notices\n",
     "licenses/THIRD_PARTY_NOTICES.ja.md":"test Japanese third-party notices\n",
     "README-FIRST.txt":"test package\n",
-    "VERSION":"1.0.0\n"
+    "VERSION":"1.0.1\n"
   };
   if(platform==="windows"){
     files["Worker CLI.cmd"]="@echo off\r\n";
@@ -56,7 +56,7 @@ function createWorkerArchive(
   fs.writeFileSync(path.join(root,"package-manifest.json"),JSON.stringify({
     schemaVersion:1,
     product:"claudex-workhouse-worker",
-    version:"1.0.0",
+    version:"1.0.1",
     platform,
     architecture,
     nodeVersion:"v22.0.0",
@@ -81,8 +81,8 @@ function createWindowsPortable(directory:string){
   const rootName="claudex-workhouse-server-windows-x64-portable",root=path.join(directory,rootName);
   fs.mkdirSync(root,{recursive:true});
   fs.writeFileSync(path.join(root,"Claudex Workhouse.exe"),"synthetic launcher");
-  fs.writeFileSync(path.join(root,"current.json"),JSON.stringify({schemaVersion:1,version:"1.0.0",payloadDirectory:"payload/1.0.0",previousVersion:null}));
-  fs.writeFileSync(path.join(root,"payload-manifest.json"),JSON.stringify({schemaVersion:1,product:"claudex-workhouse-windows-server",version:"1.0.0",architecture:"x64",files:[]}));
+  fs.writeFileSync(path.join(root,"current.json"),JSON.stringify({schemaVersion:1,version:"1.0.1",payloadDirectory:"payload/1.0.1",previousVersion:null}));
+  fs.writeFileSync(path.join(root,"payload-manifest.json"),JSON.stringify({schemaVersion:1,product:"claudex-workhouse-windows-server",version:"1.0.1",architecture:"x64",files:[]}));
   const archive=path.join(directory,"claudex-workhouse-server-windows-x64-portable.zip");
   const result=spawnSync("zip",["-qr",archive,rootName],{cwd:directory,encoding:"utf8"});
   if(result.status!==0)throw new Error(result.stderr||`could not create ${archive}`);
@@ -117,13 +117,13 @@ function fixture(){
   };
   const windowsServer=path.join(directory,"claudex-workhouse-server-windows-x64.exe"),pe=Buffer.alloc(256);pe.write("MZ");pe.writeUInt32LE(64,0x3c);Buffer.from([0x50,0x45,0,0]).copy(pe,64);fs.writeFileSync(windowsServer,pe);
   const windowsPortable=createWindowsPortable(directory);
-  const nodePackage=path.join(directory,"claudex-workhouse-1.0.0.tgz");fs.writeFileSync(nodePackage,Buffer.alloc(4096,7));
+  const nodePackage=path.join(directory,"claudex-workhouse-1.0.1.tgz");fs.writeFileSync(nodePackage,Buffer.alloc(4096,7));
   const environment={
-    CLAUDEX_WORKHOUSE_RELEASE_VERSION:"1.0.0",
+    CLAUDEX_WORKHOUSE_RELEASE_VERSION:"1.0.1",
     CLAUDEX_WORKHOUSE_RELEASE_SEQUENCE:"7",
     CLAUDEX_WORKHOUSE_RELEASE_PUBLISHED_AT:"2026-07-27T12:00:00.000Z",
     CLAUDEX_WORKHOUSE_RELEASE_EXPIRY_DAYS:"90",
-    CLAUDEX_WORKHOUSE_RELEASE_ASSET_BASE_URL:"https://github.com/canister2668/claudex-workhouse/releases/download/v1.0.0",
+    CLAUDEX_WORKHOUSE_RELEASE_ASSET_BASE_URL:"https://github.com/canister2668/claudex-workhouse/releases/download/v1.0.1",
     CLAUDEX_WORKHOUSE_RELEASE_KEY_ID:"release-test-1",
     CLAUDEX_WORKHOUSE_RELEASE_PRIVATE_KEY_FILE:privateFile,
     CLAUDEX_WORKHOUSE_RELEASE_KEY_RING_FILE:ringFile,
@@ -157,8 +157,8 @@ describe("release manifest publishing script",()=>{
     const verified=verifyReleaseManifest({
       manifestBytes:fs.readFileSync(result.manifestFile),
       signatureBytes:fs.readFileSync(result.signatureFile),
-      manifestUrl:"https://github.com/canister2668/claudex-workhouse/releases/download/v1.0.0/release-manifest.json",
-      signatureUrl:"https://github.com/canister2668/claudex-workhouse/releases/download/v1.0.0/release-manifest.json.sig",
+      manifestUrl:"https://github.com/canister2668/claudex-workhouse/releases/download/v1.0.1/release-manifest.json",
+      signatureUrl:"https://github.com/canister2668/claudex-workhouse/releases/download/v1.0.1/release-manifest.json.sig",
       keyRing:JSON.parse(fs.readFileSync(value.ringFile,"utf8")),
       policy,
       now:new Date("2026-07-27T12:01:00.000Z")
@@ -186,8 +186,8 @@ describe("release manifest publishing script",()=>{
     const verified=verifyReleaseManifest({
       manifestBytes:fs.readFileSync(result.manifestFile),
       signatureBytes:fs.readFileSync(result.signatureFile),
-      manifestUrl:"https://github.com/canister2668/claudex-workhouse/releases/download/v1.0.0/release-manifest.json",
-      signatureUrl:"https://github.com/canister2668/claudex-workhouse/releases/download/v1.0.0/release-manifest.json.sig",
+      manifestUrl:"https://github.com/canister2668/claudex-workhouse/releases/download/v1.0.1/release-manifest.json",
+      signatureUrl:"https://github.com/canister2668/claudex-workhouse/releases/download/v1.0.1/release-manifest.json.sig",
       keyRing:JSON.parse(fs.readFileSync(value.ringFile,"utf8")),
       policy:{
         allowedManifestOrigins:["https://github.com/"],
@@ -205,10 +205,10 @@ describe("release manifest publishing script",()=>{
       registry:"https://registry.npmjs.org",
       name:"claudex-workhouse",
       format:"tgz",
-      filename:"claudex-workhouse-1.0.0.tgz",
+      filename:"claudex-workhouse-1.0.1.tgz",
       sha256:sha256(fs.readFileSync(value.environment.CLAUDEX_WORKHOUSE_NODE_PACKAGE))
     });
-    expect(result.manifest.nodePackage.url).toBe(`${value.environment.CLAUDEX_WORKHOUSE_RELEASE_ASSET_BASE_URL}/claudex-workhouse-1.0.0.tgz`);
+    expect(result.manifest.nodePackage.url).toBe(`${value.environment.CLAUDEX_WORKHOUSE_RELEASE_ASSET_BASE_URL}/claudex-workhouse-1.0.1.tgz`);
     // A tarball named for another version would let a release publish bytes its
     // own manifest does not describe.
     const renamed=path.join(path.dirname(value.environment.CLAUDEX_WORKHOUSE_NODE_PACKAGE),"claudex-workhouse-9.9.9.tgz");
@@ -245,7 +245,7 @@ describe("release manifest publishing script",()=>{
     const value=fixture();
     expect(()=>createReleaseManifest({
       ...value.environment,
-      CLAUDEX_WORKHOUSE_RELEASE_VERSION:"1.0.1"
+      CLAUDEX_WORKHOUSE_RELEASE_VERSION:"1.0.2"
     })).toThrow(/does not match app\/package.json version/);
   });
   it("refuses an official archive whose signed entrypoint contract is incomplete",()=>{

@@ -49,14 +49,17 @@ describe("bundled emotion runtime",()=>{
   });
 
   it("allows only the requested cross-provider outfits for DeepSeek and Ollama",async()=>{
-    const x=fixture();fs.mkdirSync(path.join(x.assets,"Gemma-e4b"),{recursive:true});
+    const x=fixture();for(const outfit of ["Gemma-e4b","WhaleGirl"])fs.mkdirSync(path.join(x.assets,outfit),{recursive:true});
     const deepseek=new EmotionWatcher(x.state,x.assets,process.platform,"DeepSeek",PROVIDER_EMOTION_OUTFITS.deepseek,"deepseek");
-    expect(deepseek.outfits()).toEqual(["DeepSeek","Ollama"]);
+    expect(deepseek.outfits()).toEqual(["DeepSeek","Ollama","WhaleGirl"]);
     await deepseek.setOutfit("Ollama");expect(deepseek.get().outfit).toBe("Ollama");
+    await deepseek.setOutfit("WhaleGirl");expect(deepseek.get().outfit).toBe("WhaleGirl");
     await deepseek.setOutfit("Antigravity");expect(deepseek.get().outfit).toBe("DeepSeek");
     const ollama=new EmotionWatcher(path.join(x.data,"ollama.json"),x.assets,process.platform,"Ollama",PROVIDER_EMOTION_OUTFITS.ollama,"ollama");
-    expect(ollama.outfits()).toEqual(["Antigravity","DeepSeek","Gemma-e4b","Ollama"]);
-    for(const outfit of ["DeepSeek","Antigravity","Gemma-e4b"]){await ollama.setOutfit(outfit);expect(ollama.get().outfit).toBe(outfit);}
+    expect(ollama.outfits()).toEqual(["Antigravity","DeepSeek","Gemma-e4b","Ollama","WhaleGirl"]);
+    for(const outfit of ["DeepSeek","Antigravity","Gemma-e4b","WhaleGirl"]){await ollama.setOutfit(outfit);expect(ollama.get().outfit).toBe(outfit);}
+    const claude=new EmotionWatcher(path.join(x.data,"claude-whale.json"),x.assets,process.platform,"normal",PROVIDER_EMOTION_OUTFITS.claude,"claude");
+    expect(claude.outfits()).not.toContain("WhaleGirl");
   });
 
   it("persists the selected Codex outfit through the shared provider watcher",async()=>{
@@ -112,7 +115,7 @@ describe("bundled emotion runtime",()=>{
 
   it("finds every burnout palette id in every currently bundled character outfit",()=>{
     const x=fixture(),watcher=new EmotionWatcher(x.state,path.resolve("public","emoticons")),catalog=watcher.assetCatalog();
-    expect(Object.keys(catalog)).toEqual(["Antigravity","DeepSeek","Gemma-e4b","Gpt-Codex","Gpt-Sol","Grok","Ollama","capy","normal"]);
+    expect(Object.keys(catalog)).toEqual(["Antigravity","DeepSeek","Gemma-e4b","Gpt-Codex","Gpt-Sol","Grok","Ollama","WhaleGirl","capy","normal"]);
     for(const[outfit,assets]of Object.entries(catalog)){
       const ids=assets.map(asset=>asset.emotion);
       expect(ids,`${outfit} uses the lowercase renderer id dead`).toContain("dead");

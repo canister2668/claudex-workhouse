@@ -100,6 +100,12 @@ const args = ["--single",prompt,"--output-format","streaming-messages-json","--i
 const conversationAttachments=runtimeProfile==="conversation"?parseConversationAttachments(productEnv("CONVERSATION_ATTACHMENTS")):[];
 if(runtimeProfile==="conversation")args.push("--disable-web-search","--tools",conversationAttachments.length?"read_file,search_tool,use_tool":"search_tool,use_tool");
 else if(restrictedTools)args.push("--tools",profile.tools.join(","));
+// Grok's plan tools need an interactive client to approve the plan. In a
+// headless single-turn session exit_plan_mode fails with a disconnected
+// client and cancels the whole run, so keep them out of the default tool set.
+// `--no-plan` does not remove them, and the restricted profiles above already
+// exclude them.
+else args.push("--disallowed-tools","enter_plan_mode,exit_plan_mode");
 let delegationSettings:unknown;try{delegationSettings=JSON.parse(productEnv("DELEGATION_SETTINGS")??"null");}catch{delegationSettings=null;}
 const sandboxNotice=level==="full"?"Grok is running with explicit full access and no OS filesystem sandbox.":level==="read"?"Grok is restricted to the listed read/search tools; this is a provider tool restriction, not an OS filesystem sandbox.":"Grok auto mode applies its provider safety checks, but this host does not enforce an OS filesystem sandbox.";
 args.push("--rules",runtimeProfile==="conversation"?[conversationAttachments.length?"Claudex Workhouse conversation-only runtime: respond to the supplied conversation prompt. Do not modify files, run commands, browse, delegate work, or turn the exchange into an implementation task.":"Claudex Workhouse conversation-only runtime: respond to the supplied conversation prompt. Do not inspect or modify files, run commands, browse, delegate work, or turn the exchange into an implementation task.",conversationAttachmentInstruction(conversationAttachments),CONVERSATION_EMOTION_INSTRUCTION].filter(Boolean).join("\n\n"):`${delegationDeveloperInstructions(normalizeDelegationSettings(delegationSettings),providerId)}\n\n${executionPolicyTurnInstructions(providerId,level,cwd)}\n${sandboxNotice}`);
@@ -227,6 +233,7 @@ lines.on("line", (line) => {
         if(itemId)bashCommandsByToolId.delete(itemId);
         const content=typeof part.content==="string"?part.content:JSON.stringify(part.content??"");
         if(isError&&/User cancelled the execution for tool/i.test(content))headlessApprovalFailure="Grok tool approval was unavailable in the headless session.";
+        else if(isError&&/Plan approval could not be completed/i.test(content))headlessApprovalFailure="Grok plan approval was unavailable in the headless session.";
         if(command)spool.append({type:"command_completed",content,threadId:state.sessionId,itemId,toolName:"Bash",status:isError?"failed":"completed",metadata:{nativeType:event.type,command,isError,ok:!isError,source:"provider"}});
         else spool.append({type:"tool_completed",content,threadId:state.sessionId,itemId,metadata:{nativeType:event.type,isError}});
       }

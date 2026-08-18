@@ -53,8 +53,13 @@ repository merely because Claudex Workhouse implements an interface to them.
 ## Project artwork
 
 The emotion avatars and application icons under `app/public` are original works
-created by Canister for Claudex Workhouse. They are not third-party components
-and are covered by the Claudex Workhouse project license.
+created by Canister for Claudex Workhouse. They are not third-party components.
+
+That artwork is released under the Creative Commons Attribution 4.0
+International license (CC BY 4.0), separately from the AGPL-3.0-only license
+that governs the project source. Anyone may reuse, modify, and redistribute it,
+including commercially, as long as Canister is credited.
+<https://creativecommons.org/licenses/by/4.0/>
 
 Interface icons supplied by `@lucide/svelte` remain third-party works under the
 ISC license shown above.

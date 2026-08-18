@@ -6,10 +6,19 @@ import{EMOTION_MCP_PROFILE_HEADER,EMOTION_MCP_SERVER_ID,EMOTION_MCP_TASK_HEADER,
 
 const PRESERVED_DIRECTORIES=["agents","hooks","personas","plugins","roles","skills"];
 const PRIVATE_FILES=["auth.json","mcp_credentials.json","agent_id"];
+const TASK_HOME_MARKER=".claudex-workhouse-grok-task-home";
+
+// A service restarted from inside a Grok task inherits that task's GROK_HOME.
+// Treating a per-task home as the shared one links nothing back to the real
+// sessions directory, so every later resume falls through to a remote restore
+// that 404s. Never accept a task home as the shared home.
+function isTaskHome(candidate:string){
+  return fs.existsSync(path.join(candidate,TASK_HOME_MARKER))||path.basename(candidate)==="grok-home";
+}
 
 function sharedGrokHome(binary:string){
   const configured=String(process.env.CLAUDEX_WORKHOUSE_GROK_HOME??process.env.GROK_HOME??"").trim();
-  if(configured&&path.isAbsolute(configured))return configured;
+  if(configured&&path.isAbsolute(configured)&&!isTaskHome(configured))return configured;
   const parent=path.dirname(binary),bundled=path.basename(parent)==="bin"?path.dirname(parent):"";
   if(bundled&&fs.existsSync(bundled))return bundled;
   return path.join(os.homedir(),".grok");
@@ -45,6 +54,7 @@ export function grokTaskEnvironment(binary:string,taskDirectory:string,port:numb
   const validTask=validEmotionTaskId("grok",taskId);if(!validTask)throw new Error("A valid Grok task ID is required for the task environment.");
   const sharedHome=sharedGrokHome(binary),taskHome=path.join(taskDirectory,"grok-home");
   fs.mkdirSync(taskHome,{recursive:true,mode:0o700});fs.chmodSync(taskHome,0o700);
+  fs.writeFileSync(path.join(taskHome,TASK_HOME_MARKER),"",{encoding:"utf8",mode:0o600});
   for(const name of PRIVATE_FILES)copyPrivateFile(sharedHome,taskHome,name);
   for(const name of [...PRESERVED_DIRECTORIES,"sessions"])safeLinkDirectory(sharedHome,taskHome,name);
   let source="";try{source=fs.readFileSync(path.join(sharedHome,"config.toml"),"utf8");}catch{}

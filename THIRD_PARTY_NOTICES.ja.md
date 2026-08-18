@@ -53,8 +53,12 @@ Claudex Workhouse は、別途インストールされた Codex および Claude
 ## プロジェクトのアートワーク
 
 `app/public` 配下の感情アバターとアプリケーションアイコンは、Canister が Claudex Workhouse の
-ために制作した原著作物です。第三者コンポーネントではなく、Claudex Workhouse のプロジェクト
-ライセンスが適用されます。
+ために制作した原著作物です。第三者コンポーネントではありません。
+
+このアートワークは、プロジェクトのソースに適用される AGPL-3.0-only とは別に、クリエイティブ・
+コモンズ 表示 4.0 国際ライセンス（CC BY 4.0）で提供されます。Canister をクレジットすれば、
+商用利用を含めて誰でも自由に使用、改変、再配布できます。
+<https://creativecommons.org/licenses/by/4.0/deed.ja>
 
 `@lucide/svelte` が提供するインターフェースアイコンは、上表の ISC ライセンスが適用される
 第三者著作物です。

@@ -18,8 +18,8 @@ export const PROVIDER_EMOTION_OUTFITS:Record<EmotionProvider,readonly string[]>=
   claude:["normal","capy"],
   antigravity:["Antigravity","Gemma-e4b"],
   grok:["Grok"],
-  deepseek:["DeepSeek","Ollama"],
-  ollama:["Ollama","DeepSeek","Antigravity","Gemma-e4b"]
+  deepseek:["DeepSeek","Ollama","WhaleGirl"],
+  ollama:["Ollama","DeepSeek","Antigravity","Gemma-e4b","WhaleGirl"]
 };
 const DEFAULT_STATE: EmotionState = { emotion: "neutral", line: "", statusLine: "", outfit: "normal" };
 const slug = (value: unknown, fallback: string) => {

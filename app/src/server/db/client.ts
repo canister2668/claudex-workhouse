@@ -208,6 +208,7 @@ export class DeckDatabase {
       : this.request<{ journalMode: string; synchronous:number; walAutocheckpoint:number }>("ping",{},timeoutMs);
   }
   listTasks() { return this.request<DeckTask[]>("list_tasks"); }
+  listTasksByWorkChainIds(chainIds:string[]) { return this.request<DeckTask[]>("list_tasks_by_work_chain_ids",{chainIds:chainIds.slice(0,200)}); }
   searchHistoryTasks(params:{query:string;provider?:string;workspaceId?:string;status?:string;from?:string;to?:string;cursorUpdatedAt?:string;cursorId?:string;limit?:number;maxScan?:number}){
     return this.request<{results:Array<Record<string,unknown>>;nextCursor:{updatedAt:string;id:string}|null;scanned:number;exhausted:boolean}>("search_history_tasks",params);
   }
@@ -348,6 +349,7 @@ export class DeckDatabase {
   getCollaborationSession(id: string) { return this.request<any | null>("get_collaboration_session", { id }); }
   getCollaborationDetailSnapshot(id:string){return this.request<{session:any|null;participants:any[];runs:any[];messages:any[];avatarStates:any[]}>("get_collaboration_detail_snapshot",{id});}
   listCollaborationSessions(includeArchived = false) { return this.request<any[]>("list_collaboration_sessions", { includeArchived }); }
+  listCollaborationSessionsByWorkChainIds(chainIds:string[],includeArchived=false) { return this.request<any[]>("list_collaboration_sessions_by_work_chain_ids",{chainIds:chainIds.slice(0,200),includeArchived}); }
   deleteCollaborationSession(id: string) { return this.request<{deleted:boolean;artifactPaths:string[]}>("delete_collaboration_session", { id }); }
   upsertCollaborationParticipant(participant: Record<string,unknown>) { return this.request<any>("upsert_collaboration_participant", { participant }); }
   listCollaborationParticipants(collaborationSessionId: string) { return this.request<any[]>("list_collaboration_participants", { collaborationSessionId }); }

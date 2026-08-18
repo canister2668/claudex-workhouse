@@ -2,7 +2,7 @@
   "name": "claudex-workhouse-vscode",
   "displayName": "Claudex Workhouse",
   "description": "Send the active file, selection, and diagnostics to Claudex Workhouse.",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "publisher": "claudex-workhouse",
   "license": "AGPL-3.0-only",
   "repository": "https://github.com/canister2668/claudex-workhouse",
