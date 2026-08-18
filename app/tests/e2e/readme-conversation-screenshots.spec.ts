@@ -37,8 +37,8 @@ test(`captures sanitized ${captureLocale} README conversation screens`,async({pa
     if(pathname==="/api/hosts")return json({hosts:[{id:"demo-host",type:"local",displayName:"Personal NAS",platform:"linux",architecture:"x64",status:"online",lastSeenAt:now,capabilities:{}}]});
     if(pathname.startsWith("/api/workspaces"))return json({workspaces:[{id:"demo-workspace",projectId:"demo-project",hostId:"demo-host",displayName:"Demo Workspace",canonicalPath:"/demo/workspace"}]});
     if(pathname==="/api/emotion"){
-      const emotions=["thinking","happy"],assets=(prefix:string)=>emotions.map(emotion=>({emotion,file:prefix?`${prefix}_${emotion}.webp`:`${emotion}.webp`}));
-      return json({state:{outfit:"normal",emotion:"neutral"},codexState:{outfit:"Gpt-Codex",emotion:"neutral"},outfits:["normal","Gpt-Codex","DeepSeek","Ollama"],assets:{normal:assets(""),"Gpt-Codex":assets("Gpt-Codex"),DeepSeek:assets("DeepSeek"),Ollama:assets("Ollama")},mode:"catch"});
+      const emotions=["thinking","happy"],assets=()=>emotions.map(emotion=>({emotion,file:`${emotion}.webp`}));
+      return json({state:{outfit:"normal",emotion:"neutral"},codexState:{outfit:"Gpt-Codex",emotion:"neutral"},outfits:["normal","Gpt-Codex","DeepSeek","Ollama"],assets:{normal:assets(),"Gpt-Codex":assets(),DeepSeek:assets("DeepSeek"),Ollama:assets("Ollama")},mode:"catch"});
     }
     if(pathname==="/api/providers/codex/models")return json({catalog:{models:[],permissions:[]}});
     if(pathname==="/api/providers/claude/permissions")return json({models:[],permissions:[],efforts:[],catalog:{models:[],stale:false}});

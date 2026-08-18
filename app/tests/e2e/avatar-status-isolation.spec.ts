@@ -30,11 +30,11 @@ test("Codex keeps the persisted Sol outfit while the reload snapshot is pending"
   });
   await page.goto("/",{waitUntil:"domcontentloaded"});
   const avatar=page.locator(".agent-avatar-slot.codex img").first();
-  await expect(avatar).toHaveAttribute("src",/\/emoticons\/Gpt-Sol\/Gpt-Sol_neutral\.webp$/);
+  await expect(avatar).toHaveAttribute("src",/\/emoticons\/Gpt-Sol\/neutral\.webp$/);
   const bootstrapped=page.waitForResponse(response=>new URL(response.url()).pathname==="/api/emotion");
   releaseEmotion();
   await bootstrapped;
-  await expect(avatar).toHaveAttribute("src",/\/emoticons\/Gpt-Sol\/Gpt-Sol_neutral\.webp$/);
+  await expect(avatar).toHaveAttribute("src",/\/emoticons\/Gpt-Sol\/neutral\.webp$/);
 });
 
 test("avatar status is task-scoped and compatible providers receive terminal events",async({page})=>{
@@ -68,7 +68,7 @@ test("avatar status is task-scoped and compatible providers receive terminal eve
     if(path==="/api/tasks"){const provider=url.searchParams.get("provider");return json({tasks:tasks.filter(item=>!provider||item.provider===provider),partial:false,warnings:[]});}
     if(path==="/api/provider-connections")return json({singleUser:true,accounts:[{provider:"codex",state:"connected",checkedAt:now},{provider:"antigravity",state:"connected",checkedAt:now},{provider:"deepseek",state:"connected",checkedAt:now},{provider:"ollama",state:"connected",checkedAt:now}],attempts:[]});
     if(path==="/api/provider-connections/attempts")return json({attempts:[]});
-    if(path==="/api/emotion")return json({state:{emotion:"neutral",line:"",statusLine:"",outfit:"normal"},codexState:{emotion:"neutral",line:"",statusLine:"",outfit:"Gpt-Codex"},antigravityState:{emotion:"building",line:"오염된 이전 작업",statusLine:"실행 중.",outfit:"Antigravity",sessionId:"shared-thread",taskId:"antigravity:old-task"},deepseekState:{emotion:"chu",line:"DeepSeek 작업 대사",statusLine:"정상",outfit:"DeepSeek",source:"mcp-deepseek",sessionId:"stale-deepseek-thread",taskId:"deepseek:new-task"},ollamaState:{emotion:"chu",line:"Ollama 작업 대사",statusLine:"정상",outfit:"Ollama",sessionId:"stale-ollama-thread",taskId:"ollama:new-task"},outfits:["normal"],outfitsByProvider:{codex:["Gpt-Codex","Gpt-Sol"],claude:["normal"],antigravity:["Antigravity"],deepseek:["DeepSeek"],ollama:["Ollama"]},assets:{DeepSeek:[{emotion:"neutral",file:"neutral.webp"},{emotion:"chu",file:"chu.webp"}],Ollama:[{emotion:"neutral",file:"neutral.webp"},{emotion:"chu",file:"chu~.webp"}]},mode:"catch"});
+    if(path==="/api/emotion")return json({state:{emotion:"neutral",line:"",statusLine:"",outfit:"normal"},codexState:{emotion:"neutral",line:"",statusLine:"",outfit:"Gpt-Codex"},antigravityState:{emotion:"building",line:"오염된 이전 작업",statusLine:"실행 중.",outfit:"Antigravity",sessionId:"shared-thread",taskId:"antigravity:old-task"},deepseekState:{emotion:"chu",line:"DeepSeek 작업 대사",statusLine:"정상",outfit:"DeepSeek",source:"mcp-deepseek",sessionId:"stale-deepseek-thread",taskId:"deepseek:new-task"},ollamaState:{emotion:"chu",line:"Ollama 작업 대사",statusLine:"정상",outfit:"Ollama",sessionId:"stale-ollama-thread",taskId:"ollama:new-task"},outfits:["normal"],outfitsByProvider:{codex:["Gpt-Codex","Gpt-Sol"],claude:["normal"],antigravity:["Antigravity"],deepseek:["DeepSeek"],ollama:["Ollama"]},assets:{DeepSeek:[{emotion:"neutral",file:"neutral.webp"},{emotion:"chu",file:"chu.webp"}],Ollama:[{emotion:"neutral",file:"neutral.webp"},{emotion:"chu",file:"chu.webp"}]},mode:"catch"});
     if(path==="/api/projects")return json({projects:[{id:"claudex-workhouse",name:"Claudex Workhouse",enabled:true}]});
     if(path==="/api/hosts")return json({hosts:[{id:"local",displayName:"Local",status:"online"}]});
     if(path==="/api/workspaces")return json({workspaces:[{id:"workspace-test",projectId:"claudex-workhouse",hostId:"local",displayName:"Claudex Workhouse",canonicalPath:"/srv/claudex-workhouse"}]});
@@ -94,7 +94,7 @@ test("avatar status is task-scoped and compatible providers receive terminal eve
   await expect(page.locator(".agent-status-tray.flow")).toContainText("DeepSeek 작업 대사");
   await expect(page.locator(".agent-status-tray.flow")).toContainText("Ollama 작업 대사");
   await expect(page.locator(".agent-avatar-slot.deepseek img")).toHaveAttribute("src",/\/emoticons\/DeepSeek\/chu\.webp$/);
-  await expect(page.locator(".agent-avatar-slot.ollama img")).toHaveAttribute("src",/\/emoticons\/Ollama\/chu~\.webp$/);
+  await expect(page.locator(".agent-avatar-slot.ollama img")).toHaveAttribute("src",/\/emoticons\/Ollama\/chu\.webp$/);
   await expect.poll(()=>page.evaluate(()=> (window as any).__avatarStreamUrls())).toContainEqual(expect.stringContaining("/api/tasks/antigravity/"));
 
   expect(await page.evaluate(()=> (window as any).__emitAvatarEvent("/api/tasks/antigravity/","agent-event",{type:"task_completed",content:"done",sequence:999,terminal:true,timestamp:new Date().toISOString()}))).toBeGreaterThan(0);
@@ -151,5 +151,5 @@ test("a stale completed turn cannot own the avatar after its follow-up starts",a
   await page.locator(".agent-avatar-slot.codex").getByRole("button").first().click();
   const racedPanel=page.locator(".agent-avatar-slot.codex .recent-session-pop");
   await expect(racedPanel).not.toContainText("이전 완료 훅");
-  await expect(racedPanel.locator(".recent-avatar-profile img")).toHaveAttribute("src",/Gpt-Codex_coding\.webp$/);
+  await expect(racedPanel.locator(".recent-avatar-profile img")).toHaveAttribute("src",/Gpt-Codex\/coding\.webp$/);
 });

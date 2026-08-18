@@ -50,9 +50,9 @@ describe("conversation inline emotion parser",()=>{
 
   it("builds fallback output frames for compatible providers from their own catalogs",()=>{
     const people:Record<string,{id:string;provider:"deepseek"|"ollama"}>={deepseek:{id:"deepseek",provider:"deepseek"},ollama:{id:"ollama",provider:"ollama"}},runs=[{id:"deep-run",participantId:"deepseek"},{id:"ollama-run",participantId:"ollama"}],outfits={deepseek:"DeepSeek",ollama:"Ollama"};
-    const frames=buildOutputAssetFrames({runs,participant:id=>people[id],output:run=>run.id==="deep-run"?"기뻐.":"생각해 볼게.",outfit:person=>outfits[person.provider],available:outfit=>[{emotion:"neutral",file:`${outfit}-neutral.webp`}],roleplayActive:()=>true,toneSnapshot:()=>({tonePreset:"default",emotionIntensity:"natural"})});
-    expect(frames.get("deep-run")?.[0]?.file).toBe("DeepSeek-neutral.webp");
-    expect(frames.get("ollama-run")?.[0]?.file).toBe("Ollama-neutral.webp");
+    const frames=buildOutputAssetFrames({runs,participant:id=>people[id],output:run=>run.id==="deep-run"?"기뻐.":"생각해 볼게.",outfit:person=>outfits[person.provider],available:outfit=>[{emotion:"neutral",file:"neutral.webp"}],roleplayActive:()=>true,toneSnapshot:()=>({tonePreset:"default",emotionIntensity:"natural"})});
+    expect(frames.get("deep-run")?.[0]?.file).toBe("neutral.webp");
+    expect(frames.get("ollama-run")?.[0]?.file).toBe("neutral.webp");
   });
 
   it("creates ordered stable scenes and converges from streaming to the completed snapshot",()=>{

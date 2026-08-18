@@ -17,11 +17,17 @@ import { describe, expect, it } from "vitest";
 // run from `app`, but a run started at the repository root would otherwise
 // scan nothing and pass.
 const APP = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
-const ROOTS = [join(APP, "src", "web"), join(APP, "src", "server"), join(APP, "..", "hooks")];
+// The suites count too: an E2E fixture kept serving Gpt-Sol_angry.webp after
+// the rename and only the public CI caught it, because the sweep stopped at
+// the sources.
+const ROOTS = [join(APP, "src", "web"), join(APP, "src", "server"), join(APP, "tests"), join(APP, "..", "hooks")];
 const EXTENSIONS = [".ts", ".mjs", ".svelte"];
-// One interpolation, or a bare name with an optional numeric variant. Nothing
-// may sit in front of it inside the filename.
-const ALLOWED = /^(?:\$\{[^{}]*\}|[a-z][a-z0-9]*(?:_[0-9]+)?)$/;
+// A computed filename must be exactly one interpolation. Anything in front of
+// it, or a second one, is the composition that broke.
+const COMPOSED = /^\$\{[^{}]*\}$/;
+// Names the rename retired. A static literal cannot drift with an outfit, so
+// only these are worth refusing outright.
+const RETIRED = /~|^Gpt-(?:Codex|Sol)_/;
 
 function sources() {
   const files: string[] = [];
@@ -43,6 +49,9 @@ describe("emotion asset filenames", () => {
     for (const file of sources()) {
       if (file.endsWith("emotion-asset-filenames.test.ts")) continue;
       const source = readFileSync(file, "utf8");
+      // Screenshots, clipboard fixtures and attachments are images too. Only
+      // code that reaches for an outfit asset can compose an outfit filename.
+      if (!/emoticon|emotionAsset/i.test(source)) continue;
       // Every literal that ends in an image extension, quoted or templated.
       for (const match of source.matchAll(/[`"']((?:[^`"'\\\n]|\\.)*?)\.(?:webp|png|gif)[`"']/g)) {
         const name = match[1]!;
@@ -50,7 +59,8 @@ describe("emotion asset filenames", () => {
         // directory is some other asset — an outfit filename never holds a
         // path, because the outfit segment is added when the URL is built.
         if (!name || name.includes("/")) continue;
-        if (ALLOWED.test(name)) continue;
+        const composed = name.includes("${");
+        if (composed ? COMPOSED.test(name) : !RETIRED.test(name)) continue;
         const line = source.slice(0, match.index).split("\n").length;
         offenders.push(`${relative(APP, file)}:${line}  ${match[0]}`);
       }

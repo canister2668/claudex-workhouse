@@ -65,7 +65,7 @@ test(`captures sanitized ${captureLocale} README product screens`,async({page})=
     if(pathname==="/api/provider-connections")return json({singleUser:true,accounts:[{provider:"codex",state:"connected",accountType:"chatgpt",planType:"personal",emailMasked:null},{provider:"claude",state:"connected",accountType:"claude.ai",planType:"personal",emailMasked:null}]});
     if(pathname==="/api/provider-connections/attempts")return json({attempts:[]});
     if(pathname==="/api/quota")return json({claude:{fiveHour:{pct:34,resetsAt:"2026-07-31T18:00:00.000Z",durationMins:300}},codex:{fiveHour:{pct:21,resetsAt:"2026-07-31T18:00:00.000Z",durationMins:300}},fetchedAt:now});
-    if(pathname==="/api/emotion")return json({state:{outfit:"normal",emotion:"neutral"},codexState:{outfit:"Gpt-Codex",emotion:"neutral"},outfits:["normal","Gpt-Codex"],assets:{normal:[{emotion:"neutral",file:"neutral.webp"}],"Gpt-Codex":[{emotion:"neutral",file:"Gpt-Codex_neutral.webp"}]},mode:"catch"});
+    if(pathname==="/api/emotion")return json({state:{outfit:"normal",emotion:"neutral"},codexState:{outfit:"Gpt-Codex",emotion:"neutral"},outfits:["normal","Gpt-Codex"],assets:{normal:[{emotion:"neutral",file:"neutral.webp"}],"Gpt-Codex":[{emotion:"neutral",file:"neutral.webp"}]},mode:"catch"});
     if(pathname==="/api/push")return json({preferences:{},publicKey:""});
     if(pathname==="/api/runtime-updates")return json({runtimes:[]});
     if(pathname.startsWith("/api/system-settings/"))return json({settings:null,candidates:{claude:[],codex:[]},locale:captureLocale,saved:true,existingInstallation:true});

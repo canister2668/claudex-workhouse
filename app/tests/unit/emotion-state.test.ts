@@ -53,9 +53,9 @@ describe("session-scoped emotion state",()=>{
     expect(localizedEmotionCopy(key=>translateFor("en",key),"avatar.line.unknown","literal copy")).toBe("literal copy");
   });
 
-  it("resolves canonical emotion ids to fragmented asset filenames",()=>{
-    const assets={Ollama:[{emotion:"neutral",file:"neutral.webp"},{emotion:"chu",file:"chu~.webp"}]};
-    expect(emotionAssetFile(assets,"Ollama","chu","chu.webp")).toBe("chu~.webp");
+  it("prefers the catalog entry over the caller's fallback name",()=>{
+    const assets={Ollama:[{emotion:"neutral",file:"neutral.webp"},{emotion:"chu",file:"chu_2.webp"}]};
+    expect(emotionAssetFile(assets,"Ollama","chu","chu.webp")).toBe("chu_2.webp");
     expect(emotionAssetFile(assets,"Ollama","missing","missing.webp")).toBe("missing.webp");
   });
 });

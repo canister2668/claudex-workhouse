@@ -33,7 +33,7 @@ test("conversation mode keeps alternating emotion scenes inside the lighter time
   const detail={session,participants,runs,messages:[{id:"message-user",messageType:"user-input",contentRef:"태블릿과 휴대폰 레이아웃을 함께 검토해 주세요.",round:1,createdAt:now}],avatarStates:[],runOutputs:{"run-codex":output("Codex"),"run-claude":output("Claude",1,true)},runEvents:{"run-codex":[usageEvent("codex","codex-session-id",2048,1968,80)],"run-claude":[usageEvent("claude","claude-session-id",1536,1488,48)]},tasks,continuation:{available:true,canAddRounds:true,canAutoContinue:true,canSubmitUserInput:true,canRetryFailedTurn:false}};
   const managedEntry={id:"managed-conclusion",name:"conversation-abababab-conclusion.md",type:"file",size:managedContent.length,modifiedAt:now,sensitive:false,relativePath:managedPath};
   let conclusionDeleteBody:any=null,managedDeleteBody:any=null,managedDeleted=false,sentMessageBody:any=null;
-  await page.route("**/emoticons/**",route=>route.fulfill({status:200,contentType:"image/webp",body:readFileSync("public/emoticons/Gpt-Sol/Gpt-Sol_angry.webp")}));
+  await page.route("**/emoticons/**",route=>route.fulfill({status:200,contentType:"image/webp",body:readFileSync("public/emoticons/Gpt-Sol/angry.webp")}));
   await page.route("**/api/**",async route=>{
     const pathname=new URL(route.request().url()).pathname,json=(value:unknown)=>route.fulfill({status:200,contentType:"application/json",body:JSON.stringify(value)});
     if(pathname==="/api/collaborations")return json({collaborations:[session]});
@@ -49,7 +49,7 @@ test("conversation mode keeps alternating emotion scenes inside the lighter time
     if(pathname==="/api/workspaces/workspace/files/resolve")return json({entry:managedEntry});
     if(pathname==="/api/workspaces/workspace/files/read")return json({relativePath:managedPath,size:managedContent.length,modifiedAt:now,sensitive:false,requiresConfirmation:false,binary:false,content:managedContent,offset:0,nextOffset:null});
     if(pathname==="/api/emotion"){
-      const emotions=["embarrassed","pout","wink"],assets=emotions.map(emotion=>({emotion,file:`${emotion}.webp`})),codexAssets=emotions.map(emotion=>({emotion,file:`Gpt-Sol_${emotion}.webp`}));
+      const emotions=["embarrassed","pout","wink"],assets=emotions.map(emotion=>({emotion,file:`${emotion}.webp`})),codexAssets=emotions.map(emotion=>({emotion,file:`${emotion}.webp`}));
       return json({state:{outfit:"normal"},codexState:{outfit:"Gpt-Sol"},outfits:["normal","Gpt-Sol"],assets:{normal:assets,"Gpt-Sol":codexAssets},mode:"catch"});
     }
     if(pathname==="/api/providers/codex/models")return json({catalog:{models:[],permissions:[]}});
