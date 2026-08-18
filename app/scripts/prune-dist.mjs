@@ -21,3 +21,26 @@ for (const dir of [path.join(root, "assets"), root]) {
   }
 }
 console.log("dist pruned (kept last 7 days of hashed assets)");
+
+// Emoticons are not hashed: every outfit serves stable paths, and the emotion
+// catalog reads this very directory. `emptyOutDir:false` therefore left a
+// renamed asset behind under both names, so the catalog kept offering the old
+// one and the naming convention held only in `public`. Mirror it exactly.
+const emoticons = path.join(root, "emoticons");
+const source = new URL("../public/emoticons", import.meta.url).pathname;
+let removed = 0;
+const mirror = (relative) => {
+  let entries = [];
+  try { entries = fs.readdirSync(path.join(emoticons, relative), { withFileTypes: true }); } catch { return; }
+  for (const entry of entries) {
+    const next = path.join(relative, entry.name);
+    if (entry.isDirectory()) { mirror(next); continue; }
+    if (fs.existsSync(path.join(source, next))) continue;
+    fs.rmSync(path.join(emoticons, next), { force: true });
+    removed += 1;
+  }
+};
+if (fs.existsSync(source)) {
+  mirror("");
+  console.log(`emoticons mirrored (${removed} stale file${removed === 1 ? "" : "s"} removed)`);
+}

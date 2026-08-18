@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import { matchEmotion } from "./emotion-match.mjs";
 
 const OUTCOME_EMOTIONS=new Set(["happy","proud","disappointed"]);
-const ACTIVITY_EMOTIONS=new Set(["thinking","thinking_2","thinking_3","coding","coding_2","coding_3","building","building_2","building_3","reading","reading_2","reading_3","searching","searching_2","searching_3","execute"]);
+const ACTIVITY_EMOTIONS=new Set(["thinking","thinking_2","thinking_3","coding","coding_2","coding_3","building","building_2","building_3","reading","reading_2","reading_3","searching","searching_2","searching_3"]);
 const providers=new Set(["claude","codex","deepseek","ollama","antigravity","grok"]);
 const provider=providers.has(process.argv[2])?process.argv[2]:"claude";
 const stateNames={claude:"state.json",codex:"codex-state.json",deepseek:"deepseek-state.json",ollama:"ollama-state.json",antigravity:"antigravity-state.json",grok:"grok-state.json"};
@@ -19,9 +19,14 @@ const suppliedLine=String(process.argv[5]??"");
 const fallbackRoot=path.resolve(path.dirname(fileURLToPath(import.meta.url)),"../..");
 const appRoot=process.env.CLAUDEX_WORKHOUSE_APP_ROOT||process.env.CLAUDEX_WORKHOUSE_ROOT||fallbackRoot;
 const dataRoot=process.env.CLAUDEX_WORKHOUSE_DATA_ROOT||process.env.CLAUDEX_WORKHOUSE_ROOT||appRoot;
-const dataDir=path.join(dataRoot,"data","emotion"),assetsRoot=path.join(appRoot,"app","public","emoticons");
+const dataDir=path.join(dataRoot,"data","emotion");
+// Mirror resolveEmotionAssetsDir: `app/dist` is what the server publishes and
+// the only one a packaged install has, so reading `public` unconditionally left
+// the hook with no assets there and every variant lookup falling back to the
+// bare name.
+const assetsRoot=[path.join(appRoot,"app","dist","emoticons"),path.join(appRoot,"app","public","emoticons")]
+  .find(candidate=>{try{return fs.statSync(candidate).isDirectory();}catch{return false;}})??path.join(appRoot,"app","dist","emoticons");
 const stateFile=path.join(dataDir,stateNames[provider]);
-const modeFile=path.join(dataDir,"emotion-mode");
 fs.mkdirSync(dataDir,{recursive:true,mode:0o700});
 
 let input={};
@@ -47,8 +52,13 @@ const holdActive=(provider==="codex"&&sameSession&&Number(current.holdUntil??0)>
 if((requested==="auto"||requested==="prompt")&&holdActive){
   process.exit(0);
 }else if(requested==="auto"||requested==="prompt"){
-  let mode="mcp";try{mode=fs.readFileSync(modeFile,"utf8").trim();}catch{/* default */}
-  explicit=mode==="catch"?matchEmotion(prompt):null;
+  // Keyword detection is the fallback in both modes, not a catch-mode feature.
+  // An MCP expression the model actually asked for is already held above, so
+  // reaching here means nothing was requested for this turn: mcp mode used to
+  // answer "thinking" and drop the prompt on the floor, which is why a kiss
+  // left the avatar reading. Catch mode still differs — it is the mode that
+  // has no MCP server to request anything in the first place.
+  explicit=matchEmotion(prompt);
   requested=explicit?.emotion??"thinking";
 }else if((requested==="done"||requested==="disappointed")&&ACTIVITY_EMOTIONS.has(String(current.emotion??""))){
   // An outcome replaces a held activity emotion rather than being swallowed by
@@ -59,7 +69,7 @@ if((requested==="auto"||requested==="prompt")&&holdActive){
 
 const outfit=String(current.outfit??defaultOutfits[provider]).replace(/[^a-zA-Z0-9_-]/g,"")||defaultOutfits[provider];
 const assetDir=path.join(assetsRoot,fs.existsSync(path.join(assetsRoot,outfit))?outfit:provider==="codex"?"Gpt-Codex":"normal");
-const prefix=provider==="codex"?`${outfit}_`:"";
+const prefix="";
 function variants(base){
   try{
     const pattern=new RegExp(`^${prefix.replace(/[.*+?^${}()|[\\]\\\\]/g,"\\\\$&")}${base.replace(/[.*+?^${}()|[\\]\\\\]/g,"\\\\$&")}(?:_[0-9]+)?\\.(?:webp|png|gif)$`,"i");

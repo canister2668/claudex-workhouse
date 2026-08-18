@@ -55,8 +55,19 @@ export function buildInlineEmotionCards(input:{
   if(!input.mode)return cards;
   for(const run of input.runs){
     const output=input.output(run),parsed=parseInlineEmotionScenes(String(run.id),String(run.id),output,input.mode);
-    if(!parsed.hasMarkers)continue;
-    const person=input.participant(run.participantId),outfit=input.outfit(person),available=input.available(outfit),scenes=parsed.scenes.map(scene=>({...scene,asset:resolveInlineEmotionAsset(scene.emotion,available,scene.id)}));
+    const person=input.participant(run.participantId),outfit=input.outfit(person),available=input.available(outfit);
+    // Not every model honours the marker contract on every turn. The weaker
+    // ones answer in plain prose, and skipping those runs left the turn with no
+    // avatar at all — the same conversation shows a face for one speaker and
+    // nothing for the other. Read the emotion from the words instead, which is
+    // what the archival export has always done for unmarked output.
+    if(!parsed.hasMarkers){
+      const inferred=selectOutputAssets(String(run.id),output,available)[0];
+      if(!inferred)continue;
+      cards.set(run.id,{...parsed,scenes:[{id:`${run.id}:inferred`,emotion:inferred.emotion,text:parsed.plainText.trim(),sourceOffset:0,asset:inferred}]});
+      continue;
+    }
+    const scenes=parsed.scenes.map(scene=>({...scene,asset:resolveInlineEmotionAsset(scene.emotion,available,scene.id)}));
     cards.set(run.id,{...parsed,scenes});
   }
   return cards;

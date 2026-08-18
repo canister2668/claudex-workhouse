@@ -23,6 +23,7 @@
     "test:e2e": "playwright test",
     "test:e2e:release": "playwright test tests/e2e/conversation-mode-redesign.spec.ts tests/e2e/input-folding.spec.ts tests/e2e/context-usage.spec.ts tests/e2e/task-outcome-popup.spec.ts tests/e2e/work-panel-scroll.spec.ts tests/e2e/mini-tablet-landscape-chrome.spec.ts tests/e2e/scroll-chrome-resolution-matrix.spec.ts --project=mobile-360 --project=mobile-412 --project=tablet-800",
     "test:e2e:docker": "sh scripts/test-e2e-docker.sh",
+    "test:node-package:docker": "sh scripts/test-node-package-docker.sh",
     "check": "pnpm run check:version && pnpm run docs:verify && svelte-check --tsconfig ./tsconfig.json && tsc -p tsconfig.server.json --noEmit && tsc -p tsconfig.scripts.json --noEmit",
     "check:version": "node scripts/verify-private-version.mjs",
     "docs:verify": "node scripts/verify-doc-navigation.mjs",

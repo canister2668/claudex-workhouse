@@ -85,7 +85,7 @@ describe("provider worker emotion bridge",()=>{
     updateWorkerEmotion(root,"antigravity","disappointed","gemine",()=>0);
     expect(JSON.parse(fs.readFileSync(file,"utf8"))).toMatchObject({emotion:"disappointed",source:"antigravity-worker"});
 
-    held("execute");
+    held("building_3");
     updateWorkerEmotion(root,"antigravity","done","gemine",()=>0);
     expect(JSON.parse(fs.readFileSync(file,"utf8"))).toMatchObject({emotion:"proud",source:"antigravity-worker"});
 

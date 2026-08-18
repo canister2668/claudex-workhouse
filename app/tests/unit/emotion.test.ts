@@ -15,8 +15,8 @@ function fixture(){
   const assets=path.join(root,"app","public","emoticons"),data=path.join(root,"data","emotion");
   for(const outfit of ["normal","Gpt-Codex","DeepSeek","Ollama","Antigravity","Grok"])fs.mkdirSync(path.join(assets,outfit),{recursive:true});
   for(const name of ["neutral","happy","thinking","thinking_2","chu","dead"])fs.writeFileSync(path.join(assets,"normal",`${name}.webp`),"asset");
-  for(const name of ["neutral","happy","thinking","thinking_2","chu~","dead"])fs.writeFileSync(path.join(assets,"Gpt-Codex",`Gpt-Codex_${name}.webp`),"asset");
-  for(const outfit of ["DeepSeek","Ollama","Antigravity","Grok"])for(const name of ["neutral","happy","thinking","thinking_2","chu~","dead"])fs.writeFileSync(path.join(assets,outfit,`${name}.webp`),"asset");
+  for(const name of ["neutral","happy","thinking","thinking_2","chu","dead"])fs.writeFileSync(path.join(assets,"Gpt-Codex",`${name}.webp`),"asset");
+  for(const outfit of ["DeepSeek","Ollama","Antigravity","Grok"])for(const name of ["neutral","happy","thinking","thinking_2","chu","dead"])fs.writeFileSync(path.join(assets,outfit,`${name}.webp`),"asset");
   fs.mkdirSync(data,{recursive:true});fs.writeFileSync(path.join(data,"emotion-mode"),"catch\n");
   return{root,assets,data,state:path.join(data,"state.json")};
 }
@@ -28,7 +28,7 @@ describe("bundled emotion runtime",()=>{
     expect(watcher.outfits()).toEqual(["Antigravity","DeepSeek","Gpt-Codex","Grok","Ollama","normal"]);
     expect(watcher.assetCatalog().normal.map(item=>item.emotion)).toContain("happy");
     expect(watcher.assetCatalog().normal).toContainEqual({emotion:"dead",file:"dead.webp"});
-    expect(watcher.assetCatalog()["Gpt-Codex"]).toContainEqual({emotion:"dead",file:"Gpt-Codex_dead.webp"});
+    expect(watcher.assetCatalog()["Gpt-Codex"]).toContainEqual({emotion:"dead",file:"dead.webp"});
     expect(watcher.assetCatalog().normal.map(item=>item.emotion)).not.toContain("Dead");
     await watcher.setState({emotion:"happy",line:"완료"});
     expect(JSON.parse(fs.readFileSync(x.state,"utf8"))).toMatchObject({emotion:"happy",line:"완료"});
@@ -159,5 +159,48 @@ describe("bundled emotion runtime",()=>{
     expect(result.status).toBe(0);
     expect(JSON.parse(fs.readFileSync(path.join(data,"ollama-state.json"),"utf8"))).toMatchObject({emotion:"chu",outfit:"Ollama",sessionId:"ollama-data-root"});
     expect(fs.existsSync(path.join(x.data,"ollama-state.json"))).toBe(false);
+  });
+});
+
+describe("bundled outfit naming convention",()=>{
+  // The runtime used to carry three translation rules — a Gpt- filename prefix,
+  // chu~ beside chu, and execute standing in for gift artwork that was simply
+  // misnamed. Every alias is gone, so the invariant they hid has to be checked
+  // directly: one bare lowercase name per emotion, identical across outfits.
+  const root=path.resolve("public","emoticons");
+  const outfits=fs.readdirSync(root,{withFileTypes:true}).filter(entry=>entry.isDirectory()).map(entry=>entry.name).sort();
+  const names=(outfit:string)=>fs.readdirSync(path.join(root,outfit)).map(file=>file.replace(/\.(?:webp|png|gif)$/i,"")).sort();
+
+  it("names every asset the same way in every outfit",()=>{
+    expect(outfits.length).toBeGreaterThan(1);
+    for(const outfit of outfits){
+      for(const name of names(outfit)){
+        expect(name,`${outfit}/${name} must be a bare lowercase name`).toMatch(/^[a-z][a-z0-9]*(?:_[0-9]+)?$/);
+      }
+    }
+  });
+
+  it("gives every outfit the same emotion groups, variants aside",()=>{
+    const groups=(outfit:string)=>new Set(names(outfit).map(name=>name.replace(/_[0-9]+$/,"")));
+    const reference=groups(outfits[0]!);
+    for(const outfit of outfits.slice(1)){
+      expect([...groups(outfit)].sort(),`${outfit} differs from ${outfits[0]}`).toEqual([...reference].sort());
+    }
+    // Renaming cannot invent artwork, so a gap here is a missing drawing.
+    expect(reference.has("gift")).toBe(true);
+    expect(reference.has("execute")).toBe(false);
+  });
+
+  // The catalog reads `dist`, not `public`, and the build keeps `emptyOutDir`
+  // off so clients mid-deploy still find the previous shell. A rename therefore
+  // left the old filename serving from `dist` under both names until
+  // prune-dist mirrored the tree. Check the served copy, not just the source.
+  it("serves exactly the source assets once the tree is built",()=>{
+    const built=path.resolve("dist","emoticons");
+    if(!fs.existsSync(built))return;
+    for(const outfit of outfits){
+      expect(fs.readdirSync(path.join(built,outfit)).sort(),`${outfit} differs between public and dist`)
+        .toEqual(fs.readdirSync(path.join(root,outfit)).sort());
+    }
   });
 });

@@ -22,7 +22,7 @@ const ACTIVITY_VARIANTS:Record<string,string[]>={
 };
 
 /** Emotions that assert work is still happening, so a finished task must replace them. */
-export const ACTIVITY_EMOTIONS=new Set([...Object.values(ACTIVITY_VARIANTS).flat(),"execute"]);
+export const ACTIVITY_EMOTIONS=new Set(Object.values(ACTIVITY_VARIANTS).flat());
 export const isTerminalEmotion=(requested:string)=>requested==="done"||requested==="disappointed";
 /** Faces that report an outcome, and therefore claim the task is over. */
 export const OUTCOME_EMOTIONS=new Set(["happy","proud","disappointed"]);

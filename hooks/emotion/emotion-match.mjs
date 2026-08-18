@@ -5,7 +5,7 @@ export const EMOTIONS = [
   "tired", "dead", "disappointed", "disgusted", "facepalm",
   "laughing", "nervous", "pout", "speechless", "wink", "chu", "gift",
   "coding", "coding_2", "coding_3", "building", "building_2",
-  "building_3", "execute", "reading", "reading_2", "reading_3",
+  "building_3", "reading", "reading_2", "reading_3",
   "searching", "searching_2", "searching_3"
 ];
 
@@ -47,7 +47,7 @@ const RULES = [
   [/역겨|혐오|징그러|불쾌|disgust/u, "disgusted"], [/실망|아쉬워|disappoint/u, "disappointed"],
   [/멘붕|영혼\s*(?:나간|없)|죽은\s*표정|사망|dead/u, "dead"], [/생각|고민|think/u, "thinking"],
   [/코딩|코드\s*(?:써|수정|작성)|coding/u, "coding"], [/빌드|배포|building/u, "building"],
-  [/실행\s*(?:해|해줘|할게|중)|execute/u, "execute"], [/읽어|읽는\s*표정|reading/u, "reading"],
+  [/실행\s*(?:해|해줘|할게|중)|execute/u, "building"], [/읽어|읽는\s*표정|reading/u, "reading"],
   [/검색|찾아봐|조사|searching/u, "searching"], [/무표정|중립|기본\s*표정|평온|차분|neutral/u, "neutral"]
 ];
 

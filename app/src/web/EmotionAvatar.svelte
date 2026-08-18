@@ -148,10 +148,9 @@
   $: noticeScope=`${ctxEngine??"all"}:${externalState?.key??context?.taskId??context?.sessionId??""}`;
   $: if(noticeScope!==lastNoticeScope){if(lastNoticeScope)manuallyCollapsed=false;lastNoticeScope=noticeScope;}
   $: if(noticeKey!==lastNoticeKey){const hadNotice=Boolean(lastNoticeKey),clearingExternal=hadExternalState&&!externalState,outcome=terminalNoticeStatus(context?.status);lastNoticeKey=noticeKey;hadExternalState=Boolean(externalState);if(mounted&&hadNotice&&!clearingExternal){if(suspended){pendingReveal=true;pendingRevealForce=pendingRevealForce||outcome;}else revealNotice(outcome);}}
-  $: codexAssetEmotion = emotion === "chu" ? "chu~" : emotion;
-  $: normalAssetEmotion = emotion === "execute" ? "building" : emotion;
-  $: outfitAssetFile=emotionAssetFile(assets,outfit,ctxEngine==="codex"?emotion:normalAssetEmotion,ctxEngine==="codex"?`${outfit}_${codexAssetEmotion}.webp`:`${normalAssetEmotion}.webp`);
-  $: codexFallbackFile=emotionAssetFile(assets,"Gpt-Codex",emotion,`Gpt-Codex_${codexAssetEmotion}.webp`);
+  $: normalAssetEmotion = emotion;
+  $: outfitAssetFile=emotionAssetFile(assets,outfit,normalAssetEmotion,`${normalAssetEmotion}.webp`);
+  $: codexFallbackFile=emotionAssetFile(assets,"Gpt-Codex",normalAssetEmotion,`${normalAssetEmotion}.webp`);
   $: normalFallbackFile=emotionAssetFile(assets,"normal",normalAssetEmotion,`${normalAssetEmotion}.webp`);
   $: outfitNeutralFile=emotionAssetFile(assets,outfit,"neutral","neutral.webp");
   $: normalNeutralFile=emotionAssetFile(assets,"normal","neutral","neutral.webp");
@@ -263,7 +262,7 @@
             {#if onFloatingPinnedChange}<button type="button" class:on={floatingPinned} aria-pressed={floatingPinned} onclick={()=>onFloatingPinnedChange?.(!floatingPinned)}><Pin size={13}/>{$t("avatar.pinFloating",{state:floatingPinned?$t("common.on"):$t("common.off")})}</button>{/if}
             {#if ctxEngine === "codex"}
               {#each [["Gpt-Codex","Codex"],["Gpt-Sol","Sol"]] as [avatar,name]}
-                <button type="button" class="avatar-choice" class:on={outfit===avatar} onclick={()=>{void setOutfit(avatar);controlsOpen=false;}}><img src={emotionAssetUrl(avatar,`${avatar}_neutral.webp`)} alt=""/>{name}</button>
+                <button type="button" class="avatar-choice" class:on={outfit===avatar} onclick={()=>{void setOutfit(avatar);controlsOpen=false;}}><img src={emotionAssetUrl(avatar,"neutral.webp")} alt=""/>{name}</button>
               {/each}
             {:else if outfits.length > 1}
               {#each outfits as item}

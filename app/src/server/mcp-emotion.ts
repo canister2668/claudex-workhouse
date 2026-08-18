@@ -21,7 +21,7 @@ const EMOTIONS = [
   "scared", "sleepy", "thinking", "thinking_2", "thinking_3",
   "tired", "dead", "disappointed", "disgusted", "facepalm",
   "laughing", "nervous", "pout", "speechless", "wink", "chu",
-  "gift", "execute",
+  "gift",
   "coding", "coding_2", "coding_3",
   "building", "building_2", "building_3",
   "reading", "reading_2", "reading_3",
@@ -56,16 +56,11 @@ export function registerEmotionMcp(app: FastifyInstance, options: { watcher: Emo
     catch { return ["normal"]; }
   };
   const defaultOutfit = (outfits: string[]) => outfits.includes("normal") ? "normal" : outfits[0] ?? "normal";
+  // Every outfit uses the same bare lowercase filename. The aliases that used
+  // to paper over chu~, the Gpt- filename prefix, and execute-as-gift are gone
+  // with the names they translated; see the outfit convention test.
   const resolveFile = (outfit: string, emotion: string) => {
-    const names = emotion === "chu" ? ["chu", "chu~"]
-      : emotion === "execute" && !outfit.startsWith("Gpt-") ? ["execute", "building"]
-      : [emotion];
-    for (const name of names) {
-      for (const ext of EXTS) {
-        const files = outfit.startsWith("Gpt-") ? [`${outfit}_${name}${ext}`, `${name}${ext}`] : [`${name}${ext}`];
-        for (const file of files) if (fs.existsSync(path.join(assetsDir, outfit, file))) return file;
-      }
-    }
+    for (const ext of EXTS) if (fs.existsSync(path.join(assetsDir, outfit, `${emotion}${ext}`))) return `${emotion}${ext}`;
     return null;
   };
   // fallback chain: <outfit>/<emotion> → <other>/<emotion> → <outfit>/neutral → default/neutral

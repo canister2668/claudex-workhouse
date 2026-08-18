@@ -133,9 +133,7 @@ export class EmotionWatcher {
         const assets:EmotionAsset[]=[];
         for(const file of fs.readdirSync(path.join(root,entry.name),{withFileTypes:true})){
           if(!file.isFile()||!/^[a-zA-Z0-9_~-]+\.(?:webp|png|gif)$/i.test(file.name))continue;
-          let emotion=file.name.replace(/\.(?:webp|png|gif)$/i,"");
-          if(entry.name.startsWith("Gpt-")&&emotion.startsWith(`${entry.name}_`))emotion=emotion.slice(entry.name.length+1);
-          if(emotion==="chu~")emotion="chu";
+          const emotion=file.name.replace(/\.(?:webp|png|gif)$/i,"");
           assets.push({emotion,file:file.name});
         }
         if(assets.length)catalog[entry.name]=assets.sort((a,b)=>a.file.localeCompare(b.file)).slice(0,200);

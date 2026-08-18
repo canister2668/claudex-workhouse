@@ -3,6 +3,8 @@ export const INLINE_EMOTION_NAMES=[
 ] as const;
 
 const INLINE_EMOTION_SET=new Set<string>(INLINE_EMOTION_NAMES);
+// Not an asset name: the artwork is `chu` everywhere now. This maps what models
+// actually type onto that canonical name, which is the point of normalizing.
 const INLINE_EMOTION_ALIASES:Record<string,string>={"chu~":"chu"};
 const CANONICAL_MARKER=/^\[\[e:([a-z0-9_~-]+)\]\]$/i;
 const SHORTHAND_MARKER=/^\[\[([a-z0-9_~-]+)\]\]$/i;

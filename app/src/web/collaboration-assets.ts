@@ -67,10 +67,10 @@ export function resolveInlineEmotionAsset(emotion:string,available:EmotionAsset[
 }
 
 function hash(value:string){let result=2166136261;for(let index=0;index<value.length;index++){result^=value.charCodeAt(index);result=Math.imul(result,16777619);}result^=result>>>16;result=Math.imul(result,0x85ebca6b);result^=result>>>13;result=Math.imul(result,0xc2b2ae35);return(result^(result>>>16))>>>0;}
-export function emotionGroup(emotion:string){return emotion.replace(/_[0-9]+$/,"").replace(/~$/,"");}
+export function emotionGroup(emotion:string){return emotion.replace(/_[0-9]+$/,"");}
 export function emotionLabel(emotion:string){const group=emotionGroup(emotion),key=`emotion.${group}`;return translate(key)===key?group:translate(key);}
 
-const ACTIVITY_GROUPS=new Set(["building","coding","execute","reading","searching"]);
+const ACTIVITY_GROUPS=new Set(["building","coding","reading","searching"]);
 const STRONG_EMOTION_GROUPS=new Set(["angry","dead","crying","scared","disgusted","love","chu","gift","sleepy","tired","speechless"]);
 const CONFIDENT_CUE_SCORE=2;
 const STRONG_CUE_SCORE=2.5;
@@ -85,7 +85,7 @@ function activityGroups(output:string){
   if(/빌드.{0,12}(?:중|하고 있|해볼게|하겠습니다|돌리)|(?:기능|앱|파일|코드|결과물|프로젝트).{0,8}(?:생성|만들|구축).{0,10}(?:중|고 있|해볼게|하겠습니다)/i.test(output))groups.push("building");
   if(/(?:문서|파일|자료|코드|결과물).{0,8}(?:읽|검토|살펴보|확인).{0,10}(?:중|고 있|어볼게|아볼게|하겠습니다)|(?:문서|파일|자료|코드|결과물).{0,8}(?:검토하|살펴보).{0,8}(?:는 중|고 있)/i.test(output))groups.push("reading");
   if(/(?:조사|검색|찾아보|알아보|자료를 찾).{0,12}(?:중|고 있|할게|하겠습니다|해볼게)/i.test(output))groups.push("searching");
-  if(/(?:실행|테스트|명령을 돌리).{0,10}(?:중|고 있|해볼게|하겠습니다)/i.test(output))groups.push("execute");
+  if(/(?:실행|테스트|명령을 돌리).{0,10}(?:중|고 있|해볼게|하겠습니다)/i.test(output))groups.push("building");
   return unique(groups);
 }
 
