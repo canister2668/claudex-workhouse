@@ -69,6 +69,13 @@ describe("release draft ordering contract",()=>{
     // The upload stays clobbering on purpose, so a retried run replaces every
     // asset rather than leaving one behind from an older attempt.
     expect(workflow).toContain("--clobber");
+    // The guard runs before the draft exists, so it cannot ask for one. Naming
+    // the stage phase here made every upgrade release fail its first attempt
+    // with "Stage deployment requires the current draft", because only the
+    // later step creates that draft. The prepare phase is the one that merely
+    // refuses an already published release.
+    const guardPhase=prepare.slice(promote,draft).match(/CLAUDEX_WORKHOUSE_PROMOTION_PHASE: (\w+)/)?.[1];
+    expect(guardPhase,"the pre-draft image guard must not require a draft").toBe("prepare");
   });
 });
 

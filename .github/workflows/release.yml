@@ -566,7 +566,7 @@ jobs:
       - name: Promote the immutable image version only when absent or identical
         env:
           GH_TOKEN: ${{ github.token }}
-          CLAUDEX_WORKHOUSE_PROMOTION_PHASE: stage
+          CLAUDEX_WORKHOUSE_PROMOTION_PHASE: prepare
           CLAUDEX_WORKHOUSE_STABLE_MANIFEST_URL: ${{ needs.preflight.outputs.public-manifest-url }}
           CLAUDEX_WORKHOUSE_STABLE_SIGNATURE_URL: ${{ needs.preflight.outputs.public-signature-url }}
           CLAUDEX_WORKHOUSE_RELEASE_KEY_RING_FILE: ${{ github.workspace }}/deploy/release-key-ring.json
