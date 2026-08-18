@@ -65,6 +65,13 @@ export function stageNodePackage({ publicRoot, stage, fail }) {
     const source = path.join(root, name);
     if (fs.existsSync(source)) copy(source, path.join(stage, name));
   }
+  // The release service resolves the pinned key ring from <root>/deploy, and it
+  // holds public keys only. Leaving it out made every update check in an npm
+  // install fail with RELEASE_KEY_RING_INVALID — the install could never learn
+  // that a release exists, let alone verify one.
+  const keyRing = path.join(root, "deploy", "release-key-ring.json");
+  if (!fs.existsSync(keyRing)) refuse("the public tree is missing deploy/release-key-ring.json");
+  copy(keyRing, path.join(stage, "deploy", "release-key-ring.json"));
 
   // Node reads `type` for everything under `app/`. Ship the minimum rather than
   // the development manifest with its devDependencies and private flag.

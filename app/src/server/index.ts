@@ -195,10 +195,12 @@ function installMethod(){
   if(configured)return configured;
   const root=process.env.CLAUDEX_WORKHOUSE_APP_ROOT?.trim()||process.env.CLAUDEX_WORKHOUSE_ROOT?.trim()||process.cwd();
   if(fs.existsSync(path.join(root,".git")))return"source-checkout";
-  // A container swaps its own image, so the container check wins even when the
-  // server inside it was installed from the registry.
-  if(fs.existsSync("/.dockerenv")||fs.existsSync("/run/.containerenv"))return"docker-compose";
-  return isNodePackageInstall()?"node-package":"unknown";
+  // The npm layout is evidence; a container marker is only a guess. The
+  // official image lays the server out under /opt and never matches the npm
+  // path, so asking the container first merely misreported a global install
+  // that happened to run inside one — which is how the package harness runs.
+  if(isNodePackageInstall())return"node-package";
+  return fs.existsSync("/.dockerenv")||fs.existsSync("/run/.containerenv")?"docker-compose":"unknown";
 }
 // `npm install -g claudex-workhouse` places this module under a node_modules
 // directory owned by the package. Reading the running module's own path keeps
