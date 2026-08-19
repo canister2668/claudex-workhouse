@@ -3,7 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
-export const PRIVATE_VERSION_MAX = "1.0.2";
+export const PRIVATE_VERSION_MAX = "1.0.3";
 
 function versionParts(value) {
   const match = /^([0-9]+)\.([0-9]+)\.([0-9]+)(?:-[0-9A-Za-z.-]+)?$/.exec(value);

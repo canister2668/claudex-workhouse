@@ -952,23 +952,41 @@ jobs:
           set -eu
           verify_directory="$(mktemp -d)"
           trap 'rm -rf -- "$verify_directory"' EXIT HUP INT TERM
-          cache_nonce="${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-$(date +%s%N)"
-          for pair in \
-            "stable-manifest:$STABLE_MANIFEST_URL" \
-            "stable-signature:$STABLE_SIGNATURE_URL" \
-            "immutable-manifest:$IMMUTABLE_BASE_URL/release-manifest.json" \
-            "immutable-signature:$IMMUTABLE_BASE_URL/release-manifest.json.sig"
+          # Pages reports the deployment successful before the CDN serves it. The
+          # v1.0.2 release failed here comparing bytes fetched 30 seconds after
+          # that success, and the same fetch returned the new channel four
+          # minutes later. Poll rather than read the pointer once.
+          attempt=0
+          until [ "$attempt" -ge 40 ]
           do
-            name="${pair%%:*}"
-            url="${pair#*:}"
-            curl \
-              --fail --silent --show-error --location \
-              --proto '=https' --proto-redir '=https' \
-              --header 'Cache-Control: no-cache' \
-              --header 'Pragma: no-cache' \
-              "$url?claudex-release-guard=$cache_nonce-$name" \
-              --output "$verify_directory/$name"
+            cache_nonce="${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-$(date +%s%N)"
+            for pair in \
+              "stable-manifest:$STABLE_MANIFEST_URL" \
+              "stable-signature:$STABLE_SIGNATURE_URL" \
+              "immutable-manifest:$IMMUTABLE_BASE_URL/release-manifest.json" \
+              "immutable-signature:$IMMUTABLE_BASE_URL/release-manifest.json.sig"
+            do
+              name="${pair%%:*}"
+              url="${pair#*:}"
+              curl \
+                --fail --silent --show-error --location \
+                --proto '=https' --proto-redir '=https' \
+                --header 'Cache-Control: no-cache' \
+                --header 'Pragma: no-cache' \
+                "$url?claudex-release-guard=$cache_nonce-$name" \
+                --output "$verify_directory/$name"
+            done
+            if cmp -s "$verify_directory/stable-manifest" "$verify_directory/immutable-manifest" &&
+               cmp -s "$verify_directory/stable-signature" "$verify_directory/immutable-signature"
+            then
+              printf '%s\n' "stable channel is live after $attempt poll(s)"
+              break
+            fi
+            attempt=$((attempt + 1))
+            sleep 15
           done
+          # The final comparison is the unsilenced one, so a channel that never
+          # goes live still fails with the byte difference in the log.
           cmp "$verify_directory/stable-manifest" "$verify_directory/immutable-manifest"
           cmp "$verify_directory/stable-signature" "$verify_directory/immutable-signature"
       - name: Promote stable image and GitHub latest only after the channel is live

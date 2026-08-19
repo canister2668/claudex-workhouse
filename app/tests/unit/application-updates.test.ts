@@ -74,6 +74,23 @@ describe("application update contract",()=>{
     expect(evaluateApplicationUpdate(node(),withPackage(legacy))).toMatchObject({state:"unconfigured",reason:"manifest-updater-contract-missing"});
     expect(evaluateApplicationUpdate(node(),withPackage(undefined))).toMatchObject({state:"unconfigured",reason:"manifest-updater-contract-missing"});
   });
+  it("treats a matching version as current for an npm install", ()=>{
+    const node=(overrides:Record<string,unknown>={})=>installed({installMethod:"node-package",imageDigest:null,packageSha256:null,version:"1.1.0",...overrides});
+    const record={registry:"https://registry.npmjs.org",name:"claudex-workhouse",format:"tgz",filename:"claudex-workhouse-1.1.0.tgz",url:"https://example.test/claudex-workhouse-1.1.0.tgz",size:10,sha256:"e".repeat(64),minimumUpdaterProtocolVersion:1};
+    const value=release();
+    const withPackage={...value,manifest:{...value.manifest,nodePackage:record}} as ReturnType<typeof release>;
+    // A tarball cannot carry its own digest, so there is nothing to compare and
+    // the install is simply on the current release.
+    expect(evaluateApplicationUpdate(node(),withPackage)).toMatchObject({state:"up-to-date",updateAvailable:false,reason:null});
+    // An environment that does supply one is still held to it.
+    expect(evaluateApplicationUpdate(node({packageSha256:"e".repeat(64)}),withPackage).state).toBe("up-to-date");
+    expect(evaluateApplicationUpdate(node({packageSha256:"f".repeat(64)}),withPackage)).toMatchObject({state:"failed",reason:"installed-artifact-mismatch"});
+    // The relaxation is for npm alone; a portable install must still identify
+    // the artifact it is running.
+    expect(evaluateApplicationUpdate(installed({installMethod:"windows-portable",platform:"win32",imageDigest:null,packageSha256:null,version:"1.1.0"}),withPackage))
+      .toMatchObject({state:"failed",reason:"installed-artifact-identity-missing"});
+  });
+
   it("coalesces checks and reports active work as a blocker",async()=>{
     const store=new Store(),fetchRelease=vi.fn(async()=>release()),coordinator=new ApplicationUpdateCoordinator({current:installed(),release:fetchRelease,store,blockers:async()=>[{kind:"provider-task",id:"task",status:"running"}],snapshot:async()=>({id:"snapshot",directory:"/snapshot"}),writeRequest:async()=>"/request"});
     const [left,right]=await Promise.all([coordinator.check(),coordinator.check()]);

@@ -26,7 +26,7 @@ describe("repository license and notice contract",()=>{
     for(const file of["app/package.json","installer-web/package.json","vscode-extension/package.json"]){
       const manifest=JSON.parse(read(file));
       expect(manifest.license).toBe("AGPL-3.0-only");
-      expect(manifest.version).toBe("1.0.2");
+      expect(manifest.version).toBe("1.0.3");
     }
     const userFacing=["README.md","NOTICE.md",...translatedFiles,...fs.readdirSync(path.join(repositoryRoot,"docs")).filter(name=>name.endsWith(".md")).map(name=>`docs/${name}`),...fs.readdirSync(path.join(repositoryRoot,"app","src","web")).filter(name=>/\.(?:svelte|ts)$/.test(name)).map(name=>`app/src/web/${name}`),"installer-web/src/main.ts"];
     const forbidden=/(based on agent[ _-]?deck|forked from agent[ _-]?deck|derived from agent[ _-]?deck|agent[ _-]?deck upstream|agent deck 기반|agent deck 포크|agent deck에서 파생)/i;

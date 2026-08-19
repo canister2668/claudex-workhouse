@@ -135,7 +135,14 @@ export function evaluateApplicationUpdate(current:ApplicationInstallMetadata,rel
   if(order<0)return{state:"available",target,updateAvailable:true,reason:null};
   if(order>0)return{state:"up-to-date",target,updateAvailable:false,reason:"installed-version-newer-than-stable"};
   const identity=current.installMethod==="docker-compose"?current.imageDigest:current.packageSha256;
-  if(!identity)return{state:"failed",target,updateAvailable:false,reason:"installed-artifact-identity-missing"};
+  // A tarball cannot carry its own digest, so an npm install has no second
+  // identity to present and asking for one answered "failed" while it sat on
+  // the current release. npm verified the registry integrity when it installed
+  // the package; at the same version that is the check, and a digest is only
+  // compared when the environment actually supplies one.
+  if(!identity)return current.installMethod==="node-package"
+    ?{state:"up-to-date",target,updateAvailable:false,reason:null}
+    :{state:"failed",target,updateAvailable:false,reason:"installed-artifact-identity-missing"};
   return identity===binding.identity?{state:"up-to-date",target,updateAvailable:false,reason:null}:{state:"failed",target,updateAvailable:false,reason:"installed-artifact-mismatch"};
 }
 
