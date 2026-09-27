@@ -1,23 +1,46 @@
 # Windows portable server support and release policy
 
-Status: **in development, not released.** No Windows target is offered for
-installation — not the portable server, not the native Worker, and not Docker
-Desktop plus a current-user Worker. The released main-server host is Linux or a
-Linux-based NAS with Docker; Windows users reach that server from the browser.
-This policy stays authoritative for the work that a Windows release would have
-to complete first.
+Status: **portable ZIP is a release candidate; nothing is released yet.** The
+portable server (`claudex-workhouse-server-windows-x64-portable.zip`) now
+verifies its payload, starts, and runs Claude Code and Codex tasks directly in
+the server process, without a Worker. It is not advertised as supported until
+the acceptance run below passes. The single-EXE installer and the native
+Windows Worker remain in development. The released main-server host is still
+Linux or a Linux-based NAS with Docker.
+
+Resolved for the portable server:
+
+- Payload verification. The launcher counted payload files through
+  `std::filesystem::recursive_directory_iterator`/`is_regular_file`, whose CRT
+  status probe does not resolve every extended-length path on MinGW builds, so
+  a file the Win32 open found went uncounted and the start only succeeded once
+  that entry was removed from `payload-manifest.json`. Enumeration, opening and
+  hashing are now all Win32 (`FindFirstFileExW`, `CreateFileW`, `ReadFile`) on
+  the same `\\?\` paths, the manifest and the folder are compared by name, and
+  only name-surrogate reparse points (links, junctions) are refused, so OneDrive
+  and WOF-compressed files verify. The payload drops `node_modules` test and
+  example trees, `.bin` links, type declarations and source maps, and the
+  packager writes the ZIP itself with ASCII names only, within the Explorer
+  `MAX_PATH` budget (150 characters per entry, root folder included).
+- Worker dependency. `managedLocalWorkerEnabled()` is false on every platform.
+  Task workers prove liveness with an exclusively-locked `<state>.alive` file
+  and accept a stop through a `<state>.stop` request, falling back to
+  `taskkill /T /F` on the process tree (`app/src/server/worker-liveness.ts`).
+  The server discovers `claude.exe` and `codex.exe` with the verified Windows
+  discovery (`app/src/server/windows/direct-providers.ts`).
 
 Outstanding before any Windows target can be released:
 
-- The portable server does not complete a launch. Its launcher rejects the
-  payload at the manifest attribute check and only starts once an entry is
-  removed from `payload-manifest.json`, so payload verification and start-up
-  have never both succeeded on the shipped bytes.
-- The native Worker path does not run hooks, installs the Codex CLI
-  unreliably, and leaves live session progress stalled until the view is
-  reloaded.
 - The clean, non-administrator Windows 11 acceptance run named below has never
-  been performed.
+  been performed. The portable ZIP has been exercised under Wine (payload
+  verification, start-up, readiness, direct task completion and stop), which
+  is not a substitute.
+- Antigravity and Grok tasks and login (refused on the Windows server), Claude
+  usage probes, and the Claude model list
+  refresh still depend on python3 and a POSIX pseudo-terminal and are
+  unavailable on Windows.
+- The single-EXE installer and the native Worker path are unchanged and still
+  unverified.
 
 The repository now enforces the private-package version ceiling, Windows
 artifact-size and runtime/SQLite pins, isolation labels, signed manifest v2,

@@ -6,7 +6,8 @@ export function buildWindowsBootstrapStatus(input:{
   dataReady:boolean;
   databaseReady:boolean;
   serverReady:boolean;
-  workerStatus:"connecting"|"online"|"offline"|"failed";
+  /** Omitted when the server runs providers itself (no Worker stage). */
+  workerStatus?:"connecting"|"online"|"offline"|"failed";
   providers:Partial<Record<"codex"|"claude","not-found"|"login-required"|"diagnostic-required"|"ready">>;
   workspaceCount:number;
   internalUrl:string;
@@ -18,7 +19,7 @@ export function buildWindowsBootstrapStatus(input:{
     {id:"data",state:input.dataReady?"ready":"failed",detail:input.dataReady?"data-protected":"data-unavailable",remediation:input.dataReady?null:"retry"},
     {id:"database",state:input.databaseReady?"ready":"failed",detail:input.databaseReady?"database-ready":"database-unavailable",remediation:input.databaseReady?null:"retry"},
     {id:"server",state:input.serverReady?"ready":"running",detail:input.serverReady?"loopback-ready":"server-starting",remediation:null},
-    {id:"worker",state:input.workerStatus==="online"?"ready":input.workerStatus==="connecting"?"running":"failed",detail:`worker-${input.workerStatus}`,remediation:input.workerStatus==="offline"||input.workerStatus==="failed"?"retry":null},
+    ...(input.workerStatus?[{id:"worker" as const,state:input.workerStatus==="online"?"ready" as const:input.workerStatus==="connecting"?"running" as const:"failed" as const,detail:`worker-${input.workerStatus}`,remediation:input.workerStatus==="offline"||input.workerStatus==="failed"?"retry" as const:null}]:[]),
     {id:"provider",state:providerReady?"ready":providerKnown?"attention":"pending",detail:providerReady?"provider-ready":providerKnown?"provider-action-required":"provider-check-pending",remediation:providerReady?null:"open-provider-guide"},
     {id:"workspace",state:input.workspaceCount>0?"ready":"attention",detail:input.workspaceCount>0?"workspace-ready":"workspace-required",remediation:input.workspaceCount>0?null:"open-workspace-settings"}
   ];

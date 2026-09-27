@@ -6,6 +6,8 @@ import path from"node:path";
 import{fileURLToPath}from"node:url";
 import{buildWindowsPayloadManifest,verifyWindowsPayload}from"../dist-server/windows/payload.js";
 import{buildWindowsSingleExe}from"../dist-server/windows/single-exe.js";
+import{createPortableZip}from"../dist-server/windows/portable-zip.js";
+import crypto from"node:crypto";
 
 const appRoot=path.resolve(path.dirname(fileURLToPath(import.meta.url)),".."),repoRoot=path.dirname(appRoot),packageJson=JSON.parse(fs.readFileSync(path.join(appRoot,"package.json"),"utf8")),version=String(packageJson.version);
 const commitSha=process.env.CLAUDEX_WORKHOUSE_COMMIT_SHA?.trim()||"unknown";
@@ -23,8 +25,18 @@ const copy=(source,target,options)=>fs.cpSync(source,target,{recursive:true,dere
 // developer artifact, they roughly double the server payload, and each one
 // embeds the absolute path of the tree that compiled it — which is how a build
 // machine's private checkout path reached a shipped archive.
-copy(path.join(appRoot,"dist-server"),path.join(appPayload,"dist-server"),{filter:source=>!source.endsWith(".map")});
-copy(path.resolve(modulesSource),path.join(appPayload,"node_modules"));
+copy(path.join(appRoot,"dist-server"),path.join(appPayload,"dist-server"),{filter:source=>!source.endsWith(".map")&&!/\.test\.[cm]?js$/.test(source)});
+// The production node_modules come from a package-manager install, so they
+// carry what a Windows payload must not or need not ship: `.bin` holds POSIX
+// symbolic links (a verified payload rejects links), the pnpm state files and
+// better-sqlite3's C sources are build inputs, and the Svelte UI packages are
+// already compiled into dist/. Type declarations and source maps are never
+// loaded at runtime. None of them is loaded by dist-server.
+// Package test and example trees are never loaded at runtime, and they are
+// where non-ASCII fixture names (`snow ☃`) and the longest paths come from.
+const testDirectories=new Set(["test","tests","__tests__","example","examples"]);
+const modulesRoot=path.resolve(modulesSource),skippedModules=new Set([".bin",".pnpm",".modules.yaml",".package-lock.json","better-sqlite3/deps","better-sqlite3/src","@lucide/svelte","svelte"]);
+copy(modulesRoot,path.join(appPayload,"node_modules"),{filter:source=>{const relative=path.relative(modulesRoot,source).split(path.sep).join("/");if(!relative)return true;const parts=relative.split("/");const name=parts[parts.length-1];if(parts.includes(".bin")||parts.slice(1).some(part=>testDirectories.has(part))||/^\.pnpm-workspace-state/.test(name)||(/\.(?:d\.[cm]?ts|map)$/.test(name)&&fs.statSync(source).isFile()))return false;return !skippedModules.has(relative);}});
 fs.mkdirSync(path.join(payloadRoot,"bin"),{recursive:true});
 for(const name of["claude-runtime.mjs","codex-runtime.mjs","claude-auth-pty.py"])fs.copyFileSync(path.join(repoRoot,"bin",name),path.join(payloadRoot,"bin",name));
 // Provider workers look for the prompt/activity hook below
@@ -73,4 +85,13 @@ fs.copyFileSync(path.resolve(launcherSource),path.join(packageRoot,"Claudex Work
 const total=manifest.files.reduce((sum,item)=>sum+item.size,0)+fs.statSync(path.join(packageRoot,"Claudex Workhouse.exe")).size;
 if(total>200*1024*1024)throw new Error(`Windows server folder exceeds the 200 MiB policy (${total} bytes).`);
 const singleExe=path.join(repoRoot,"packages","claudex-workhouse-server-windows-x64.exe"),single=buildWindowsSingleExe({launcher:path.resolve(launcherSource),payloadRoot,manifest,output:singleExe});
-process.stdout.write(`${packageRoot}\n${singleExe}\nfiles=${manifest.files.length}\nfolderBytes=${total}\nsingleExeBytes=${single.totalSize}\n`);
+// The portable ZIP is the folder above under one root folder. It is written
+// here rather than by the host archiver so every build machine produces the
+// same entry names, attributes and timestamps, and so the Explorer path-length
+// budget is enforced before anything is published.
+const sourceDateEpoch=Number(process.env.SOURCE_DATE_EPOCH?.trim()||"");
+const portableZip=path.join(repoRoot,"packages","claudex-workhouse-server-windows-x64-portable.zip");
+const zip=createPortableZip({sourceRoot:packageRoot,rootName:"Claudex Workhouse",output:portableZip,date:Number.isSafeInteger(sourceDateEpoch)&&sourceDateEpoch>0?new Date(sourceDateEpoch*1000):undefined});
+const zipSha=crypto.createHash("sha256").update(fs.readFileSync(portableZip)).digest("hex");
+fs.writeFileSync(`${portableZip}.sha256`,`${zipSha}  ${path.basename(portableZip)}\n`);
+process.stdout.write(`${packageRoot}\n${singleExe}\n${portableZip}\nfiles=${manifest.files.length}\nfolderBytes=${total}\nsingleExeBytes=${single.totalSize}\nportableZipBytes=${zip.bytes}\nportableZipSha256=${zipSha}\nportableZipLongestPath=${zip.longestPath}\n`);

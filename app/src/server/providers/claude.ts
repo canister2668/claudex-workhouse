@@ -12,7 +12,7 @@ import { automationLevel } from "../automation-level.js";
 import { normalizeDelegationSettings } from "../delegation-settings.js";
 import { localizedTaskSuffix, normalizeStoredLocale } from "../ui-locale.js";
 import {resolveExecutionPolicy} from "../execution-policy.js";
-import { resolveTranscriptFile } from "../claude-transcript.js";
+import { projectSlug, resolveTranscriptFile } from "../claude-transcript.js";
 import { streamFile } from "../stream-events.js";
 import { readStreamEvents, staleClaudeTerminalSequences } from "../stream-events.js";
 import {CLAUDE_FALLBACK_MODELS} from "../claude-model-catalog.js";
@@ -23,6 +23,7 @@ import { ensureTaskTempDirectory } from "../workspace-temp.js";
 import { sanitizeSensitiveValue } from "../sensitive-data.js";
 import { seedTaskEmotion } from "../task-emotion-seed.js";
 import {prepareExternalMcpEnvironment} from "../external-mcp-runtime.js";
+import{markWorkerStateStopped,stopWindowsWorker,usesWindowsWorkerLiveness,workerLivenessHeld}from"../worker-liveness.js";
 import{workspaceInstructionFollowUpMetadata}from"../workspace-instructions.js";
 import{emotionMcpEnvironment}from"../emotion-mcp-policy.js";
 
@@ -123,7 +124,7 @@ export class ClaudeProvider implements AgentProvider {
         if (!line.trim()) continue;
         try {
           const entry = JSON.parse(line);
-          if (!cwd && typeof entry.cwd === "string" && entry.cwd.startsWith("/")) cwd = entry.cwd;
+          if (!cwd && typeof entry.cwd === "string" && path.isAbsolute(entry.cwd)) cwd = entry.cwd;
           if (!found && entry.type === "summary" && entry.summary) { title = String(entry.summary).replace(/\s+/g, " ").slice(0, 80); found = true; }
           if (!found && entry.type === "user") {
             const content = entry.message?.content;
@@ -200,7 +201,7 @@ export class ClaudeProvider implements AgentProvider {
     }
     const home = process.env.HOME || os.homedir();
     const store = path.join(home, ".claude", "projects");
-    const slugToProject = new Map(this.config.projects.filter((item) => item.enabled).map((item) => [item.realPath.replaceAll("/", "-"), item]));
+    const slugToProject = new Map(this.config.projects.filter((item) => item.enabled).map((item) => [projectSlug(item.realPath), item]));
     // Default scope: only configured project folders. scope=all: every local
     // session folder — unconfigured ones get a "dir:<slug>" pseudo project and
     // their real cwd recovered from the transcript itself.
@@ -354,6 +355,7 @@ export class ClaudeProvider implements AgentProvider {
   }
 
   private processMatches(task: DeckTask) {
+    if (usesWindowsWorkerLiveness()) return Boolean(task.pid && task.commandMarker) && workerLivenessHeld(this.stateFile(task.id));
     if (!task.pid || !task.pgid || !task.commandMarker || !task.processStart) return false;
     try {
       const stat = fs.readFileSync(`/proc/${task.pid}/stat`, "utf8").split(" ");
@@ -368,6 +370,11 @@ export class ClaudeProvider implements AgentProvider {
     task = await this.refresh(task);
     if (!task.owned) throw Object.assign(new Error("External Claude sessions cannot be stopped by Claudex Workhouse."), { statusCode: 403 });
     if (!this.processMatches(task)) throw Object.assign(new Error("Claude process identity no longer matches the recorded worker."), { statusCode: 409 });
+    if (usesWindowsWorkerLiveness()) {
+      await stopWindowsWorker(this.stateFile(task.id), task.pid);
+      markWorkerStateStopped(this.stateFile(task.id));
+      return this.refresh(await this.db.upsertTask({ ...task, status: "stopped", updatedAt: now() }));
+    }
     process.kill(-task.pgid!, "SIGTERM");
     for (let i = 0; i < 20; i++) {
       await new Promise((resolve) => setTimeout(resolve, 250));

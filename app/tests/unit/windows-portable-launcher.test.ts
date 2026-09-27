@@ -93,14 +93,37 @@ describe("Windows portable launcher contract",()=>{
     const verifier=functionBody("VerifiedPayloadFile verifyPayloadFile(const std::filesystem::path& file,const std::wstring& relative)");
     expect(verifier).toContain("CreateFileW");
     expect(verifier).toContain("FILE_FLAG_OPEN_REPARSE_POINT");
-    expect(verifier).toContain("GetFileInformationByHandle");
-    expect(verifier).toContain("FILE_ATTRIBUTE_DIRECTORY|FILE_ATTRIBUTE_REPARSE_POINT");
+    expect(verifier).toContain("GetFileInformationByHandleEx(probe,FileAttributeTagInfo");
+    expect(verifier).toContain("nameSurrogateReparse(tag.FileAttributes,tag.ReparseTag)");
     expect(verifier).toContain('"payload open: "+narrow(relative)+"; win32="');
     expect(verifier).toContain('"payload type: "+narrow(relative)+"; attributes="');
+    // Hashing reads through the same Win32 handle family, never a CRT stream.
+    expect(verifier).toContain("ReadFile(handle");
+    expect(verifier).not.toMatch(/ifstream|sha256\(extendedPath/);
     const manifest=functionBody("void verifyPayloadManifest(const std::string& manifest,const std::filesystem::path& payload,const std::string& version)");
-    expect(manifest).toContain("verifyPayloadFile(file,relative)");
+    expect(manifest).toContain("verifyPayloadFile(payload/std::filesystem::path(relative),relative)");
     expect(manifest).toContain('"payload hash: "+narrow(relative)');
     expect(manifest).not.toContain('runtime_error("payload attributes")');
+  });
+
+  /** The field failure behind "starts only after one entry is removed from
+   * payload-manifest.json": the extra-file count went through
+   * recursive_directory_iterator/is_regular_file, whose CRT status probe on
+   * MinGW does not resolve every extended-length path, so one real file went
+   * uncounted. Enumeration is now FindFirstFileExW on the same `\\?\` paths,
+   * and the comparison is by name so a mismatch says which file. */
+  it("enumerates the payload with Win32 and compares it to the manifest by name",()=>{
+    const manifest=functionBody("void verifyPayloadManifest(const std::string& manifest,const std::filesystem::path& payload,const std::string& version)");
+    expect(manifest).not.toMatch(/recursive_directory_iterator|is_regular_file|GetFileAttributesW/);
+    expect(manifest).toContain("enumeratePayload(extendedPath(payload).wstring(),L\"\",actual,0)");
+    expect(manifest).toContain('"payload unexpected file: "+narrow(relative)');
+    expect(manifest).toContain('"duplicate manifest path: "+narrow(relative)');
+    const walk=functionBody("void enumeratePayload(const std::wstring& directory,const std::wstring& relative,std::vector<std::wstring>& files,unsigned depth)");
+    expect(walk).toContain("FindFirstFileExW");
+    expect(walk).toContain("nameSurrogateReparse(entry.dwFileAttributes,entry.dwReserved0)");
+    // OneDrive, WOF and dedup reparse tags are not name surrogates; only links
+    // and junctions are refused.
+    expect(source).toContain("bool nameSurrogateReparse(DWORD attributes,DWORD tag){return(attributes&FILE_ATTRIBUTE_REPARSE_POINT)!=0&&(tag&0x20000000)!=0;}");
   });
 
   /** A portable start that fails has to be identifiable as one. */

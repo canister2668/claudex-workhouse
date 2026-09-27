@@ -15,9 +15,11 @@ afterEach(()=>{for(const item of created.splice(0))fs.rmSync(item,{recursive:tru
 async function until(check:()=>boolean|Promise<boolean>,timeout=10_000){const end=Date.now()+timeout;while(Date.now()<end){if(await check())return;await new Promise(resolve=>setTimeout(resolve,25));}throw new Error("condition timed out");}
 
 describe("managed Windows local Worker",()=>{
-  it("routes only Windows local execution through the managed Worker",()=>{
-    expect(managedLocalWorkerEnabled("win32")).toBe(true);
-    expect(executionHostUsesWorker("local","win32")).toBe(true);
+  it("runs local execution directly on every platform and only remote hosts through a Worker",()=>{
+    // Windows runs local tasks directly; only remote hosts use a Worker.
+    expect(managedLocalWorkerEnabled("win32")).toBe(false);
+    expect(executionHostUsesWorker("local","win32")).toBe(false);
+    expect(executionHostUsesWorker(crypto.randomUUID(),"win32")).toBe(true);
     expect(executionHostUsesWorker("local","linux")).toBe(false);
     expect(executionHostUsesWorker(crypto.randomUUID(),"linux")).toBe(true);
     expect(workerConnectionOriginAllowed("local","127.0.0.1")).toBe(true);

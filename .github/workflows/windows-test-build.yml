@@ -87,6 +87,9 @@ jobs:
           try {
             pnpm prune --prod
             if ($LASTEXITCODE -ne 0) { throw 'Production dependency pruning failed.' }
+            # The commit time dates every portable ZIP entry, so a rebuild of
+            # the same commit produces the same archive.
+            $env:SOURCE_DATE_EPOCH = (git -C $env:GITHUB_WORKSPACE log -1 --format=%ct)
             $env:CLAUDEX_WORKHOUSE_WINDOWS_NODE_EXE = (Get-Command node.exe).Source
             $env:CLAUDEX_WORKHOUSE_WINDOWS_NODE_MODULES = (Resolve-Path 'node_modules').Path
             $env:CLAUDEX_WORKHOUSE_WINDOWS_LAUNCHER_EXE = (Resolve-Path (Join-Path $publicRoot 'out\windows-launcher\Release\claudex-workhouse.exe')).Path
@@ -110,10 +113,13 @@ jobs:
           finally { Pop-Location }
           if ($LASTEXITCODE -ne 0) { throw 'Unsigned single EXE inspection failed.' }
           Copy-Item -LiteralPath $exe -Destination $output
-          $portableRoot = Join-Path $env:RUNNER_TEMP 'claudex-workhouse-server-windows-x64-portable'
-          Copy-Item -LiteralPath (Join-Path $publicRoot 'packages\claudex-workhouse-server-windows-x64-folder') -Destination $portableRoot -Recurse
+          # package-windows-server.mjs writes the portable ZIP itself: one
+          # "Claudex Workhouse" root folder, ASCII forward-slash names within the
+          # Explorer path budget, DOS attributes and a fixed timestamp.
+          # Compress-Archive is not used because its separators, timestamps and
+          # hidden-file handling differ between PowerShell editions.
           $zip = Join-Path $output 'claudex-workhouse-server-windows-x64-portable.zip'
-          Compress-Archive -LiteralPath $portableRoot -DestinationPath $zip -CompressionLevel Optimal
+          Copy-Item -LiteralPath (Join-Path $publicRoot 'packages\claudex-workhouse-server-windows-x64-portable.zip') -Destination $zip
           # Inspect the archive as shipped as well as the directory it came
           # from, so a packaging step that reintroduces a file cannot pass.
           if ($env:CLAUDEX_PRIVATE_SOURCE -eq 'true') {

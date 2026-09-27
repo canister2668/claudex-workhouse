@@ -23,6 +23,7 @@ import {conversationAttachmentPaths} from "../conversation-attachments.js";
 import{workspaceInstructionFollowUpMetadata}from"../workspace-instructions.js";
 import {seedTaskEmotion} from "../task-emotion-seed.js";
 import {prepareExternalMcpEnvironment} from "../external-mcp-runtime.js";
+import{markWorkerStateStopped,stopWindowsWorker,usesWindowsWorkerLiveness,workerLivenessHeld}from"../worker-liveness.js";
 import{emotionMcpEnvironment}from"../emotion-mcp-policy.js";
 
 const CX = "/usr/local/bin/cx";
@@ -750,6 +751,13 @@ export class CodexProvider implements AgentProvider {
     if (task.commandMarker?.startsWith("claudex-workhouse-codex:")) {
       task = await this.refreshWorker(task);
       if (!this.processMatchesWorker(task)) throw Object.assign(new Error("Codex worker identity no longer matches the recorded process."), { statusCode:409 });
+      if (usesWindowsWorkerLiveness()) {
+        // Codex interrupts its turn before exiting, which takes up to 5 s.
+        await stopWindowsWorker(this.stateFile(task.id), task.pid, 8000);
+        markWorkerStateStopped(this.stateFile(task.id));
+        const current=await this.refreshWorker(task);
+        return this.db.upsertTask({ ...current, status:"stopped", updatedAt:now() });
+      }
       process.kill(-task.pgid!, "SIGTERM");
       for(let i=0;i<20;i++){await new Promise(resolve=>setTimeout(resolve,250));const current=await this.refreshWorker(task);if(!this.processMatchesWorker(current))return this.db.upsertTask({...current,status:"stopped",updatedAt:now()});}
       if(this.processMatchesWorker(task))process.kill(-task.pgid!,"SIGKILL");
@@ -763,6 +771,7 @@ export class CodexProvider implements AgentProvider {
   }
 
   private processMatchesWorker(task: DeckTask) {
+    if (usesWindowsWorkerLiveness()) return Boolean(task.pid && task.commandMarker) && workerLivenessHeld(this.stateFile(task.id));
     if (!task.pid || !task.pgid || !task.processStart || !task.commandMarker) return false;
     try {
       const stat = fs.readFileSync(`/proc/${task.pid}/stat`, "utf8").split(" ");

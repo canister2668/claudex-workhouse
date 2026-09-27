@@ -20,6 +20,7 @@ import {ClaudeProvider} from "./claude.js";
 import{workspaceInstructionFollowUpMetadata}from"../workspace-instructions.js";
 import {seedTaskEmotion} from "../task-emotion-seed.js";
 import {prepareExternalMcpEnvironment} from "../external-mcp-runtime.js";
+import{markWorkerStateStopped,stopWindowsWorker,usesWindowsWorkerLiveness,workerLivenessHeld}from"../worker-liveness.js";
 import{emotionMcpEnvironment}from"../emotion-mcp-policy.js";
 
 const now=()=>new Date().toISOString();
@@ -96,8 +97,8 @@ export class AnthropicCompatibleProvider implements AgentProvider{
     for(const member of members){const state=this.stateFile(member.id),spool=streamFile(this.config.dataRoot??this.config.root,member.id);fs.rmSync(state,{force:true});fs.rmSync(spool,{force:true});fs.rmSync(`${spool}.1`,{force:true});this.signatures.delete(member.id);}
     const deletedTasks=await this.db.deleteTaskSession(this.id,task.threadId);this.snapshot.invalidate();return{threadId:task.threadId,deleted:true,deletedTasks};
   }
-  private processMatches(task:DeckTask){if(!task.pid||!task.pgid||!task.commandMarker||!task.processStart)return false;try{const stat=fs.readFileSync(`/proc/${task.pid}/stat`,"utf8").split(" "),cmd=fs.readFileSync(`/proc/${task.pid}/cmdline`,"utf8").replaceAll("\0"," ");return stat[21]===task.processStart&&Number(stat[4])===task.pgid&&cmd.includes("claude-worker.js")&&cmd.includes(task.commandMarker);}catch{return false;}}
-  async stopTask(task:DeckTask){task=await this.refresh(task);if(!this.processMatches(task))throw Object.assign(new Error("Worker process identity no longer matches the recorded task."),{statusCode:409});process.kill(-task.pgid!,"SIGTERM");for(let i=0;i<20;i++){await new Promise(resolve=>setTimeout(resolve,250));if(!this.processMatches(task))return this.db.upsertTask({...task,status:"stopped",updatedAt:now()});}if(this.processMatches(task))process.kill(-task.pgid!,"SIGKILL");return this.db.upsertTask({...task,status:"stopped",updatedAt:now()});}
+  private processMatches(task:DeckTask){if(usesWindowsWorkerLiveness())return Boolean(task.pid&&task.commandMarker)&&workerLivenessHeld(this.stateFile(task.id));if(!task.pid||!task.pgid||!task.commandMarker||!task.processStart)return false;try{const stat=fs.readFileSync(`/proc/${task.pid}/stat`,"utf8").split(" "),cmd=fs.readFileSync(`/proc/${task.pid}/cmdline`,"utf8").replaceAll("\0"," ");return stat[21]===task.processStart&&Number(stat[4])===task.pgid&&cmd.includes("claude-worker.js")&&cmd.includes(task.commandMarker);}catch{return false;}}
+  async stopTask(task:DeckTask){task=await this.refresh(task);if(!this.processMatches(task))throw Object.assign(new Error("Worker process identity no longer matches the recorded task."),{statusCode:409});if(usesWindowsWorkerLiveness()){await stopWindowsWorker(this.stateFile(task.id),task.pid);markWorkerStateStopped(this.stateFile(task.id));return this.refresh(await this.db.upsertTask({...task,status:"stopped",updatedAt:now()}));}process.kill(-task.pgid!,"SIGTERM");for(let i=0;i<20;i++){await new Promise(resolve=>setTimeout(resolve,250));if(!this.processMatches(task))return this.db.upsertTask({...task,status:"stopped",updatedAt:now()});}if(this.processMatches(task))process.kill(-task.pgid!,"SIGKILL");return this.db.upsertTask({...task,status:"stopped",updatedAt:now()});}
   /**
    * The Ollama catalog answers with each cloud model's pinned tags but omits its
    * rolling alias, so a model the account can actually run is missing from the

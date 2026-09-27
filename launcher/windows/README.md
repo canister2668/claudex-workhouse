@@ -21,6 +21,17 @@ Start menu or desktop shortcut, no Windows Installed apps entry and no
 removes the program. Code verification and the browser first-run setup are
 ordinary product setup and still apply.
 
+Payload verification is Win32 end to end. Every manifest entry is opened with
+`CreateFileW` on an extended-length path, checked for a name-surrogate reparse
+point (symbolic link, junction), sized and hashed with `ReadFile`; the folder is
+enumerated with `FindFirstFileExW` and compared to the manifest by name, so a
+missing or extra file is reported by path. Non-surrogate reparse points such as
+OneDrive Files On-Demand or WOF-compressed files verify normally. The portable
+ZIP itself is written by `app/scripts/package-windows-server.mjs`
+(`app/src/server/windows/portable-zip.ts`) under one `Claudex Workhouse` root
+folder, with printable-ASCII names no longer than 150 characters so Explorer's
+built-in extractor can unpack it.
+
 The single EXE opens a native three-stage installer wizard before touching the
 payload. The welcome screen shows the per-user install location and lets the
 user choose a different current-user-writable folder. The selected location is
