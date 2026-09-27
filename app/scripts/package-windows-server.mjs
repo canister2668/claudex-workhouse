@@ -15,6 +15,9 @@ if(commitSha!=="unknown"&&!/^[a-f0-9]{7,64}$/i.test(commitSha))throw new Error("
 const nodeSource=process.env.CLAUDEX_WORKHOUSE_WINDOWS_NODE_EXE?.trim(),modulesSource=process.env.CLAUDEX_WORKHOUSE_WINDOWS_NODE_MODULES?.trim(),launcherSource=process.env.CLAUDEX_WORKHOUSE_WINDOWS_LAUNCHER_EXE?.trim();
 for(const[name,value]of[["CLAUDEX_WORKHOUSE_WINDOWS_NODE_EXE",nodeSource],["CLAUDEX_WORKHOUSE_WINDOWS_NODE_MODULES",modulesSource],["CLAUDEX_WORKHOUSE_WINDOWS_LAUNCHER_EXE",launcherSource]])if(!value)throw new Error(`${name} is required.`);
 for(const[name,file]of[["Windows Node runtime",nodeSource],["Windows launcher",launcherSource]])if(!fs.statSync(path.resolve(file)).isFile())throw new Error(`${name} is not a file.`);
+// The ConPTY bridge is built next to the launcher by the same CMake project.
+const bridgeSource=path.resolve(process.env.CLAUDEX_WORKHOUSE_WINDOWS_CONPTY_BRIDGE_EXE?.trim()||path.join(path.dirname(path.resolve(launcherSource)),"claudex-conpty-bridge.exe"));
+if(!fs.existsSync(bridgeSource)||!fs.statSync(bridgeSource).isFile())throw new Error(`Windows ConPTY bridge is missing: ${bridgeSource}. Build launcher/windows or set CLAUDEX_WORKHOUSE_WINDOWS_CONPTY_BRIDGE_EXE.`);
 if(!fs.statSync(path.resolve(modulesSource)).isDirectory())throw new Error("Windows production node_modules is not a directory.");
 if(!fs.existsSync(path.join(path.resolve(modulesSource),"better-sqlite3","build","Release","better_sqlite3.node")))throw new Error("Windows production node_modules does not contain the pinned better-sqlite3 native binding.");
 
@@ -38,7 +41,10 @@ const testDirectories=new Set(["test","tests","__tests__","example","examples"])
 const modulesRoot=path.resolve(modulesSource),skippedModules=new Set([".bin",".pnpm",".modules.yaml",".package-lock.json","better-sqlite3/deps","better-sqlite3/src","@lucide/svelte","svelte"]);
 copy(modulesRoot,path.join(appPayload,"node_modules"),{filter:source=>{const relative=path.relative(modulesRoot,source).split(path.sep).join("/");if(!relative)return true;const parts=relative.split("/");const name=parts[parts.length-1];if(parts.includes(".bin")||parts.slice(1).some(part=>testDirectories.has(part))||/^\.pnpm-workspace-state/.test(name)||(/\.(?:d\.[cm]?ts|map)$/.test(name)&&fs.statSync(source).isFile()))return false;return !skippedModules.has(relative);}});
 fs.mkdirSync(path.join(payloadRoot,"bin"),{recursive:true});
-for(const name of["claude-runtime.mjs","codex-runtime.mjs","claude-auth-pty.py"])fs.copyFileSync(path.join(repoRoot,"bin",name),path.join(payloadRoot,"bin",name));
+for(const name of["claude-runtime.mjs","codex-runtime.mjs"])fs.copyFileSync(path.join(repoRoot,"bin",name),path.join(payloadRoot,"bin",name));
+// Windows has no python3 pty: the usage, model-picker, cloud-session and login
+// helpers run as app/dist-server/pty-helpers/cli.js over this bridge.
+fs.copyFileSync(bridgeSource,path.join(payloadRoot,"bin","claudex-conpty-bridge.exe"));
 // Provider workers look for the prompt/activity hook below
 // CLAUDEX_WORKHOUSE_APP_ROOT. A checkout has it at `<root>/hooks`, but the
 // portable payload used to omit that directory entirely, so every Windows

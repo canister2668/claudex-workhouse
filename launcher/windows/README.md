@@ -65,6 +65,14 @@ language button rewrites the whole window in place. The wizard owner-draws
 its own chrome so it follows the system light/dark theme and the per-monitor
 DPI of the display it is on.
 
+The same CMake project builds `claudex-conpty-bridge.exe`
+(`src/conpty-bridge.cpp`), a console helper the server uses to run Claude
+Code's interactive screens (usage, model picker, cloud session, login) inside
+a Windows pseudo console. It starts the program through a second stage that
+opens `CONIN$`/`CONOUT$` explicitly, so the program sees a terminal whatever
+the host does with redirected std handles, and runs it in a kill-on-close job
+tied to `--parent-pid`, so nothing outlives the helper that asked for it.
+
 Build on a supported Windows x64 runner:
 
 ```powershell

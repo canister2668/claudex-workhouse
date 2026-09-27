@@ -152,6 +152,7 @@ import {
   type VerifiedRelease
 } from "./deployment/index.js";
 import { WORKER_PROTOCOL_VERSION } from "./worker-protocol.js";
+import{screenHelperCommand}from"./pty-helpers/command.js";
 import{legalNoticeMetadata}from"./legal-notices.js";
 import{ApplicationUpdateCoordinator,applicationUpdateBlockers as collectApplicationUpdateBlockers,compareApplicationVersions,normalizeApplicationInstallMetadata,writeApplicationUpdateRequest,type ApplicationUpdateBlocker,type ApplicationUpdateStatus}from"./application-updates.js";
 import{createApplicationUpdateSnapshot}from"./application-update-snapshot.js";
@@ -2084,9 +2085,9 @@ async function claudeQuota(): Promise<QuotaResult> {
   if(claudeQuotaCooldownUntil>Date.now())return claudeQuotaRateLimited(claudeQuotaCooldownUntil);
   try {
     const result = await new Promise<string>((resolve,reject)=>{
-      const helper=path.join(config.appRoot,"bin","claude-usage.py");
       const probeDir=path.join(config.dataDir,"claude-usage-probe");
-      const child=spawn("python3",[helper,config.claudeBinary,probeDir],{cwd:config.appRoot,shell:false,windowsHide:true,env:{...process.env,DISABLE_AUTOUPDATER:"1"},stdio:["ignore","pipe","pipe"]});
+      const helper=screenHelperCommand(config.appRoot,"claude-usage",[config.claudeBinary,probeDir]);
+      const child=spawn(helper.command,helper.args,{cwd:config.appRoot,shell:false,windowsHide:true,env:{...process.env,DISABLE_AUTOUPDATER:"1"},stdio:["ignore","pipe","pipe"]});
       let stdout="",stderr="";
       let settled=false;
       const finish=(error?:Error)=>{if(settled)return;settled=true;clearTimeout(timer);error?reject(error):resolve(stdout);};

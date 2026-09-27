@@ -28,17 +28,24 @@ Resolved for the portable server:
   `taskkill /T /F` on the process tree (`app/src/server/worker-liveness.ts`).
   The server discovers `claude.exe` and `codex.exe` with the verified Windows
   discovery (`app/src/server/windows/direct-providers.ts`).
+- Python dependency. The Claude usage probe, model-picker refresh, cloud
+  session creation and web login used python3's POSIX `pty`, which Windows
+  Python does not have, so installing Python would not have helped. They are
+  ported to Node (`app/src/server/pty-helpers/`) and run over
+  `claudex-conpty-bridge.exe`, a console helper built with the launcher that
+  hosts the CLI in a ConPTY. A small virtual screen rebuilds conhost's
+  repainted output into text so the same parsers apply; tests hold the Node
+  parsers to byte-identical JSON with the Python ones. Linux keeps the Python
+  helpers.
 
 Outstanding before any Windows target can be released:
 
 - The clean, non-administrator Windows 11 acceptance run named below has never
   been performed. The portable ZIP has been exercised under Wine (payload
-  verification, start-up, readiness, direct task completion and stop), which
-  is not a substitute.
-- Antigravity and Grok tasks and login (refused on the Windows server), Claude
-  usage probes, and the Claude model list
-  refresh still depend on python3 and a POSIX pseudo-terminal and are
-  unavailable on Windows.
+  verification, start-up, readiness, direct task completion and stop, the
+  ConPTY usage probe and web login), which is not a substitute.
+- Antigravity and Grok tasks and login still depend on a POSIX pseudo-terminal
+  and Unix sockets; the Windows server refuses them with an explicit error.
 - The single-EXE installer and the native Worker path are unchanged and still
   unverified.
 

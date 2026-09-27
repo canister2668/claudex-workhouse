@@ -1,8 +1,9 @@
 import { afterEach, describe, expect, test } from "vitest";
 import fs from "node:fs";
 import path from "node:path";
-import { ProviderAuthManager, antigravityAuthHosts, claudeAuthHosts,grokAuthHosts, maskEmail, parseClaudeAuthStatus, parseCodexAccount, providerAuthLimits, validateAntigravityAuthUrl, validateClaudeAuthUrl, validateCodexAuthUrl,validateGrokAuthUrl,windowsClaudeLoginCommand } from "../../src/server/provider-auth.js";
+import { ProviderAuthManager, antigravityAuthHosts, claudeAuthHosts,grokAuthHosts, maskEmail, parseClaudeAuthStatus, parseCodexAccount, providerAuthLimits, validateAntigravityAuthUrl, validateClaudeAuthUrl, validateCodexAuthUrl,validateGrokAuthUrl } from "../../src/server/provider-auth.js";
 import { resetCodexAppServerPool } from "../../src/server/codex/app-server.js";
+import { screenHelperCommand } from "../../src/server/pty-helpers/command.js";
 
 const roots:string[]=[];
 const temp=()=>{const dir=fs.mkdtempSync(path.join(process.cwd(),".claudex-workhouse-auth-test-"));roots.push(dir);return dir;};
@@ -13,9 +14,12 @@ const config=(dataRoot:string,claudeBinary:string,grokBinary="/bin/false")=>({ro
 afterEach(()=>{resetCodexAppServerPool();delete process.env.CLAUDEX_WORKHOUSE_CODEX_BIN;delete process.env.CLAUDEX_WORKHOUSE_ROOT;delete process.env.CLAUDEX_WORKHOUSE_ANTIGRAVITY_BINARY;delete process.env.FAKE_AUTH_STATE;delete process.env.FAKE_DEVICE_UNSUPPORTED;delete process.env.FAKE_CLAUDE_STATE;delete process.env.FAKE_CLAUDE_MODE;delete process.env.FAKE_ANTIGRAVITY_STATE;for(const root of roots.splice(0))fs.rmSync(root,{recursive:true,force:true});});
 
 describe("provider auth parsing and URL boundaries",()=>{
-  test("builds a fixed Windows Claude login command and quotes apostrophes",()=>{
-    expect(windowsClaudeLoginCommand("C:\\Program Files\\Claude\\claude.exe","subscription")).toBe("& 'C:\\Program Files\\Claude\\claude.exe' auth login --claudeai");
-    expect(windowsClaudeLoginCommand("C:\\Odd'Name\\claude.exe","sso")).toBe("& 'C:\\Odd''Name\\claude.exe' auth login --sso");
+  test("runs the Claude login helper through Node on Windows and python3 elsewhere",()=>{
+    const windows=screenHelperCommand("C:\\Workhouse","claude-auth-pty",["claude.exe","C:\\work","sso","id","marker"],"win32");
+    expect(windows.command).toBe(process.execPath);
+    expect(windows.args[0]).toMatch(/pty-helpers[\\/]cli\.js$/);
+    expect(windows.args.slice(1)).toEqual(["claude-auth-pty","claude.exe","C:\\work","sso","id","marker"]);
+    expect(screenHelperCommand("/opt/w","claude-auth-pty",["claude"],"linux")).toEqual({command:"python3",args:[path.join("/opt/w","bin","claude-auth-pty.py"),"claude"]});
   });
   test("accepts only the observed exact Claude authentication hosts",()=>{
     expect(claudeAuthHosts).toEqual(["claude.com","platform.claude.com"]);

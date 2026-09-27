@@ -3,6 +3,7 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { screenHelperCommand } from "./pty-helpers/command.js";
 
 // Claude Code cloud sessions run on Anthropic infrastructure and draw from the
 // one-time cloud-session credit before the subscription. The CLI's /usage
@@ -127,8 +128,8 @@ export class ClaudeCloudSessions {
   }
 
   async create(input: { workspaceId: string; repository: string; task: string; bundle: boolean; paidConfirmed: boolean }) {
-    const helper = path.join(this.options.appRoot, "bin", "claude-cloud.py");
-    const result = await run("python3", [helper, this.options.claudeBinary(), input.repository, input.task, input.bundle ? "bundle" : "auto"], { cwd: this.options.appRoot, timeoutMs: 330_000, env: { ...process.env, DISABLE_AUTOUPDATER: "1" } });
+    const helper = screenHelperCommand(this.options.appRoot, "claude-cloud", [this.options.claudeBinary(), input.repository, input.task, input.bundle ? "bundle" : "auto"]);
+    const result = await run(helper.command, helper.args, { cwd: this.options.appRoot, timeoutMs: 330_000, env: { ...process.env, DISABLE_AUTOUPDATER: "1" } });
     let body: any;
     try { body = JSON.parse(result.stdout.trim().split("\n").pop() ?? ""); }
     catch { throw failure(`Cloud session helper failed (${result.code}): ${result.stderr.trim().slice(-400)}`, 502, "CLOUD_SESSION_HELPER_FAILED"); }

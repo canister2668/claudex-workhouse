@@ -45,14 +45,29 @@ Windows 서버는 Linux 서버와 같은 방식으로 Claude Code와 Codex를 **
   PID 재사용에 속지 않고 PowerShell 호출도 필요 없습니다.
 - 작업 중지는 작업 프로세스가 스스로 정리하도록 요청한 뒤(Codex는 진행 중 턴을
   중단), 5–8초 안에 끝나지 않으면 CLI와 그 하위 도구 프로세스 전체를 종료합니다.
-- Python은 필요 없습니다. DB는 번들된 Node SQLite 워커를 씁니다.
+- Python은 필요 없고 설치하지도 않습니다. DB는 번들된 Node SQLite 워커를 씁니다.
 
-Windows에서 아직 동작하지 않는 기능:
+### Python 없이 동작하는 터미널 기능
 
-- Antigravity·Grok 실행과 로그인(POSIX 의사 터미널과 Unix 소켓이 필요합니다). DeepSeek·Ollama는
-  Claude Code 엔진으로 직접 실행됩니다.
-- Claude 사용량 조회와 Claude 모델 목록 자동 갱신(Python 도구 사용). 모델 목록은
-  기본 목록으로 대체되고 작업 실행에는 영향이 없습니다.
+Linux 서버는 Claude Code의 대화형 화면(사용량 `/usage`, 모델 선택기 `/model`,
+`--cloud` 세션 생성, `auth login`)을 python3의 POSIX 의사 터미널로 읽습니다.
+Windows용 Python에는 이 모듈이 없어서 Python을 설치해도 동작하지 않습니다.
+대신 Windows 서버는 같은 기능을 Node로 옮긴 헬퍼
+(`app/dist-server/pty-helpers/cli.js`)를 번들된 `claudex-conpty-bridge.exe`로
+실행합니다. 브리지는 Windows ConPTY 안에서 CLI를 실행하고, 헬퍼는 화면을
+재구성해 Linux와 같은 파서로 읽습니다.
+
+- Claude 사용량 조회와 모델 목록 자동 갱신이 Windows에서도 동작합니다.
+- Claude 로그인은 Linux와 같은 웹 방식입니다. 로그인 링크를 열고 받은 코드를
+  Workhouse 화면에 붙여 넣으므로, 휴대폰 등 다른 기기에서 접속해도 로그인할 수
+  있습니다(예전에는 서버 PC에 PowerShell 창이 떴습니다).
+- Claude 클라우드 세션 생성도 같은 방식으로 동작합니다(Git for Windows 필요).
+- 헬퍼나 서버가 종료되면 브리지가 CLI와 하위 프로세스를 함께 정리합니다.
+
+Windows에서 아직 동작하지 않는 기능: Antigravity·Grok 실행과 로그인. 두 런타임은
+작업 실행 자체가 POSIX 의사 터미널과 Unix 소켓에 묶여 있어 Windows 서버에서는
+선택 시 명확한 오류로 거부합니다. DeepSeek·Ollama는 Claude Code 엔진으로 직접
+실행됩니다.
 
 ### 직접 빌드
 
@@ -70,6 +85,10 @@ $env:CLAUDEX_WORKHOUSE_WINDOWS_NODE_MODULES = (Resolve-Path node_modules).Path
 $env:CLAUDEX_WORKHOUSE_WINDOWS_LAUNCHER_EXE = (Resolve-Path ..\out\windows-launcher\Release\claudex-workhouse.exe).Path
 node scripts/package-windows-server.mjs
 ```
+
+CMake는 런처와 함께 `claudex-conpty-bridge.exe`도 빌드하며, 패키저는 런처 옆의
+브리지를 payload의 `bin`에 넣습니다(다른 위치면
+`CLAUDEX_WORKHOUSE_WINDOWS_CONPTY_BRIDGE_EXE`로 지정).
 
 결과물은 `packages\claudex-workhouse-server-windows-x64-portable.zip`과 `.sha256`
 파일입니다. 패키저는 ZIP을 직접 작성하며, 모든 항목 이름이 ASCII이고 탐색기의

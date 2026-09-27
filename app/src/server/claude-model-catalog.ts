@@ -3,6 +3,7 @@ import {spawn} from "node:child_process";
 import type {AppConfig} from "./config.js";
 import type {DeckDatabase} from "./db/client.js";
 import { sanitizeSensitiveText } from "./sensitive-data.js";
+import{screenHelperCommand}from"./pty-helpers/command.js";
 
 export type ClaudeModelCatalogItem={id:string;displayName:string;description:string;source:"runtime"|"custom"};
 export type ClaudeModelCatalogSnapshot={models:ClaudeModelCatalogItem[];fetchedAt:string;stale:boolean;source:string};
@@ -64,8 +65,8 @@ export class ClaudeModelCatalog{
   }
   private async loadFresh():Promise<ClaudeModelCatalogSnapshot>{
     try{
-      const helper=path.join(this.config.appRoot,"bin","claude-models.py"),probeDir=path.join(this.config.dataDir,"claude-model-probe"),result=await new Promise<any>((resolve,reject)=>{
-        const child=spawn("python3",[helper,this.config.claudeBinary,probeDir],{cwd:this.config.appRoot,shell:false,windowsHide:true,env:{...process.env,DISABLE_AUTOUPDATER:"1"},stdio:["ignore","pipe","pipe"]});let stdout="",stderr="",settled=false;
+      const probeDir=path.join(this.config.dataDir,"claude-model-probe"),helper=screenHelperCommand(this.config.appRoot,"claude-models",[this.config.claudeBinary,probeDir]),result=await new Promise<any>((resolve,reject)=>{
+        const child=spawn(helper.command,helper.args,{cwd:this.config.appRoot,shell:false,windowsHide:true,env:{...process.env,DISABLE_AUTOUPDATER:"1"},stdio:["ignore","pipe","pipe"]});let stdout="",stderr="",settled=false;
         const finish=(error?:Error)=>{if(settled)return;settled=true;clearTimeout(timer);if(error)reject(error);else try{resolve(JSON.parse(stdout));}catch{reject(new Error("Claude model resolver returned invalid JSON."));}};
         const timer=setTimeout(()=>{child.kill("SIGTERM");finish(new Error("Claude model resolver timed out."));},30_000);timer.unref?.();
         child.stdout.setEncoding("utf8");child.stderr.setEncoding("utf8");child.stdout.on("data",chunk=>stdout=`${stdout}${chunk}`.slice(-131072));child.stderr.on("data",chunk=>stderr=`${stderr}${chunk}`.slice(-2000));child.once("error",error=>finish(new Error(sanitizeSensitiveText(error.message))));child.once("exit",code=>code===0?finish():finish(new Error(`Claude model resolver failed (${code}): ${sanitizeSensitiveText(stderr)}`)));
