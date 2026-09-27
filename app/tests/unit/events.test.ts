@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
-import { codexTurnEvents, collaborationPublicEvents, MAX_EVENT_METADATA_BYTES, mergeActiveClaudeThreadEvents, mergeHistoricalFileChanges, normalizeAgentEvent, providerThreadEvents, sanitizeEventMetadata, withTaskRequestIdentity } from "../../src/server/events.js";
+import { codexTurnEvents, collaborationPublicEvents, completedThreadTurnEvents, MAX_EVENT_METADATA_BYTES, mergeActiveClaudeThreadEvents, mergeHistoricalFileChanges, normalizeAgentEvent, providerThreadEvents, sanitizeEventMetadata, withTaskRequestIdentity } from "../../src/server/events.js";
 import { presentEvent } from "../../src/web/events.js";
-import { StreamSpool, readStreamEvents, readStreamFileChanges, STREAM_REPLAY_LIMIT } from "../../src/server/stream-events.js";
+import { StreamSpool, mergeStreamAgentLifecycle, readStreamAgentLifecycle, readStreamEvents, readStreamFileChanges, STREAM_REPLAY_LIMIT } from "../../src/server/stream-events.js";
 import {persistProviderSystemEvent} from "../../src/server/provider-system-events.js";
 import fs from "node:fs";
 import { CLAUDEX_WORKHOUSE_NATIVE_COLLABORATION_INSTRUCTIONS, claudexWorkhouseCollaborationInstructions, turnLifecycleEvent } from "../../src/server/codex-collaboration.js";
@@ -68,6 +68,17 @@ describe("AgentEvent safety and presentation", () => {
     fs.rmSync(root,{recursive:true,force:true});
   });
 
+  it("recovers parallel-agent lifecycle after noisy progress leaves the replay window",()=>{
+    const root=fs.mkdtempSync("/tmp/claudex-workhouse-stream-agents-test-"),taskId="codex:agents",spool=new StreamSpool(root,taskId,"codex");
+    const started=spool.append({type:"agent_started",content:"inspect",metadata:{receiverThreadIds:["child-a"]}}) as any;
+    for(let index=0;index<STREAM_REPLAY_LIMIT+10;index++)spool.append({type:"tool_progress",content:`thinking ${index}`});
+    const replay=readStreamEvents(root,taskId).events,lifecycle=readStreamAgentLifecycle(root,taskId);
+    expect(replay.some(event=>event.type==="agent_started")).toBe(false);
+    expect(lifecycle).toMatchObject([{type:"agent_started",metadata:{receiverThreadIds:["child-a"]}}]);
+    expect(mergeStreamAgentLifecycle(replay,lifecycle)[0].eventId).toBe(started.eventId);
+    fs.rmSync(root,{recursive:true,force:true});
+  });
+
   it("suppresses compatible-provider per-token thinking system events",()=>{
     expect(persistProviderSystemEvent("deepseek","thinking_tokens")).toBe(false);
     expect(persistProviderSystemEvent("ollama","thinking_tokens")).toBe(false);
@@ -81,7 +92,7 @@ describe("AgentEvent safety and presentation", () => {
     expect(events[1].type).toBe("message_completed");
   });
 
-  it.each(["antigravity","deepseek","ollama","grok"] as const)("keeps every %s session turn when the newest task is reopened",provider=>{
+  it.each(["codex","antigravity","deepseek","ollama","grok"] as const)("keeps every %s session turn when the newest task is reopened",provider=>{
     const task=(id:string,prompt:string,createdAt:string)=>({id,provider,nativeId:id,threadId:"shared-session",projectId:"project",title:"session",prompt,status:"completed",createdAt,updatedAt:createdAt,result:null,error:null,log:"",owned:true,pid:null,pgid:null,processStart:null,commandMarker:null,parentThreadId:null,metadata:{}} as any);
     const first=task(`${provider}:one`,"첫 입력","2026-08-04T01:00:00.000Z"),second=task(`${provider}:two`,"두 번째 입력","2026-08-04T02:00:00.000Z");
     const events=providerThreadEvents([
@@ -89,6 +100,23 @@ describe("AgentEvent safety and presentation", () => {
       {task:first,events:[{type:"message_completed",content:"첫 출력",taskId:first.id,eventId:"one:1"} as any]},
     ]);
     expect(events.map(event=>event.content)).toEqual(["첫 입력","첫 출력","두 번째 입력","두 번째 출력"]);
+  });
+
+  it("keeps only the final assistant answer from a completed thread turn",()=>{
+    const task={id:"codex:done",provider:"codex",nativeId:"done",threadId:"thread",projectId:"project",title:"done",prompt:"요청",status:"completed",createdAt:"2026-08-30T01:00:00.000Z",updatedAt:"2026-08-30T01:01:00.000Z",result:"최종 답변",error:null,log:"",owned:true,metadata:{}} as any;
+    const events=completedThreadTurnEvents(task,[
+      {type:"message_completed",content:"과정 답변",metadata:{role:"agent",phase:"commentary"}},
+      {type:"message_delta",content:"작성 중",metadata:{role:"agent"}},
+      {type:"command_completed",content:"test passed"},
+      {type:"message_completed",content:"최종 답변",metadata:{role:"agent",phase:"final_answer"}}
+    ] as any[]);
+    expect(events.map(event=>event.content)).toEqual(["test passed","최종 답변"]);
+  });
+
+  it("falls back to the persisted result when a completed stream has no final marker",()=>{
+    const task={id:"codex:done",provider:"codex",nativeId:"done",threadId:"thread",projectId:"project",title:"done",prompt:"요청",status:"completed",createdAt:"2026-08-30T01:00:00.000Z",updatedAt:"2026-08-30T01:01:00.000Z",result:"DB 최종 답변",error:null,log:"",owned:true,metadata:{}} as any;
+    const events=completedThreadTurnEvents(task,[{type:"message_completed",content:"과정만 있음",metadata:{role:"agent",phase:"commentary"}}] as any[]);
+    expect(events).toMatchObject([{type:"message",content:"DB 최종 답변",metadata:{role:"agent",section:"result"}}]);
   });
 
   it("keeps Grok input and output cards when a noisy latest turn exceeds the thread limit",()=>{
@@ -101,6 +129,17 @@ describe("AgentEvent safety and presentation", () => {
     ]);
     expect(events).toHaveLength(1_500);
     expect(events.filter(event=>event.type==="message"||event.type==="message_completed").map(event=>event.content)).toEqual(["첫 입력","첫 출력","두 번째 입력","두 번째 출력"]);
+  });
+
+  it("keeps parallel-agent lifecycle cards after noisy process events",()=>{
+    const task={id:"codex:parallel",provider:"codex",nativeId:"parallel",threadId:"root",projectId:"project",title:"parallel",prompt:"병렬 조사",status:"running",createdAt:"2026-08-04T01:00:00.000Z",updatedAt:"2026-08-04T01:01:00.000Z",result:null,error:null,log:"",owned:true,metadata:{}} as any;
+    const lifecycle=[
+      {type:"agent_started",content:"조사",threadId:"root",metadata:{receiverThreadIds:["child-a"]}},
+      {type:"agent_completed",content:"완료",threadId:"root",metadata:{receiverThreadIds:["child-a"]}}
+    ] as any[];
+    const noise=Array.from({length:1_600},(_,index)=>({type:"tool_progress",content:`progress ${index}`} as any));
+    const events=providerThreadEvents([{task,events:[...lifecycle,...noise]}]);
+    expect(events.filter(event=>event.type.startsWith("agent_"))).toEqual(lifecycle);
   });
 
   it("does not duplicate a provider prompt already present in a task stream",()=>{

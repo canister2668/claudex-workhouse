@@ -1,3 +1,4 @@
+import { asyncAnswerPrompt, listAsyncUserInputs } from "./async-user-input.js";
 // SPDX-License-Identifier: AGPL-3.0-only
 // This file is part of Claudex Workhouse.
 
@@ -30,8 +31,9 @@ import { AntigravityProvider } from "./providers/antigravity.js";
 import{GrokProvider}from"./providers/grok.js";
 import {normalizeAntigravityOutputEvents} from "./antigravity-runtime.js";
 import { readClaudeRuntime } from "./claude-runtime.js";
+import { registerAccessActivity } from "./security/access-activity.js";
 import { authorizeLocalOwnerRequest, createAuthenticator, isLoopbackAddress, LocalEntryAuth, localEntryPublicRequest, registerLocalEntryRoutes } from "./security/auth.js";
-import { codexTurnEvents, collaborationPublicEvents, mergeActiveClaudeThreadEvents, mergeHistoricalFileChanges, normalizeAgentEvent, providerThreadEvents, taskEvents, withTaskRequestIdentity } from "./events.js";
+import { codexTurnEvents, collaborationPublicEvents, completedThreadTurnEvents, mergeActiveClaudeThreadEvents, mergeHistoricalFileChanges, normalizeAgentEvent, providerThreadEvents, taskEvents, withTaskRequestIdentity } from "./events.js";
 import { claudeTranscriptEvents, resolveTranscriptFile } from "./claude-transcript.js";
 import { EmotionWatcher, PROVIDER_EMOTION_OUTFITS } from "./emotion.js";
 import { ProviderAvatarSettings } from "./provider-avatar-settings.js";
@@ -45,11 +47,13 @@ import { registerEmotionMcp } from "./mcp-emotion.js";
 import {MCP_REGISTRY_SETTING_KEY,externalMcpProviderSupport,mcpRegistryPutSchema,normalizeMcpRegistrySettings,publicMcpRegistrySettings} from "./mcp-registry.js";
 import {McpSecretStore} from "./mcp-secrets.js";
 import {registerExternalMcpProxy} from "./external-mcp-proxy.js";
-import { cleanupStreamEvents, readStreamEvents, readStreamFileChanges, sseResumeSequence, STREAM_REPLAY_LIMIT } from "./stream-events.js";
+import { cleanupStreamEvents, mergeStreamAgentLifecycle, readStreamAgentLifecycle, readStreamEvents, readStreamFileChanges, sseResumeSequence, staleClaudeTerminalSequences, STREAM_REPLAY_LIMIT } from "./stream-events.js";
 import {mergePersistedImageOutputs,persistedImageOutputEvents,persistedImageOutputsFromEvents} from "./image-outputs.js";
-import { mapAntigravityQuotaError, mapClaudeQuota, mapCodexQuota, mapDeepseekBalance, mapGrokQuota, mapOllamaPlan, mapOllamaQuota, quotaCacheDuration, readFreshCodexRateLimits, type ProviderBalance, type ProviderQuota } from "./quota.js";
+import { codexQuotaForModel, mapAntigravityQuotaError, mapClaudeQuota, mapCodexQuota, mapDeepseekBalance, mapGrokQuota, mapOllamaPlan, mapOllamaQuota, quotaCacheDuration, readFreshCodexRateLimits, restorableClaudeQuota, type ProviderBalance, type ProviderQuota } from "./quota.js";
 import { ProviderAuthManager, type AuthProvider, type LoginMethod } from "./provider-auth.js";
 import { HostWorkspaceManager, LOCAL_HOST_ID } from "./host-workspaces.js";
+import { registerExternalParticipantRoutes } from "./external-participant.js";
+import { ClaudeCloudSessions, CloudCreditConfirmationRequiredError, cloudCreditNeedsConfirmation, readCloudCredit } from "./claude-cloud.js";
 import { WorkerHub } from "./worker-hub.js";
 import{DesktopWorkerClient}from"./desktop-worker/client.js";
 import{saveWorkerConfig}from"./desktop-worker/config.js";
@@ -493,11 +497,13 @@ const appendTaskListJournal=(revision:number,mutation:TaskSnapshotMutation)=>{
 const recordTaskListMutation=(mutation:TaskSnapshotMutation)=>{const revision=++taskListSnapshotRevision;taskListSnapshotMutations.push({revision,mutation});appendTaskListJournal(revision,mutation);};
 const publishTaskSnapshots=(rows:DeckTask[],provider:ProviderId|undefined,afterRevision:number)=>{
   const previousRows=taskListSnapshot.filter(task=>!provider||task.provider===provider);
-  const previous=new Map(previousRows.map(task=>[task.id,JSON.stringify(projectTaskListItem(task))]));
+  const previous=new Map(previousRows.map(task=>[task.id,task]));
   const mutations=taskListSnapshotMutations.filter(entry=>entry.revision>afterRevision).map(entry=>entry.mutation);
   taskListSnapshot=reconcileTaskSnapshot(taskListSnapshot,rows,provider,mutations);
   const nextRows=taskListSnapshot.filter(task=>!provider||task.provider===provider),nextIds=new Set(nextRows.map(task=>task.id));
-  const changed=nextRows.filter(task=>previous.get(task.id)!==JSON.stringify(projectTaskListItem(task)));
+  // Provider caches hand back the same row object until it changes, so an
+  // identical reference skips serializing both projections of every row.
+  const changed=nextRows.filter(task=>{const before=previous.get(task.id);return before!==task&&(!before||JSON.stringify(projectTaskListItem(before))!==JSON.stringify(projectTaskListItem(task)));});
   const removed=previousRows.filter(task=>!nextIds.has(task.id));
   if(changed.length||removed.length){const revision=++taskListSnapshotRevision;for(const task of changed)appendTaskListJournal(revision,{kind:"upsert",task});for(const task of removed)appendTaskListJournal(revision,{kind:"delete-task",provider:task.provider,taskId:task.id});}
   taskListSnapshotMutations.length=0;
@@ -517,7 +523,7 @@ function limited<T>(promise:Promise<T>,timeoutMs:number,label:string):Promise<T>
   return new Promise((resolve,reject)=>{const timer=setTimeout(()=>reject(Object.assign(new Error(`${label} timed out.`),{statusCode:503,code:"database_busy"})),timeoutMs);timer.unref?.();promise.then(value=>{clearTimeout(timer);resolve(value);},error=>{clearTimeout(timer);reject(error);});});
 }
 
-const app = Fastify({ logger: { level: process.env.LOG_LEVEL ?? "info", redact: ["req.headers.cookie", "req.headers.cf-access-jwt-assertion", "req.headers.authorization", "req.body.token", "req.body.claimToken", "req.body.ownerCredential", "req.body.pairingCode"],serializers:{req(request:any){return{method:request.method,url:sanitizeSensitiveText(request.url),host:request.hostname,remoteAddress:request.ip,remotePort:request.socket?.remotePort};},err(error:any){return sanitizeSensitiveObject(error);}} }, bodyLimit: 65536, trustProxy: false });
+const app = Fastify({ logger: { level: process.env.LOG_LEVEL ?? "info", redact: ["req.headers.cookie", "req.headers.cf-access-jwt-assertion", "req.headers.x-claudex-proxy-auth", "req.headers.authorization", "req.body.token", "req.body.apiKey", "req.body.participantToken", "req.body.claimToken", "req.body.ownerCredential", "req.body.pairingCode"],serializers:{req(request:any){return{method:request.method,url:sanitizeSensitiveText(request.url),host:request.hostname,remoteAddress:request.ip,remotePort:request.socket?.remotePort};},err(error:any){return sanitizeSensitiveObject(error);}} }, bodyLimit: 65536, trustProxy: false });
 const sweepTempStorage=async()=>{
   try{
     const {tasks,workspaces,knownRoots}=await loadTempStorageContext();
@@ -572,6 +578,7 @@ app.addHook("onRequest",async(request)=>{
   if(access==="blocked")throw Object.assign(new Error("Complete the one-time owner claim before using the management API."),{statusCode:428,code:"OWNER_CLAIM_REQUIRED"});
   (request as any).actor=await authenticate(request);
 });
+registerAccessActivity(app);
 // A single visible conversation legitimately maintains SSE plus lightweight
 // approval, user-input, task and session reconciliation. Keep the global guard
 // above that steady-state read traffic; sensitive mutations retain their lower
@@ -707,7 +714,11 @@ const taskListQuery = z.object({
   provider:providerParam.optional(),
   scope:z.enum(["all"]).optional(),
   snapshot:z.enum(["true","false"]).transform(value=>value==="true").optional(),
-  revision:z.coerce.number().int().nonnegative().optional()
+  revision:z.coerce.number().int().nonnegative().optional(),
+  // `none` runs the same synchronization but returns no rows. The web client's
+  // periodic background sync discards the body and re-reads the snapshot delta,
+  // so shipping the full multi-megabyte list there was pure waste.
+  view:z.enum(["summary","none"]).optional()
 });
 const promptBody = z.object({ prompt: z.string().trim().min(1).max(config.promptMaxLength) });
 const createBody = promptBody.extend({
@@ -1682,6 +1693,43 @@ app.post("/api/tasks/:provider/:taskId/proton-uploads/prepare",{config:{rateLimi
 app.post("/api/proton-drive/uploads/:uploadId/execute",{config:{rateLimit:{max:5,timeWindow:"10 minutes"}}},async(request)=>{const{uploadId}=z.object({uploadId:z.string().uuid()}).parse(request.params),body=z.object({expectedSha256:z.string().regex(/^[a-f0-9]{64}$/),confirmUpload:z.literal(true)}).parse(request.body);return idempotent(request,`proton-upload-execute:${uploadId}`,body,async()=>{try{const upload=await protonDriveUploads.execute(uploadId,body.expectedSha256),task=await db.getTask(upload.taskId);await audit(request,"proton-upload-execute","success",task??undefined,`upload=${upload.id};remote=${upload.remotePath};sha256=${upload.sourceSha256}`);return{upload};}catch(error){const upload=(error as any)?.operation??await protonDriveUploads.get(uploadId);let task=null;if(upload)task=await db.getTask(upload.taskId);await audit(request,"proton-upload-execute","failed",task??undefined,`upload=${uploadId};code=${typeof(error as any)?.code==="string"?(error as any).code:"unknown"}`).catch(()=>{});throw error;}});});
 app.post("/api/proton-drive/uploads/:uploadId/cancel",async(request)=>{const{uploadId}=z.object({uploadId:z.string().uuid()}).parse(request.params),body=z.object({confirmCancel:z.literal(true)}).parse(request.body);return idempotent(request,`proton-upload-cancel:${uploadId}`,body,async()=>({upload:await protonDriveUploads.cancel(uploadId)}));});
 app.put("/api/system-settings/credit-usage",async(request)=>{const settings=creditUsageSettingsSchema.parse(request.body);return idempotent(request,"credit-usage-settings",settings,async()=>{const updatedAt=new Date().toISOString();await db.putSystemSetting("billing.credit-usage",settings,updatedAt);await db.appendAudit({createdAt:updatedAt,actor:(request as any).actor,action:"credit-usage-settings",provider:null,taskId:null,projectId:null,outcome:"success",detail:`allowPaidCredits=${settings.allowPaidCredits}`});if(settings.allowPaidCredits)void pumpCreditConsentWaits();return{settings,updatedAt};});});
+// Claude Code cloud sessions (claude --cloud) spend the cloud-session credit
+// first. When the cached balance is used up, expired, or unknown, the caller
+// must confirm that the run may draw from the subscription instead.
+const claudeCloud=new ClaudeCloudSessions({appRoot:config.appRoot,dataDir:config.dataDir,claudeBinary:()=>config.claudeBinary});
+async function requireCloudCreditConsent(request:FastifyRequest,confirmed:boolean){
+  const credit=readCloudCredit();
+  if(!cloudCreditNeedsConfirmation(credit))return{credit,paidConfirmed:false};
+  if(!confirmed)throw Object.assign(new CloudCreditConfirmationRequiredError(credit),{errorParams:{credit}});
+  await requirePaidCreditConsent(request,["claude"]);
+  return{credit,paidConfirmed:true};
+}
+app.get("/api/claude-cloud",async(request)=>{
+  const {refresh}=z.object({refresh:z.enum(["0","1"]).optional()}).parse(request.query);
+  if(refresh==="1")await claudeQuota();
+  return{credit:readCloudCredit(),sessions:claudeCloud.list()};
+});
+app.post("/api/claude-cloud/sessions",{config:{rateLimit:{max:10,timeWindow:"10 minutes"}}},async(request)=>{
+  const body=z.object({workspaceId:z.string().min(1).max(200),task:z.string().trim().min(1).max(20_000),bundle:z.boolean().default(false),confirmWithoutCredit:z.boolean().default(false)}).parse(request.body);
+  const workspace=await db.getWorkspace(body.workspaceId);
+  if(!workspace||workspace.hostId!==LOCAL_HOST_ID||(workspace as any).archivedAt)throw Object.assign(new Error("Choose an active Workspace on this server."),{statusCode:409,code:"CLOUD_SESSION_WORKSPACE_UNAVAILABLE"});
+  const {paidConfirmed}=await requireCloudCreditConsent(request,body.confirmWithoutCredit);
+  const record=await claudeCloud.create({workspaceId:workspace.id,repository:workspace.canonicalPath,task:body.task,bundle:body.bundle,paidConfirmed});
+  await db.appendAudit({createdAt:record.createdAt,actor:(request as any).actor,action:"claude-cloud-session-create",provider:"claude",taskId:null,projectId:workspace.projectId,outcome:"success",detail:`session=${record.sessionId};workspace=${workspace.id};upload=${record.upload};paidConfirmed=${paidConfirmed}`});
+  return{session:record,credit:readCloudCredit()};
+});
+app.post("/api/claude-cloud/sessions/:sessionId/messages",{config:{rateLimit:{max:30,timeWindow:"10 minutes"}}},async(request)=>{
+  const {sessionId}=z.object({sessionId:z.string().regex(/^(session|cse)_[A-Za-z0-9]+$/)}).parse(request.params);
+  const body=z.object({message:z.string().trim().min(1).max(20_000),confirmWithoutCredit:z.boolean().default(false)}).parse(request.body);
+  const {paidConfirmed}=await requireCloudCreditConsent(request,body.confirmWithoutCredit);
+  const result=await claudeCloud.send(sessionId,body.message);
+  await db.appendAudit({createdAt:result.sentAt,actor:(request as any).actor,action:"claude-cloud-session-message",provider:"claude",taskId:null,projectId:null,outcome:"success",detail:`session=${sessionId};paidConfirmed=${paidConfirmed}`});
+  return result;
+});
+app.get("/api/claude-cloud/sessions/:sessionId/github",async(request)=>{
+  const {sessionId}=z.object({sessionId:z.string().regex(/^(session|cse)_[A-Za-z0-9]+$/)}).parse(request.params);
+  return claudeCloud.github(sessionId);
+});
 app.get("/api/snapshots",async(request)=>{const query=z.object({state:z.enum(["ready","trashed","error","purged"]).optional()}).parse(request.query),items=await requireSnapshots().list();return{items:query.state?items.filter(item=>item.state===query.state):items.filter(item=>item.state!=="purged")};});
 app.get("/api/snapshots/summary",async()=>({summary:await requireSnapshots().summary(),status:snapshotStartupError?"degraded":"ready",error:snapshotStartupError}));
 app.post("/api/snapshots/scan",{config:{rateLimit:{max:2,timeWindow:"10 minutes"}}},async(request)=>{const body=z.object({confirmReadOnly:z.literal(true)}).parse(request.body);return idempotent(request,"snapshot-legacy-scan",body,async()=>({legacy:requireSnapshots().legacyInventory()}));});
@@ -1993,7 +2041,28 @@ async function ollamaQuota(): Promise<QuotaResult> {
   } catch { return failed("unavailable"); }
 }
 let lastClaudeQuota: ProviderQuota | null = null;
+// A throttled usage endpoint stays throttled while the 10s "unavailable" cache
+// keeps launching probes. Hold the probe off for a full window instead, and
+// keep serving the last reading so the panel shows usage rather than nothing.
+const CLAUDE_QUOTA_RATE_LIMIT_COOLDOWN_MS=10*60_000;
+let claudeQuotaCooldownUntil=0;
+const CLAUDE_QUOTA_STORE_KEY="quota.claude.last-reading";
+let claudeQuotaRestored=false;
+async function restoreClaudeQuota(){
+  if(claudeQuotaRestored)return;
+  claudeQuotaRestored=true;
+  try{
+    const stored=await db.getSystemSetting(CLAUDE_QUOTA_STORE_KEY);
+    const restored=restorableClaudeQuota(stored?.value);
+    if(restored&&!lastClaudeQuota)lastClaudeQuota=restored;
+  }catch{/* a missing or unreadable reading is not an error */}
+}
+function claudeQuotaRateLimited(retryAt:number):QuotaResult{
+  return { ...(lastClaudeQuota ?? { fiveHour:null, sevenDay:null, status:"partial" as const }), error:"rate_limited", retryAt:new Date(retryAt).toISOString() };
+}
 async function claudeQuota(): Promise<QuotaResult> {
+  await restoreClaudeQuota();
+  if(claudeQuotaCooldownUntil>Date.now())return claudeQuotaRateLimited(claudeQuotaCooldownUntil);
   try {
     const result = await new Promise<string>((resolve,reject)=>{
       const helper=path.join(config.appRoot,"bin","claude-usage.py");
@@ -2012,8 +2081,15 @@ async function claudeQuota(): Promise<QuotaResult> {
       child.once("exit",(code)=>code===0?finish():finish(new Error(`Claude usage probe failed (${code}): ${stderr}`)));
     });
     const body: any = JSON.parse(result);
+    if(!body?.ok&&body?.error==="rate_limited"){
+      claudeQuotaCooldownUntil=Date.now()+CLAUDE_QUOTA_RATE_LIMIT_COOLDOWN_MS;
+      return claudeQuotaRateLimited(claudeQuotaCooldownUntil);
+    }
     if(!body?.ok)throw new Error("Claude CLI did not return usage data.");
+    claudeQuotaCooldownUntil=0;
     lastClaudeQuota = mapClaudeQuota(body);
+    const at=new Date().toISOString();
+    await db.putSystemSetting(CLAUDE_QUOTA_STORE_KEY,{quota:lastClaudeQuota,at},at).catch(()=>{});
     return { ...lastClaudeQuota, error:null, retryAt:null };
   } catch { return { ...(lastClaudeQuota ?? { fiveHour:null, sevenDay:null, status:"partial" as const }), error:"unavailable", retryAt:null }; }
 }
@@ -2139,7 +2215,7 @@ async function pumpQuotaTaskReservations(){
     // post-reset observation. Let it settle, then start a new provider read.
     if(quotaPending)await quotaPending.catch(()=>null);
     const quota=await refreshQuotaData();
-    for(const row of due as QuotaTaskReservation[]){if(row.provider!=="codex"&&row.provider!=="claude")continue;const weekly=quota[row.provider]?.sevenDay?.pct;if(typeof weekly==="number"&&weekly>=90&&weekly<100)app.log.warn({provider:row.provider,reservationId:row.id,weeklyPercent:weekly},"Starting a quota reservation while weekly usage is high.");}
+    for(const row of due as QuotaTaskReservation[]){if(row.provider!=="codex"&&row.provider!=="claude")continue;const providerQuota=row.provider==="codex"?codexQuotaForModel(quota.codex,row.request.model):quota.claude,weekly=providerQuota?.sevenDay?.pct;if(typeof weekly==="number"&&weekly>=90&&weekly<100)app.log.warn({provider:row.provider,reservationId:row.id,weeklyPercent:weekly},"Starting a quota reservation while weekly usage is high.");}
     await runQuotaReservationPump({store:db,quota,start:async claimed=>{try{await startClaimedQuotaReservation(claimed);}catch{/* failure is persisted and reported by startClaimedQuotaReservation */}}});
   }catch(error){app.log.warn({err:sanitizeSensitiveObject(error)},"Skipping a quota reservation pump.");}
   finally{quotaReservationPumpBusy=false;}
@@ -2166,10 +2242,10 @@ app.post("/api/quota-reservations",{config:{rateLimit:{max:6,timeWindow:"1 minut
   const quotaProvider: "codex"|"claude"=body.provider;
   await validateQuotaReservationBody(body);
   return idempotent(request,"quota-reservation-create",body,async()=>{
-    const now=new Date().toISOString(),quota=await currentQuotaData(true),id=crypto.randomUUID(),idempotencyKey=String(request.headers["idempotency-key"]);
-    const reservation=await db.createQuotaTaskReservation({id,provider:quotaProvider,projectId:body.projectId,executionHostId:body.executionHostId??LOCAL_HOST_ID,workspaceId:body.workspaceId,title:body.title??body.prompt.replace(/\s+/g," ").slice(0,80),request:body,permissionSnapshot:reservationPermissionSnapshot(body),status:"waiting-quota",idempotencyKey,createdAt:now,updatedAt:now,nextCheckAt:initialReservationCheckAt(quota[quotaProvider]),lastQuotaCheckAt:quota.fetchedAt,lastQuotaStatus:reservationQuotaDecision(quota[quotaProvider]).reason,claimStartedAt:null,taskId:null,error:null});
+    const now=new Date().toISOString(),quota=await currentQuotaData(true),id=crypto.randomUUID(),idempotencyKey=String(request.headers["idempotency-key"]),taskQuota=quotaProvider==="codex"?codexQuotaForModel(quota.codex,body.model):quota.claude;
+    const reservation=await db.createQuotaTaskReservation({id,provider:quotaProvider,projectId:body.projectId,executionHostId:body.executionHostId??LOCAL_HOST_ID,workspaceId:body.workspaceId,title:body.title??body.prompt.replace(/\s+/g," ").slice(0,80),request:body,permissionSnapshot:reservationPermissionSnapshot(body),status:"waiting-quota",idempotencyKey,createdAt:now,updatedAt:now,nextCheckAt:initialReservationCheckAt(taskQuota),lastQuotaCheckAt:quota.fetchedAt,lastQuotaStatus:reservationQuotaDecision(taskQuota).reason,claimStartedAt:null,taskId:null,error:null});
     await db.appendAudit({createdAt:now,actor:(request as any).actor??"owner",action:"quota-reservation-create",provider:body.provider,taskId:null,projectId:body.projectId,hostId:body.executionHostId??LOCAL_HOST_ID,workspaceId:body.workspaceId,outcome:"success",detail:`reservation=${id};criterion=next-five-hour-reset`});
-    return{reservation:publicQuotaReservation(reservation),quota:quota[quotaProvider]};
+    return{reservation:publicQuotaReservation(reservation),quota:taskQuota};
   });
 });
 app.post("/api/quota-reservations/:reservationId/cancel",async(request)=>{
@@ -2210,9 +2286,12 @@ app.post("/api/quota-reservations/:reservationId/retry",async(request)=>{
 
 registerEmotionMcp(app, { watcher: emotion, codexWatcher: codexEmotion, deepseekWatcher:deepseekEmotion, ollamaWatcher:ollamaEmotion, antigravityWatcher:antigravityEmotion,grokWatcher:grokEmotion, stateFile: config.emotionStateFile, assetsDir:config.emotionAssetsDir, baseUrl: config.emotionAssetBaseUrl,selectOutfit:async(provider,outfit)=>{await avatarSettings.select(provider,outfit);} });
 registerExternalMcpProxy(app,{db,secrets:mcpSecretStore});
-const managedProviderBridge=new ManagedProviderBridge(db,collaboration,async task=>task.executionHostId&&executionHostUsesWorker(task.executionHostId)?remoteTaskCommand(task,"provider.task.status"):db.upsertTask(await provider(task.provider).getTask(task)),async(task,prompt)=>withThreadTurn(task.provider,task.threadId,async()=>{if(task.executionHostId&&executionHostUsesWorker(task.executionHostId))return remoteTaskCommand(task,"provider.session.resume",{prompt});const next=await provider(task.provider).sendMessage(task,workspacePromptForTask(task,prompt));return db.upsertTask({...next,...(next.id!==task.id?{prompt}:{}),metadata:workspaceInstructionFollowUpMetadata(task.metadata,next.metadata)});}),async(providerId,model)=>{await assertPaidCreditConsent([providerId]);await requireGlobalModel(providerId,model);});
+const managedProviderBridge=new ManagedProviderBridge(db,collaboration,async task=>task.executionHostId&&executionHostUsesWorker(task.executionHostId)?remoteTaskCommand(task,"provider.task.status"):db.upsertTask(await provider(task.provider).getTask(task)),async(task,prompt)=>withThreadTurn(task.provider,task.threadId,async()=>{if(task.executionHostId&&executionHostUsesWorker(task.executionHostId))return remoteTaskCommand(task,"provider.session.resume",{prompt});const next=await provider(task.provider).sendMessage(task,workspacePromptForTask(task,prompt));return db.upsertTask({...next,...(next.id!==task.id?{prompt}:{}),metadata:workspaceInstructionFollowUpMetadata(task.metadata,next.metadata)});}),async(providerId,model)=>{await assertPaidCreditConsent([providerId]);await requireGlobalModel(providerId,model);},async()=>{
+  const stored=await db.getSystemSetting("models.global-catalog"),parsed=globalModelSettingsSchema.safeParse(stored?.value);
+  return{settings:parsed.success?parsed.data:(await globalModelSettings()).settings,updatedAt:stored?.updatedAt??null};
+});
 let managedProviderMcpExtension:unknown;
-registerManagedProviderMcp(app,managedProviderBridge,managedProviderMcpExtension);
+registerManagedProviderMcp(app,managedProviderBridge,managedProviderMcpExtension,config.dataRoot);
 let emotionStreams = 0;
 app.get("/api/emotion", async () => ({ state: emotion.get(), codexState: codexEmotion.get(), deepseekState:deepseekEmotion.get(), ollamaState:ollamaEmotion.get(), antigravityState:antigravityEmotion.get(),grokState:grokEmotion.get(), taskStates:{codex:codexEmotion.taskStates(),claude:emotion.taskStates(),antigravity:antigravityEmotion.taskStates(),deepseek:deepseekEmotion.taskStates(),ollama:ollamaEmotion.taskStates(),grok:grokEmotion.taskStates()}, outfits:emotion.outfits(), outfitsByProvider:{codex:codexEmotion.outfits(),claude:emotion.outfits(),antigravity:antigravityEmotion.outfits(),deepseek:deepseekEmotion.outfits(),ollama:ollamaEmotion.outfits(),grok:grokEmotion.outfits()}, assets:emotion.assetCatalog(), assetBaseUrl:"", mode: emotion.getMode() }));
 app.post("/api/emotion/mode", { config: { rateLimit: { max: 30, timeWindow: "1 minute" } } }, async (request) => {
@@ -2554,8 +2633,9 @@ app.get("/api/location-options",async(request)=>{
 app.post("/api/projects",{config:{rateLimit:{max:10,timeWindow:"10 minutes"}}},async(request)=>{const body=z.object({name:z.string().trim().min(1).max(100),slug:z.string().regex(/^[a-z0-9][a-z0-9-]{0,79}$/),description:z.string().trim().max(1000).nullable().optional(),defaultProvider:providerParam.nullable().optional()}).parse(request.body);assertWorkspaceManagementAllowed(body.slug);return idempotent(request,"project-create",body,async()=>{const timestamp=new Date().toISOString();return{project:await db.upsertProject({id:body.slug,name:body.name,slug:body.slug,description:body.description??null,defaultProvider:body.defaultProvider??null,createdAt:timestamp,updatedAt:timestamp,archivedAt:null})};});});
 app.patch("/api/projects/:projectId",async(request)=>{const {projectId}=z.object({projectId:z.string().regex(/^[a-z0-9-]+$/)}).parse(request.params),body=z.object({name:z.string().trim().min(1).max(100),description:z.string().trim().max(1000).nullable().optional(),workspaceIds:z.array(z.string().min(1).max(100)).max(100).refine(items=>new Set(items).size===items.length,"Workspace pipeline contains duplicates.").optional()}).parse(request.body);assertWorkspaceManagementAllowed(projectId);return idempotent(request,`project-update:${projectId}`,body,async()=>{const current=(await db.listProjects()).find(item=>item.id===projectId);if(!current)throw Object.assign(new Error("Project not found."),{statusCode:404});if(current.archivedAt)throw Object.assign(new Error("Archived project cannot be edited."),{statusCode:409});if(body.workspaceIds){const available=new Set((await db.listWorkspaces({projectId})).map(item=>item.id));if(body.workspaceIds.some(id=>!available.has(id)))throw Object.assign(new Error("Workspace pipeline contains an unavailable or unrelated workspace."),{statusCode:409});}const timestamp=new Date().toISOString(),project=await db.upsertProject({...current,name:body.name,description:body.description??null,updatedAt:timestamp});if(body.workspaceIds)await db.putSystemSetting(`project.workspace-pipeline.${projectId}`,{workspaceIds:body.workspaceIds,version:1},timestamp);await db.appendAudit({createdAt:timestamp,actor:(request as any).actor,action:"project-update",provider:null,taskId:null,projectId,hostId:null,workspaceId:null,outcome:"success",detail:`name and description updated;workspacePipeline=${body.workspaceIds?.length??"unchanged"}`});return{project,workspaceIds:body.workspaceIds};});});
 app.post("/api/projects/:projectId/archive",async(request)=>{const {projectId}=z.object({projectId:z.string().regex(/^[a-z0-9-]+$/)}).parse(request.params),body=z.object({confirm:z.literal(true),filesRemain:z.literal(true)}).parse(request.body);assertWorkspaceManagementAllowed(projectId);return idempotent(request,`project-archive:${projectId}`,body,async()=>{const current=(await db.listProjects()).find(item=>item.id===projectId);if(!current)throw Object.assign(new Error("Project not found."),{statusCode:404});const workspaces=await db.listWorkspaces({projectId}),workspaceIds=new Set(workspaces.map(item=>item.id)),active=(await db.listTasks()).some(task=>(task.projectId===projectId||Boolean(task.workspaceId&&workspaceIds.has(task.workspaceId)))&&["pending","queued","running","waiting","unknown"].includes(task.status));if(active)throw Object.assign(new Error("Project has an active or unconfirmed task."),{statusCode:409});const timestamp=new Date().toISOString();for(const workspace of workspaces)await db.archiveWorkspace(workspace.id,timestamp);const project=await db.upsertProject({...current,updatedAt:timestamp,archivedAt:timestamp});await db.putSystemSetting(`project.workspace-pipeline.${projectId}`,{workspaceIds:[],version:1},timestamp);await db.appendAudit({createdAt:timestamp,actor:(request as any).actor,action:"project-archive",provider:null,taskId:null,projectId,hostId:null,workspaceId:null,outcome:"success",detail:`workspacesArchived=${workspaces.length};filesDeleted=false`});return{project,workspacesArchived:workspaces.length,filesDeleted:false};});});
-app.get("/api/tasks", async (request) => {
+app.get("/api/tasks", async (request,reply) => {
   const query = taskListQuery.parse(request.query);
+  const listRows=(tasks:DeckTask[])=>query.view==="none"?[]:projectTasksWithLiveGitAttribution(tasks);
   if(query.snapshot){
     if(query.revision===taskListSnapshotRevision)return{tasks:[],partial:false,warnings:[],snapshot:true,unchanged:true,revision:taskListSnapshotRevision};
     if(query.revision!==undefined&&query.revision>taskListSnapshotJournalFloor&&query.revision<taskListSnapshotRevision){
@@ -2568,20 +2648,25 @@ app.get("/api/tasks", async (request) => {
     const tasks=taskListSnapshot
       .filter(task=>!query.provider||task.provider===query.provider)
       .sort((left,right)=>right.updatedAt.localeCompare(left.updatedAt));
-    return{tasks:projectTasksWithLiveGitAttribution(tasks),partial:false,warnings:[],snapshot:true,unchanged:false,revision:taskListSnapshotRevision};
+    return{tasks:listRows(tasks),partial:false,warnings:[],snapshot:true,unchanged:false,revision:taskListSnapshotRevision};
   }
   if(taskListSynchronization){
     const tasks=taskListSnapshot.filter(task=>!query.provider||task.provider===query.provider).sort((left,right)=>right.updatedAt.localeCompare(left.updatedAt));
-    return{tasks:projectTasksWithLiveGitAttribution(tasks),partial:true,warnings:[{source:"synchronization",error:"refresh_in_progress"}],snapshot:true,refreshing:true,unchanged:false,revision:taskListSnapshotRevision};
+    return{tasks:listRows(tasks),partial:true,warnings:[{source:"synchronization",error:"refresh_in_progress"}],snapshot:true,refreshing:true,unchanged:false,revision:taskListSnapshotRevision};
   }
   const synchronizationRevision=taskListSnapshotRevision;
+  // Server-Timing exposes where a synchronization spends its time; the DB
+  // trace in the slow-request log only covers requests above five seconds.
+  const synchronizationStartedAt=performance.now(),timings:string[]=[];let phaseStartedAt=synchronizationStartedAt;
+  const phase=(name:string)=>{const now=performance.now();timings.push(`${name};dur=${(now-phaseStartedAt).toFixed(1)}`);phaseStartedAt=now;};
   const synchronization=(async()=>{
   const scope = query.scope === "all" ? "all" as const : undefined;
   // Claude's list must not wait for Codex's cx/database reconciliation. The
   // UI uses this provider filter on the Claude tab while the All tab keeps the
   // original combined response.
   const selectedProviders = query.provider ? [provider(query.provider)] : [...providers.values()];
-  const providerResults=await Promise.allSettled(selectedProviders.map(item=>limited(item.listTasks(scope),8000,`${item.id} task synchronization`)));
+  const providerResults=await Promise.allSettled(selectedProviders.map(item=>limited(item.listTasks(scope).finally(()=>timings.push(`provider-${item.id};dur=${(performance.now()-synchronizationStartedAt).toFixed(1)}`)),8000,`${item.id} task synchronization`)));
+  phase("providers");
   const external=providerResults.flatMap(result=>result.status==="fulfilled"?result.value:[]);
   // The provider snapshots above already cover every stored row for their
   // provider, so the full (and expensive) stored-task scan is only worth
@@ -2594,7 +2679,10 @@ app.get("/api/tasks", async (request) => {
   // type, which is `local`. Filtering on `type === "worker"` alone excluded it
   // from session synchronization entirely, so on Windows — where that Worker is
   // the only execution path — no provider session was ever discovered.
-  const onlineWorkers=storedResult.ok?(await db.listHosts().catch(()=>[])).filter(item=>(item.type==="worker"||(managedLocalWorkerRequired&&item.id===LOCAL_HOST_ID))&&item.status==="online"&&workerHub.isOnline(item.id)):[];
+  // Every host that survives the filter below must also be connected, so with
+  // no live Worker connection the host query only queued behind background
+  // provider refreshes on the serialized database worker.
+  const onlineWorkers=storedResult.ok&&workerHub.hasOnlineConnection()?(await db.listHosts().catch(()=>[])).filter(item=>(item.type==="worker"||(managedLocalWorkerRequired&&item.id===LOCAL_HOST_ID))&&item.status==="online"&&workerHub.isOnline(item.id)):[];
   // Remote-session dedupe needs the previous rows; the provider snapshots are
   // now the primary source of those, with the stored fallback layered on top.
   const storedById=new Map([...external,...(storedResult.ok?storedResult.value:[])].map(task=>[task.id,task]));
@@ -2608,6 +2696,7 @@ app.get("/api/tasks", async (request) => {
     if(previous&&previous.threadId===threadId&&previous.status===status&&previous.updatedAt===timestamp&&previous.title===title&&previous.source===source&&previous.workspaceId===workspace.id)continue;
     const next=await db.upsertTask({id,provider:providerId,nativeId,threadId,projectId:workspace.projectId,title,prompt:"",status,createdAt:previous?.createdAt??timestamp,updatedAt:timestamp,result:null,error:null,log:"",owned:false,pid:null,pgid:null,processStart:null,commandMarker:null,parentThreadId:null,ownership:"external",source,cwd:null,lastSeenAt:timestamp,executionHostId:host.id,workspaceId:workspace.id,remoteWorkerId:host.id,hostTaskId:null,providerSessionId:threadId,metadata:{canStop:false,discoveredOnHost:host.id}});storedById.set(id,next);
   }}catch{/* a slow/offline Worker must not block local session listing */}}));
+  phase("workers");
   const stored=(storedResult.ok?storedResult.value:taskListSnapshot).filter((task) => !query.provider || task.provider === query.provider);
   if(!storedResult.ok&&!stored.length&&!external.length)throw storedResult.error;
   const merged = new Map(stored.map((task) => [task.id, task]));
@@ -2618,8 +2707,12 @@ app.get("/api/tasks", async (request) => {
     merged.set(task.id, task);
   }
   const tasks=hideOwnedProviderSessionMirrors([...merged.values()],[...taskListSnapshot,...merged.values()]).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+  phase("merge");
   if(storedResult.ok)publishTaskSnapshots(tasks,query.provider,synchronizationRevision);
-  return { tasks:projectTasksWithLiveGitAttribution(tasks), partial:!storedResult.ok||warnings.length>0, warnings,revision:taskListSnapshotRevision };
+  phase("publish");
+  const rows=listRows(tasks);phase("project");
+  reply.header("Server-Timing",timings.join(", "));
+  return { tasks:rows, partial:!storedResult.ok||warnings.length>0, warnings,revision:taskListSnapshotRevision };
   })();
   taskListSynchronization=synchronization;
   try{return await synchronization;}finally{if(taskListSynchronization===synchronization)taskListSynchronization=null;}
@@ -2655,7 +2748,18 @@ async function createTaskFromBody(body:CreateTaskBody,requestedNativeId?:string,
     return publishTaskSnapshot(item);
 }
 const collaborationBoard=new CollaborationBoardService(db);
+registerExternalParticipantRoutes(app,{db,workspaces:hostWorkspaces,dataRoot:config.dataRoot});
 type BoardAutomationActionContext={approvedProviders:Set<ProviderId>;fullAccessAcknowledged:boolean};
+async function boardRevisionPrompt(chainId:string,title:string,description:string){
+  const base=`Continue revising ${title}. ${description}`.trim(),card=await collaborationBoard.detail(chainId) as any;
+  const review=[...(card.sessions??[])].filter((item:any)=>item.kind==="collaboration"&&item.role==="review"&&["completed","partial"].includes(item.status)).sort((a:any,b:any)=>String(b.updatedAt??"").localeCompare(String(a.updatedAt??"")))[0];
+  if(!review)return base;
+  const [messages,participants]=await Promise.all([db.listCollaborationMessages(review.id),db.listCollaborationParticipants(review.id)]) as [any[],any[]],providers=new Map(participants.map(item=>[item.id,item.provider]));
+  const outputs=messages.filter(item=>item.messageType==="provider-output"&&item.contentKind==="inline"&&typeof item.contentRef==="string"&&item.contentRef.trim()).map(item=>`## ${providers.get(item.participantId)??"reviewer"} review\n${item.contentRef.trim()}`);
+  if(!outputs.length)return base;
+  const header=`\n\nPrior review evidence from session ${review.id}. Treat it as review material, verify it against the current artifact, and address every applicable finding:\n\n`,budget=Math.max(0,config.promptMaxLength-base.length-header.length),context=outputs.join("\n\n").slice(0,budget);
+  return`${base}${header}${context}`;
+}
 const boardActions={
   "start-work":async(request:FastifyRequest|null,chainId:string,raw:Record<string,unknown>,context?:BoardAutomationActionContext)=>{
     const card=await db.getWorkChain(chainId);if(!card)throw Object.assign(new Error("Collaboration board card not found."),{statusCode:404});
@@ -2664,7 +2768,7 @@ const boardActions={
   },
   "start-revision":async(request:FastifyRequest|null,chainId:string,raw:Record<string,unknown>,context?:BoardAutomationActionContext)=>{
     const card=await db.getWorkChain(chainId);if(!card)throw Object.assign(new Error("Collaboration board card not found."),{statusCode:404});
-    const role=(card.roles?.implementer??{}) as any,body=createBody.parse({...raw,provider:raw.provider??role.provider,model:raw.model??role.model,reasoningEffort:raw.reasoningEffort??role.reasoningEffort,serviceTier:raw.serviceTier??role.serviceTier,permissionProfile:raw.permissionProfile??role.permissionProfile,workMode:raw.workMode??role.workMode,automationLevel:raw.automationLevel??role.automationLevel,googleSearchMode:raw.googleSearchMode??role.googleSearchMode,projectId:card.projectId,workspaceId:raw.workspaceId??card.workspaceId,title:raw.title??`${card.title} · Revision`,prompt:raw.prompt??`Continue revising ${card.title}. ${card.description}`.trim(),...(context?.fullAccessAcknowledged?{dangerConfirmation:true,fullAccessAcknowledged:true,acknowledgementVersion:1}:{})});
+    const role=(card.roles?.implementer??{}) as any,prompt=raw.prompt??await boardRevisionPrompt(chainId,card.title,card.description),body=createBody.parse({...raw,provider:raw.provider??role.provider,model:raw.model??role.model,reasoningEffort:raw.reasoningEffort??role.reasoningEffort,serviceTier:raw.serviceTier??role.serviceTier,permissionProfile:raw.permissionProfile??role.permissionProfile,workMode:raw.workMode??role.workMode,automationLevel:raw.automationLevel??role.automationLevel,googleSearchMode:raw.googleSearchMode??role.googleSearchMode,projectId:card.projectId,workspaceId:raw.workspaceId??card.workspaceId,title:raw.title??`${card.title} · Revision`,prompt,...(context?.fullAccessAcknowledged?{dangerConfirmation:true,fullAccessAcknowledged:true,acknowledgementVersion:1}:{})});
     const approvals=request?confirmedPaidCreditProviders(request):context?.approvedProviders??new Set<ProviderId>();await assertPaidCreditConsent([body.provider],approvals);await requireGlobalModel(body.provider,body.model);const task=await createTaskFromBody(body,undefined,undefined,{workChainId:chainId,boardRole:"revision"});return{task};
   },
   "resume":async(_request:FastifyRequest|null,chainId:string,raw:Record<string,unknown>)=>{
@@ -2786,19 +2890,39 @@ app.post("/api/tasks/:provider/:taskId/approvals/:approvalId",{config:{rateLimit
 app.get("/api/user-input",async(request)=>{
   const query=z.object({taskId:z.string().min(3).max(200).optional()}).parse(request.query);
   const tasks=(query.taskId?[await db.getTask(query.taskId)].filter(Boolean):await db.listActiveTasks()) as DeckTask[];const requests:any[]=[];
-  for(const task of tasks.filter(item=>item.provider==="codex"&&item.owned&&["pending","queued","running","waiting","unknown"].includes(item.status))){
+  for(const task of tasks.filter(item=>item.owned)){
+    requests.push(...listAsyncUserInputs(config.dataRoot,task.id).map(item=>({...item,title:task.title})));
+    if(task.provider!=="codex")continue;
     try{if(task.executionHostId&&executionHostUsesWorker(task.executionHostId)){const result=await workerHub.request(task.executionHostId,"provider.userInput.list",{taskId:task.hostTaskId??task.id,provider:task.provider,workspaceId:task.workspaceId});for(const item of (result as any)?.requests??[])requests.push({...item,title:task.title});}else for(const item of codex.listUserInputs(task))requests.push({...item,title:task.title});}catch{}
   }
-  return{requests,capabilities:{codex:true,claude:false},checkedAt:new Date().toISOString()};
+  const visible=[];for(const item of new Map(requests.map(item=>[item.id,item])).values())if(item.delivery!=="async"||!await db.getSessionMessage(item.id))visible.push(item);
+  return{requests:visible,capabilities:Object.fromEntries(["codex","claude","deepseek","ollama","antigravity","grok"].map(id=>[id,true])),checkedAt:new Date().toISOString()};
 });
 app.post("/api/tasks/:provider/:taskId/user-input/:requestId",{config:{rateLimit:{max:20,timeWindow:"1 minute"}}},async(request)=>{
   const params=z.object({provider:providerParam,taskId:z.string().min(3).max(200),requestId:z.string().uuid()}).parse(request.params);
   const body=z.object({answers:z.record(z.string().min(1).max(80),z.object({answers:z.array(z.string().min(1).max(1000)).min(1).max(12)}))}).parse(request.body);
-  if(params.provider!=="codex")throw Object.assign(new Error("This provider does not expose a structured user-input response channel."),{statusCode:409,code:"USER_INPUT_UNSUPPORTED"});
   const task=await db.getTask(params.taskId);if(!task||task.provider!==params.provider)throw Object.assign(new Error("Task not found."),{statusCode:404});
   return idempotent(request,`user-input:${task.id}:${params.requestId}`,{requestId:params.requestId,answers:body.answers},async()=>{
-    const remote=Boolean(task.executionHostId&&executionHostUsesWorker(task.executionHostId));const listed=remote?await workerHub.request(task.executionHostId!,"provider.userInput.list",{taskId:task.hostTaskId??task.id,provider:task.provider,workspaceId:task.workspaceId}):{requests:codex.listUserInputs(task)};
-    const pending=(listed as any)?.requests?.find((item:any)=>item?.id===params.requestId);if(!pending)throw Object.assign(new Error("User input request is no longer pending."),{statusCode:409});if(pending.taskId!==task.id&&pending.taskId!==(task.hostTaskId??task.id))throw Object.assign(new Error("User input request does not belong to this task."),{statusCode:409});
+    const remote=Boolean(task.executionHostId&&executionHostUsesWorker(task.executionHostId)),local=listAsyncUserInputs(config.dataRoot,task.id).find(item=>item.id===params.requestId);const listed=local?{requests:[local]}:remote?await workerHub.request(task.executionHostId!,"provider.userInput.list",{taskId:task.hostTaskId??task.id,provider:task.provider,workspaceId:task.workspaceId}):{requests:task.provider==="codex"?codex.listUserInputs(task):[]};
+    const pending=[...listAsyncUserInputs(config.dataRoot,task.id),...((listed as any)?.requests??[])].find((item:any)=>item?.id===params.requestId);if(!pending)throw Object.assign(new Error("User input request is no longer pending."),{statusCode:409});if(pending.taskId!==task.id&&pending.taskId!==(task.hostTaskId??task.id))throw Object.assign(new Error("User input request does not belong to this task."),{statusCode:409});
+    if(pending.delivery==="async"){
+      if(!task.owned||task.ownership==="external"||!task.threadId)throw Object.assign(new Error("Only an owned session can receive an answer."),{statusCode:409});
+      if(pending.threadId&&pending.threadId!==task.threadId)throw Object.assign(new Error("This question belongs to a different native thread."),{statusCode:409});
+      const prompt=asyncAnswerPrompt(pending,body.answers);
+      await requirePaidCreditConsent(request,[task.provider]);
+      if(!await db.getSessionMessage(pending.id)){
+        const timestamp=new Date().toISOString(),approved=confirmedPaidCreditProviders(request).has(task.provider);
+        await db.enqueueSessionMessage({id:pending.id,provider:task.provider,threadId:task.threadId,sourceTaskId:task.id,prompt,createdAt:timestamp,updatedAt:timestamp,...(approved?{error:`paid-credit-approved:${task.provider}`}:{})});
+      }
+      // An answer must wake a session that is waiting for it. Ordinary queue
+      // pumping waits for the current turn to end, which can deadlock here.
+      // Reuse send-now's stop/resume path rather than launch a second writer.
+      const message=await db.getSessionMessage(pending.id);
+      if(message?.status==="sent")return{resolved:true,requestId:pending.id,queued:false};
+      const delivery=await dispatchQueuedMessage(pending.id,true,confirmedPaidCreditProviders(request));
+      return{resolved:!delivery.queued,requestId:pending.id,queued:delivery.queued};
+    }
+    if(task.provider!=="codex")throw Object.assign(new Error("Native user input is unsupported for this provider."),{statusCode:409});
     if(remote)await workerHub.request(task.executionHostId!,"provider.userInput.respond",{taskId:task.hostTaskId??task.id,provider:task.provider,workspaceId:task.workspaceId,requestId:params.requestId,answers:body.answers});else codex.respondUserInput(task,params.requestId,body.answers);
     await audit(request,"user-input-resolve","success",task,`request=${params.requestId};questions=${Object.keys(body.answers).length}`).catch(()=>{});return{resolved:true,requestId:params.requestId};
   });
@@ -2810,16 +2934,34 @@ app.get("/api/tasks/:provider/:taskId/events", async (request) => {
   const task = item.task.executionHostId&&executionHostUsesWorker(item.task.executionHostId)?item.task:await item.provider.getTask(item.task);
   const stream=task.owned?readStreamEvents(config.dataRoot,task.id,0,STREAM_REPLAY_LIMIT):null;
   let durableImageOutputs=mergePersistedImageOutputs(task.metadata?.imageOutputs);
+  let linkedCodexTasks:any[]=[];
   if(task.provider==="codex"&&task.threadId){
     const[storedThread,linkedTasks]=await Promise.all([db.getCodexThread(task.threadId).catch(()=>null),db.listProviderTaskLinksByThreads("codex",[task.threadId]).catch(()=>[])]);
+    linkedCodexTasks=linkedTasks;
     durableImageOutputs=mergePersistedImageOutputs(durableImageOutputs,storedThread?.metadata?.imageOutputs,...linkedTasks.map((linked:any)=>linked.metadata?.imageOutputs));
   }
   const durableImageEvents=persistedImageOutputEvents(durableImageOutputs);
   const currentTaskImageEvents=persistedImageOutputEvents(durableImageOutputs,task.id);
   const replayEvents=mergeHistoricalFileChanges(durableImageEvents,stream?.events??[]);
-  const providerStreamEvents=task.provider==="antigravity"?normalizeAntigravityOutputEvents(stream?.events??[]):stream?.events??[];
+  const providerStreamEvents=task.provider==="antigravity"?normalizeAntigravityOutputEvents(stream?.events??[]):task.provider==="codex"&&stream?mergeStreamAgentLifecycle(stream.events,readStreamAgentLifecycle(config.dataRoot,task.id)):stream?.events??[];
   const streamResult=()=>({taskId:task.id,status:task.status,events:mergeHistoricalFileChanges(providerStreamEvents,currentTaskImageEvents),source:"stream",latestSequence:stream?.latestSequence??0});
   if(task.provider==="codex"&&task.threadId&&!Boolean(task.executionHostId&&executionHostUsesWorker(task.executionHostId))){
+    // A separate app-server process can cache the native thread at the turn
+    // where Workhouse first attached to it. Later managed follow-ups are still
+    // durably represented by their task rows and stream spools, even when
+    // thread/turns/list keeps returning that stale native page. Prefer the
+    // managed thread reconstruction whenever this thread has sibling tasks so
+    // reopening or following up cannot jump back to an old interrupted turn.
+    const recentLinks=linkedCodexTasks.filter((link:any)=>link.owned)
+      .sort((left:any,right:any)=>String(left.createdAt??"").localeCompare(String(right.createdAt??""))||String(left.id).localeCompare(String(right.id)))
+      .slice(-12);
+    const managedMembers:DeckTask[]=(await Promise.all(recentLinks.map((link:any)=>db.getTask(link.id)))).filter((member:any):member is DeckTask=>Boolean(member&&member.provider==="codex"&&member.threadId===task.threadId&&member.owned));
+    if(managedMembers.length>1){
+      const keepCurrentProcess=["pending","queued","running","waiting"].includes(task.status);
+      const turns=managedMembers.map((member:DeckTask)=>{const streamReplay=readStreamEvents(config.dataRoot,member.id,0,STREAM_REPLAY_LIMIT).events,replay=mergeHistoricalFileChanges(mergeStreamAgentLifecycle(streamReplay,readStreamAgentLifecycle(config.dataRoot,member.id)),[...readStreamFileChanges(config.dataRoot,member.id),...persistedImageOutputEvents(mergePersistedImageOutputs(member.metadata?.imageOutputs),member.id)]);return{task:member,events:keepCurrentProcess&&member.id===task.id?replay:completedThreadTurnEvents(member,replay)};});
+      const events=providerThreadEvents(turns);
+      if(events.length)return{taskId:task.id,status:task.status,events,source:"thread-streams",latestSequence:stream?.latestSequence??0};
+    }
     const isActive=["pending","queued","running","waiting"].includes(task.status);
     // The worker spool is the freshest source while a turn is active. Reading
     // app-server history first could return a snapshot from just before the
@@ -2849,8 +2991,8 @@ app.get("/api/tasks/:provider/:taskId/events", async (request) => {
     // transcript, replaying only the selected task would show a single turn and
     // hide the rest of the conversation, so stitch the sibling turns together.
     if(task.threadId&&!Boolean(task.executionHostId&&executionHostUsesWorker(task.executionHostId))){
-      const links=await db.listProviderTasks("claude").catch(()=>[]);
-      const members=links.filter((member:any)=>member.threadId===task.threadId&&member.owned);
+      const links=await db.listThreadTasks("claude",task.threadId).catch(()=>[]);
+      const members=links.filter((member:any)=>member.owned);
       if(members.length>1){
         const turns=members.map((member:any)=>({task:member,events:mergeHistoricalFileChanges(readStreamEvents(config.dataRoot,member.id,0,STREAM_REPLAY_LIMIT).events,[...readStreamFileChanges(config.dataRoot,member.id),...persistedImageOutputEvents(mergePersistedImageOutputs(member.metadata?.imageOutputs),member.id)])}));
         const events=providerThreadEvents(turns);
@@ -2884,6 +3026,7 @@ app.get("/api/tasks/:provider/:taskId/events/stream", { config:{ rateLimit:{ max
   const perTask=taskStreamConnections.get(item.task.id) ?? 0;
   if (streamConnections >= MAX_TASK_STREAMS || perTask >= 3) throw Object.assign(new Error("Too many live event connections."), { statusCode:429 });
   const tail=String((request.query as any)?.tail??"")==="1";
+  const staleClaudeTerminals=item.task.provider==="claude"?staleClaudeTerminalSequences(readStreamEvents(config.dataRoot,item.task.id).events):new Set<number>();
   let sequence=tail
     ?readStreamEvents(config.dataRoot,item.task.id,0,1).latestSequence
     :sseResumeSequence(request.headers["last-event-id"],(request.query as any)?.after);
@@ -2897,7 +3040,11 @@ app.get("/api/tasks/:provider/:taskId/events/stream", { config:{ rateLimit:{ max
   const pump=()=>{
     const replay=readStreamEvents(config.dataRoot,item.task.id,sequence,STREAM_REPLAY_LIMIT);
     if(replay.replayMissed){send("resync",{reason:"replay-window-exceeded",latestSequence:replay.latestSequence});sequence=replay.latestSequence;return;}
-    for(const event of replay.events){if(!send("agent-event",applyPathDisplayPolicy(event,hideLocalPaths),event.eventId)){response.end();return;}sequence=event.sequence;}
+    for(const event of replay.events){
+      if(item.task.provider==="claude"&&staleClaudeTerminals.has(event.sequence)){sequence=event.sequence;continue;}
+      if(!send("agent-event",applyPathDisplayPolicy(event,hideLocalPaths),event.eventId)){response.end();return;}
+      sequence=event.sequence;
+    }
   };
   pump();
   const poll=setInterval(pump,250);poll.unref?.();
@@ -3168,7 +3315,7 @@ app.post("/api/codex/threads/:threadId/messages", async (request) => {
   await requirePaidCreditConsent(request,["codex"]);
   const stored=await db.getCodexThread(threadId);if(stored&&stored.ownership!=="claudex-workhouse")throw Object.assign(new Error("Use the explicit control handoff for an external Codex session."),{statusCode:409,code:"CONTROL_HANDOFF_REQUIRED"});
   return idempotent(request,`codex-message:${threadId}`,body,async()=>{
-    const linked=(await db.listProviderTasks("codex")).filter(task=>task.threadId===threadId&&task.ownership==="claudex-workhouse").sort((a,b)=>b.updatedAt.localeCompare(a.updatedAt));
+    const linked=(await db.listThreadTasks("codex",threadId)).filter(task=>task.ownership==="claudex-workhouse").sort((a,b)=>b.updatedAt.localeCompare(a.updatedAt));
     let task:DeckTask;
     if(linked[0]){const source=await applyPendingTaskLocation(linked[0]),next=source.executionHostId&&executionHostUsesWorker(source.executionHostId)?await remoteTaskCommand(source,"provider.session.resume",{prompt:body.prompt,model:source.requestedModel,reasoningEffort:source.requestedReasoningEffort,serviceTier:source.requestedServiceTier,permissionProfile:source.permissionProfile,workMode:source.metadata?.workMode??"default",automationLevel:automationLevel(source.metadata?.automationLevel,source.permissionProfile)}):await codex.sendMessage(source,workspacePromptForTask(source,body.prompt));task=next.id!==source.id?await db.upsertTask({...next,prompt:body.prompt}):next;}
     else{task=await codex.sendThreadMessage(threadId,body.prompt,body);}
@@ -3188,7 +3335,7 @@ app.patch("/api/codex/threads/:threadId/settings",async(request)=>{
   await requireGlobalModel("codex",body.model);
   return idempotent(request,`codex-settings:${threadId}`,body,async()=>{
     const stored=await db.getCodexThread(threadId);if(!stored)throw Object.assign(new Error("Codex thread not found."),{statusCode:404});
-    const linked=(await db.listProviderTasks("codex")).filter(task=>task.threadId===threadId&&task.ownership==="claudex-workhouse");
+    const linked=(await db.listThreadTasks("codex",threadId)).filter(task=>task.ownership==="claudex-workhouse");
     const current=linked[0]??null;let location:any=null,locatedLinked:DeckTask[]=[];
     if(body.projectId||body.workspaceId){
       const hostId=current?.executionHostId??stored.metadata?.executionHostId??LOCAL_HOST_ID;

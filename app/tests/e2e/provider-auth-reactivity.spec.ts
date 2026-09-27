@@ -64,32 +64,34 @@ test("provider OAuth code inputs appear without reopening settings",async({page}
   const more=page.getByRole("button",{name:"추가 작업",exact:true});
   if(await more.isVisible())await more.click();
   await page.getByRole("button",{name:"설정 열기"}).click();
-  const settings=page.getByRole("dialog",{name:"설정"});
-  await settings.getByRole("button",{name:"실행 기본값",exact:true}).click();
-  await expect(settings.getByRole("button",{name:"공통",exact:true})).toHaveAttribute("aria-current","page");
+  const settings=page.getByRole("region",{name:"설정"});
+  const settingsNav=settings.getByRole("navigation",{name:"설정"});
+  await settingsNav.getByRole("button",{name:"실행 정책",exact:true}).click();
+  await expect(settingsNav.getByRole("button",{name:"실행 정책",exact:true})).toHaveAttribute("aria-current","page");
   for(const provider of ["Codex","Claude","Gemini","DeepSeek","Ollama"]){
-    await settings.getByRole("button",{name:provider,exact:true}).click();
-    await expect(settings.getByText(`${provider} 기본값`,{exact:true})).toBeVisible();
+    await settingsNav.getByRole("button",{name:provider,exact:true}).click();
+    await expect(settings.getByRole("heading",{name:`${provider} 기본값`,exact:true})).toBeVisible();
   }
   for(const [provider,count] of [["Gemini",4],["DeepSeek",6],["Ollama",6]] as const){
-    await settings.getByRole("button",{name:provider,exact:true}).click();
-    const effort=settings.getByText(`${provider} 기본값`,{exact:true}).locator("xpath=following-sibling::label[3]/select");
+    await settingsNav.getByRole("button",{name:provider,exact:true}).click();
+    const effort=settings.getByRole("combobox",{name:"추론 강도",exact:true});
     await expect(effort).toBeVisible();await expect(effort.locator("option")).toHaveCount(count);
   }
-  await settings.getByRole("button",{name:"계정",exact:true}).click();
-  const deepseekCard=settings.locator(".provider-connection-card").filter({hasText:"DeepSeek"});
+  // Each agent page carries its own connection card under 계정·연결.
+  const openAccount=async(provider:string)=>{await settingsNav.getByRole("button",{name:provider,exact:true}).click();await settings.getByRole("button",{name:"계정·연결",exact:true}).click();return settings.locator(".provider-connection-card");};
+  const deepseekCard=await openAccount("DeepSeek");
   await expect(deepseekCard.getByLabel("DeepSeek API 주소")).toHaveValue("https://api.deepseek.com/anthropic");
   await expect(deepseekCard.getByLabel("DeepSeek API 키")).toHaveAttribute("type","password");
-  const ollamaCard=settings.locator(".provider-connection-card").filter({hasText:"Ollama"});
+  const ollamaCard=await openAccount("Ollama");
   await expect(ollamaCard.getByLabel("Ollama Cloud API 주소")).toHaveValue("https://ollama.com");
   await expect(ollamaCard.getByLabel("Ollama Cloud API 키")).toHaveAttribute("type","password");
-  const claudeCard=settings.locator(".provider-connection-card").filter({hasText:"Claude Code"});
+  const claudeCard=await openAccount("Claude");
   await claudeCard.getByRole("button",{name:"Claude 구독으로 연결"}).click();
   await expect(settings).toBeVisible();
   await expect(claudeCard.getByLabel("Claude 인증 코드")).toBeVisible();
   await expect(claudeCard.getByRole("button",{name:"로그인 취소"})).toBeVisible();
 
-  const antigravityCard=settings.locator(".provider-connection-card").filter({hasText:"Gemini"});
+  const antigravityCard=await openAccount("Gemini");
   await antigravityCard.getByRole("button",{name:"Google로 연결"}).click();
   await expect(settings).toBeVisible();
   await expect(antigravityCard.getByLabel("Google 인증 코드")).toBeVisible();

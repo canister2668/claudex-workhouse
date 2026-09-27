@@ -1,9 +1,9 @@
 import { expect, test } from "@playwright/test";
 
 const locales = [
-  { id: "ko", settings: "설정", openSettings:"설정 열기",more:"추가 작업", display: "화면·알림", language: "Language", subtitle: "GPT·Claude 노역 관리소" },
-  { id: "en", settings: "Settings", openSettings:"Open settings",more:"More actions", display: "Display & notifications", language: "Language", subtitle: "GPT & Claude Agent Workhouse" },
-  { id: "ja", settings: "設定", openSettings:"設定を開く",more:"その他の操作", display: "表示・通知", language: "Language", subtitle: "GPT・Claude作業管理所" }
+  { id: "ko", settings: "설정", openSettings:"설정 열기",more:"추가 작업", display: "일반·화면", language: "Language", subtitle: "GPT·Claude 노역 관리소" },
+  { id: "en", settings: "Settings", openSettings:"Open settings",more:"More actions", display: "General & display", language: "Language", subtitle: "GPT & Claude Agent Workhouse" },
+  { id: "ja", settings: "設定", openSettings:"設定を開く",more:"その他の操作", display: "一般・表示", language: "Language", subtitle: "GPT・Claude作業管理所" }
 ] as const;
 
 for (const locale of locales) {

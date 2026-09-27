@@ -62,7 +62,7 @@
       {/if}
     {:else if run.status==="timed-out"}<p class="provider-error">{$t("collaboration.responseTimedOut")}</p>{:else if run.errorCategory==="PROVIDER_OUTPUT_UNAVAILABLE"}<p class="provider-error">{$t("collaboration.providerOutputUnavailable")}</p>{:else if task?.error}<p class="provider-error">{task.error}</p>{:else}<p class="provider-waiting">{run.status==="queued"?$t("queue.pending"):$t("collaboration.waitingProvider")}<span class="typing-dots" aria-hidden="true"><i></i><i></i><i></i></span></p>{/if}
     <ConversationProcessFold {sessionId} runId={run.id} participantId={person.id} rows={process} expanded={processExpanded} label={$t("collaboration.publicProcess",{provider:providerLabel})} ontoggle={ontoggleProcess}/>
-    {#if task&&run.status==="waiting-approval"}<ApprovalPanel {api} {task}/>{/if}{#if task&&run.status==="waiting-user"}<UserInputPanel {api} {task}/>{/if}
+    {#if task&&run.status==="waiting-approval"}<ApprovalPanel {api} {task}/>{/if}{#if task}<UserInputPanel {api} {task}/>{/if}
     <footer class="conversation-turn-footer">
       <span class="turn-primary-meta">{permissionLabel}{#if showRound} · {$t("collaboration.round",{count:run.round})}{/if}{#if outputUsage} · <span class="turn-token"><TurnUsageDetails usage={outputUsage}/></span>{/if}</span>
       <span class="turn-footer-actions">

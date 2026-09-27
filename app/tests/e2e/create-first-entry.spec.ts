@@ -52,19 +52,18 @@ test("first create entry waits for a selected model and work location",async({pa
   const dialog=page.getByRole("dialog",{name:"새 작업"});
   await expect(dialog).toBeVisible();
   await expect(dialog.getByText("작업 위치를 불러오는 중…",{exact:true})).toBeVisible();
-  await expect(dialog.locator(".workspace-choice-grid button.active")).toHaveCount(0);
-  await expect(dialog.getByRole("button",{name:"지금 시작",exact:true})).toBeDisabled();
+  await expect(dialog.locator("#create-workspace")).toBeDisabled();
+  await expect(dialog.getByRole("button",{name:"시작",exact:true})).toBeDisabled();
   await expect(dialog.getByRole("button",{name:"한도 초기화 후 시작",exact:true})).toBeDisabled();
   await dialog.getByLabel("요청",{exact:true}).fill("위치를 기다리는 동안 먼저 입력");
   await expect(dialog.getByLabel("요청",{exact:true})).toHaveValue("위치를 기다리는 동안 먼저 입력");
 
   releaseLocation();
   await expect(dialog.getByText("작업 위치를 불러오는 중…",{exact:true})).toHaveCount(0,{timeout:15_000});
-  // The location block collapses to its summary row once a workspace resolves.
-  await expect(dialog.locator(".cpick[aria-expanded]")).toContainText("/workspace/ready-project");
-  await dialog.locator(".cpick[aria-expanded]").click();
-  await expect(dialog.locator(".workspace-choice-grid button.active")).toContainText("/workspace/ready-project");
-  await expect(dialog.getByRole("button",{name:"GPT First Entry"})).toHaveClass(/active/);
+  // The workspace token resolves to the ready project and shows its path.
+  await expect(dialog.locator("#create-workspace")).toBeEnabled();
+  await expect(dialog.locator(".composer-path")).toContainText("/workspace/ready-project");
+  await expect(dialog.getByLabel("모델",{exact:true})).toHaveValue("gpt-first-entry");
 
   await dialog.getByRole("button",{name:"대화",exact:true}).click();
   const conversationDialog=page.getByRole("dialog",{name:"새 대화"});

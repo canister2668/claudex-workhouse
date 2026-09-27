@@ -5,7 +5,7 @@
   import { activeBuilds, BUILD_HISTORY_VISIBLE, buildDurationLabel, buildEventSet, buildHistory, buildProgressRows } from "./build-progress";
   import HeartbeatBar from "./HeartbeatBar.svelte";
   import { presentEvent, type AgentEvent } from "./events";
-  import { groupProcessEvents, isFinalAssistantOutput, isParallelAgentEvent, isRootThreadEvent, organizeConversation, processEventSummary, restoreLatestTurnOutputUsage, type DisplayEvent, type ProcessEventGroup } from "./conversation";
+  import { finalAssistantOutputResolver, groupProcessEvents, isParallelAgentEvent, isRootThreadEvent, organizeConversation, processEventSummary, restoreLatestTurnOutputUsage, type DisplayEvent, type ProcessEventGroup } from "./conversation";
   import { parallelAgentCards, parallelAgentTally, parallelAgentsActive, sortAgentsByAttention, type ParallelAgentCard } from "./parallel-agents";
   import { isMarkdownEvent, renderMarkdown, workspaceViewTarget } from "./markdown";
   import { followLatestAfterScroll, intentionalTopReach, readingRestoreNeedsMoreHeight, readingScrollRestoreTarget, scrollButtonMode, scrollPosition, shouldAutoFoldSessionChrome, shouldRestoreAutoFoldedPanel, topClampNeedsRestore } from "./scroll-navigation";
@@ -19,6 +19,8 @@
   import { activeTurnStartedAt, taskProgressHeartbeat } from "./task-progress";
   import { IMMERSIVE_TOP_REVEAL, shouldRevealOnTap } from "./immersive-chrome";
   import { providerDisplayName } from "./provider-display";
+  import { relativeTime } from "./session-ui";
+  import { quotaForProviderModel, type WebProviderQuota } from "./quota-retry";
 
   export let events: AgentEvent[] = [];
   export let provider:"codex"|"claude"|"deepseek"|"ollama"|"antigravity"|"grok"="codex";
@@ -28,8 +30,8 @@
   export let busy = false;   // task is actively running
   export let liveMode:"Live"|"Delayed"|"History"="History";
   export let rootThreadId:string|null=null;
-  type ProviderQuotaWindow={pct:number|null;resetsAt:string|null;resetLabel?:string|null;durationMins?:number|null};
-  export let providerQuota:{fiveHour?:ProviderQuotaWindow|null;sevenDay?:ProviderQuotaWindow|null}|null=null;
+  export let providerQuota:WebProviderQuota|null=null;
+  export let providerModel:string|null=null;
   export let persistedOutputUsage:unknown=null;
   export let scrollAutoSwitch = true;
   export let onScrollDirection:((direction:"down"|"up",scrollTop:number,nearBottom:boolean)=>void)|null=null;
@@ -143,12 +145,13 @@
     void tick().then(()=>requestAnimationFrame(()=>{if(!logElement)return;logElement.scrollTop=logElement.scrollHeight;lastScrollTop=logElement.scrollTop;updateScrollPosition();}));
     return true;
   }
-  $: quotaWindow=providerQuota?.fiveHour??providerQuota?.sevenDay??null;
-  $: quotaUsesFiveHour=Boolean(providerQuota?.fiveHour);
+  $: resolvedQuota=quotaForProviderModel(providerQuota,provider,providerModel);
+  $: quotaWindow=resolvedQuota.quota?.fiveHour??resolvedQuota.quota?.sevenDay??null;
+  $: quotaUsesFiveHour=Boolean(resolvedQuota.quota?.fiveHour);
   $: quotaPercent=quotaWindow?.pct!==null&&quotaWindow?.pct!==undefined
     ?Math.max(0,Math.min(100,quotaWindow.pct))
     :null;
-  $: quotaTitle=quotaUsesFiveHour?$t("quota.fiveHourAllowance"):`${$t("quota.weekly")} ${$t("quota.label")}`;
+  $: quotaTitle=`${resolvedQuota.pool?`${resolvedQuota.pool.label} · `:""}${quotaUsesFiveHour?$t("quota.fiveHourAllowance"):`${$t("quota.weekly")} ${$t("quota.label")}`}`;
   $: quotaBadge=quotaPercent===null?"":quotaUsesFiveHour
     ?$t("quota.fiveHourAllowanceBadge",{value:Math.round(quotaPercent)})
     :$t("quota.usage",{label:$t("quota.weekly"),value:Math.round(quotaPercent)});
@@ -161,17 +164,18 @@
   // down on every 4s poll, which read as "scrolling is broken".)
   const eventIdentity=(event:AgentEvent|undefined)=>event?`${(event as any).eventId??""}:${(event as any).sequence??""}:${event.timestamp??""}:${event.type}:${event.content.length}:${event.content.slice(-32)}`:"";
   const eventAnchorIdentity=(event:AgentEvent|undefined)=>event?`${event.threadId??event.metadata?.threadId??""}:${event.turnId??event.metadata?.turnId??""}:${event.itemId??event.metadata?.itemId??event.eventId??event.sequence??""}:${event.type}:${event.metadata?.role??""}:${event.content.slice(0,32)}`:"";
-  const isFinalOutputEvent=(event:AgentEvent)=>isFinalAssistantOutput(event as DisplayEvent,rootThreadId,events as DisplayEvent[],!busy);
-  const latestLiveWritingKey=(rows:AgentEvent[])=>{
+  // One linear pass per update; every card and the reveal tracker share it.
+  $: finalOutputResolver=finalAssistantOutputResolver(events as DisplayEvent[],rootThreadId,!busy);
+  const latestLiveWritingKey=(rows:AgentEvent[],isFinal:(event:DisplayEvent)=>boolean)=>{
     if(!busy)return"";
     const latest=[...rows].reverse().find(event=>isRootThreadEvent(event,rootThreadId)&&(event.type==="message_delta"||event.type==="message_completed")&&event.metadata?.role!=="user");
-    return latest&&!isFinalOutputEvent(latest)?eventAnchorIdentity(latest):"";
+    return latest&&!isFinal(latest as DisplayEvent)?eventAnchorIdentity(latest):"";
   };
-  $: liveWritingEventKey=latestLiveWritingKey(events);
-  const rootFinalEventKeys=(rows:AgentEvent[])=>new Set(rows.filter(event=>isFinalOutputEvent(event)).map(event=>eventAnchorIdentity(event)));
+  $: liveWritingEventKey=latestLiveWritingKey(events,finalOutputResolver);
+  const rootFinalEventKeys=(rows:AgentEvent[],isFinal:(event:DisplayEvent)=>boolean)=>new Set(rows.filter(event=>isFinal(event as DisplayEvent)).map(event=>eventAnchorIdentity(event)));
   $: {
     const sessionKey=`${sourceTaskId??""}:${requestTimestamp??""}:${request}`;
-    const currentFinalKeys=rootFinalEventKeys(events);
+    const currentFinalKeys=rootFinalEventKeys(events,finalOutputResolver);
     if(sessionKey!==finalRevealSessionKey){
       finalRevealSessionKey=sessionKey;
       finalRevealTaskWasBusy=busy;
@@ -261,7 +265,7 @@
     readingAnchorTop=readingAnchor.getBoundingClientRect().top;
   }
   onMount(()=>{
-    knownFinalEventKeys=rootFinalEventKeys(events);
+    knownFinalEventKeys=rootFinalEventKeys(events,finalOutputResolver);
     finalRevealReady=true;
     let resizeFrame=0;
     const topObserver=typeof IntersectionObserver==="undefined"?null:new IntersectionObserver(entries=>{
@@ -321,6 +325,15 @@
   $: failedValidationCount=panelOutcome.checks.filter(check=>check.status==="failed").length;
   $: detailedProcessRows=groupProcessEvents(processRows.filter(event=>event.type!=="message_delta"&&event.type!=="message_completed"&&!buildEvents.has(event)) as DisplayEvent[]);
   $: statusVisibility=processVisibility(processRows,provider,sourceTaskId,liveMode);
+  // A zero carries no news but reads as heavily as a real count. The category
+  // stays listed — a reader still needs to know nothing was written — but it
+  // recedes so "tools 10" is what the eye lands on.
+  $: workCountChips=[
+    {key:"conversation.commandCount",count:statusVisibility.commandCount},
+    {key:"conversation.fileCount",count:statusVisibility.fileCount},
+    {key:"conversation.toolCount",count:statusVisibility.toolCount},
+    {key:"conversation.internalCount",count:statusVisibility.internalCount}
+  ];
   $: agentName = providerDisplayName(events.find((event) => event.provider)?.provider ?? provider);
   // Compute the indicator label once per update (not per render); bottom-stick
   // is already handled by afterUpdate below, so no extra rAF loop here.
@@ -626,7 +639,7 @@
     {@const timestamp = event.timestamp??fallbackTimestamp}
     {@const preview=imagePreview(event)}
     {@const grounding=googleGrounding(event)}
-    {@const finalOutput=isFinalOutputEvent(event)}
+    {@const finalOutput=finalOutputResolver(event as DisplayEvent)}
     {@const liveWriting=liveWritingEventKey===eventAnchorIdentity(event)}
     {#if preview}
       <button type="button" class="conversation-image-card" aria-haspopup="dialog" aria-label={$t("outcome.openImage",{file:preview.path})} title={$t("outcome.openImage",{file:preview.path})} data-event-type={event.type} data-scroll-anchor={eventAnchorIdentity(event)} onclick={()=>openImagePreview=preview}><span><ImageIcon size={15}/><strong>{$t("conversation.image")}</strong><code>{preview.path.split(/[\\/]/).at(-1)}</code><Eye size={14}/></span><img src={preview.href} alt={preview.path} loading="lazy"/></button>
@@ -709,24 +722,19 @@
             <span class="provider-quota-head"><strong>{quotaTitle}</strong>{#if quotaPercent!==null}<b>{Math.round(quotaPercent)}%</b>{/if}</span>
             <div class="provider-quota-bar" aria-label={quotaBadge||quotaTitle}><i style={`width:${quotaPercent??0}%`}></i></div>
             {#if quotaWindow.resetsAt}<small>{$t("quota.reset",{label:formatCardDateTime(quotaWindow.resetsAt,$locale)})}</small>
-            {:else if quotaWindow.resetLabel}<small>{quotaWindow.resetLabel}</small>{/if}
+            {:else if quotaWindow.resetLabel}<small>{$t("quota.reset",{label:quotaWindow.resetLabel})}</small>{/if}
           </div>
         {/if}
-        {#if liveMode!=="History"}
-          <div class="work-heartbeat">
-            <span class="work-heartbeat-head"><strong>{$t("conversation.activitySignal")}</strong><small>{$t("conversation.activityReset")}</small></span>
-            <HeartbeatBar lastEventAt={Date.parse(statusVisibility.lastAt??"")||Date.now()} transport={statusVisibility.transport} phase={statusVisibility.phase==="idle"?"reasoning":statusVisibility.phase}/>
-          </div>
-        {/if}
-        <div class="work-activity-row">
+        <!-- One activity block, not three. The sparkline carries the shape of the
+             work, the event count is its caption, and the transport pill is the
+             only remaining copy of the connection state. -->
+        <div class="work-activity">
+          <span class="work-activity-head"><strong>{$t("conversation.activitySignal")}</strong>{#if liveMode!=="History"}<HeartbeatBar lastEventAt={Date.parse(statusVisibility.lastAt??"")||Date.now()} transport={statusVisibility.transport} phase={statusVisibility.phase==="idle"?"reasoning":statusVisibility.phase} compact/>{/if}</span>
           <div class="work-spark" aria-hidden="true">{#each statusVisibility.bars as height}<i style={`height:${height}px`}></i>{/each}</div>
-          <strong>{$t("conversation.eventCount",{count:processRows.length})}</strong>
+          <span class="work-activity-caption"><b>{$t("conversation.eventCount",{count:processRows.length})}</b>{#if statusVisibility.lastAt}<small>{$t("conversation.lastEvent",{time:relativeTime(statusVisibility.lastAt)})}</small>{/if}</span>
         </div>
         <div class="work-event-summary">
-          <span>{$t("conversation.commandCount",{count:statusVisibility.commandCount})}</span>
-          <span>{$t("conversation.fileCount",{count:statusVisibility.fileCount})}</span>
-          <span>{$t("conversation.toolCount",{count:statusVisibility.toolCount})}</span>
-          <span>{$t("conversation.internalCount",{count:statusVisibility.internalCount})}</span>
+          {#each workCountChips as chip (chip.key)}<span class:zero={!chip.count}>{$t(chip.key,{count:chip.count})}</span>{/each}
         </div>
         {#if detailedProcessRows.length}
           <details class="work-event-details">

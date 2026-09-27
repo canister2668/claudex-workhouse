@@ -31,7 +31,7 @@ const fail=(error:unknown)=>{if(settled)return;settled=true;const message=stoppe
 const stop=()=>{stopped=true;controller.abort();};process.once("SIGTERM",stop);process.once("SIGINT",stop);
 try{
   let declarations:VertexFunctionDeclaration[]=[];
-  if(managedDelegation){mcpClient=new Client({name:"claudex-workhouse-vertex-worker",version:"1.0.0"},{capabilities:{}});const transport=new StreamableHTTPClientTransport(new URL(managedUrl),{requestInit:{headers:{Authorization:`Bearer ${managedToken}`,"X-Claudex-Workhouse-Task-Id":taskId}}});await mcpClient.connect(transport);const listed=await mcpClient.listTools();declarations=listed.tools.filter(tool=>tool.name.startsWith("managed_provider_task_")).map(tool=>({name:tool.name,description:tool.description,parameters:(tool.inputSchema??{type:"object",properties:{}}) as Record<string,unknown>}));}
+  if(managedDelegation){mcpClient=new Client({name:"claudex-workhouse-vertex-worker",version:"1.0.0"},{capabilities:{}});const transport=new StreamableHTTPClientTransport(new URL(managedUrl),{requestInit:{headers:{Authorization:`Bearer ${managedToken}`,"X-Claudex-Workhouse-Task-Id":taskId}}});await mcpClient.connect(transport);const listed=await mcpClient.listTools();declarations=listed.tools.filter(tool=>(tool.name.startsWith("managed_provider_task_")||tool.name==="request_user_input_async")).map(tool=>({name:tool.name,description:tool.description,parameters:(tool.inputSchema??{type:"object",properties:{}}) as Record<string,unknown>}));}
   let requestCount=0,totalUsage:VertexUsage={promptTokenCount:0,candidateTokenCount:0,totalTokenCount:0,cachedTokenCount:0,thoughtTokenCount:0};
   let grounding:VertexGrounding|null=null;
   for(let toolRound=0;toolRound<9;toolRound++){

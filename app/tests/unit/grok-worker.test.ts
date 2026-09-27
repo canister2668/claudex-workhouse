@@ -58,24 +58,26 @@ describe("Grok worker CLI contract",()=>{
     expect(args).toContain("--single");
     expect(args[args.indexOf("--permission-mode")+1]).toBe("plan");
     expect(args).not.toContain("--sandbox");
+    expect(args.filter((value:string)=>value==="--always-approve")).toHaveLength(1);
     expect(args[args.indexOf("--tools")+1]).toBe("Read,Glob,Grep,WebSearch,WebFetch");
     expect(args).not.toContain("--plugin-dir");
     expect(args.some((value:string)=>value.startsWith("MCPTool("))).toBe(false);
     expect(state).toMatchObject({status:"completed",result:"안녕!",sessionId:"11111111-1111-4111-8111-111111111111"});
   });
 
-  it("uses Grok auto mode instead of an unanswerable approval prompt",()=>{
+  it("pre-approves Grok auto mode because the headless worker cannot answer prompts",()=>{
     const{result,args,childEnv}=runWorker({permission:":workspace-write",automation:"auto"});
     expect(result.status,result.stderr).toBe(0);
     expect(args[args.indexOf("--permission-mode")+1]).toBe("auto");
+    expect(args.filter((value:string)=>value==="--always-approve")).toHaveLength(1);
     expect(args).not.toContain("--sandbox");
     expect(args).not.toContain("--tools");
     expect(args[args.indexOf("--rules")+1]).toContain("- Automation: auto");
-    expect(args[args.indexOf("--rules")+1]).toContain("does not enforce an OS filesystem sandbox");
+    expect(args[args.indexOf("--rules")+1]).toContain("tool calls pre-approved");
     expect(childEnv.sandbox).toBeNull();
   });
 
-  it("maps explicit full access to bypassPermissions",()=>{const{args}=runWorker({permission:":danger-full-access",automation:"full"});expect(args[args.indexOf("--permission-mode")+1]).toBe("bypassPermissions");expect(args[args.indexOf("--rules")+1]).toContain("explicit full access");});
+  it("maps explicit full access to bypassPermissions",()=>{const{args}=runWorker({permission:":danger-full-access",automation:"full"});expect(args[args.indexOf("--permission-mode")+1]).toBe("bypassPermissions");expect(args.filter((value:string)=>value==="--always-approve")).toHaveLength(1);expect(args[args.indexOf("--rules")+1]).toContain("explicit full access");});
 
   it("removes the plan tools that cancel a headless session",()=>{
     for(const options of [{permission:":workspace-write",automation:"auto"},{permission:":danger-full-access",automation:"full"}]){
@@ -94,7 +96,15 @@ describe("Grok worker CLI contract",()=>{
     expect(state).toMatchObject({status:"failed",error:"Grok plan approval was unavailable in the headless session."});
   });
 
-  it("keeps conversation built-ins restricted while retaining the measured MCP meta-tools",()=>{const{args}=runWorker({runtimeProfile:"conversation"}),tools=args[args.indexOf("--tools")+1],rules=args[args.indexOf("--rules")+1];expect(tools).toBe("search_tool,use_tool");expect(rules).toContain("call set_emotion exactly once");expect(rules).toContain("뽀뽀쪽");expect(rules).toContain("Do not call express_emotion");});
+  it("keeps conversation built-ins restricted while retaining the measured MCP meta-tools",()=>{
+    const{args}=runWorker({runtimeProfile:"conversation"}),tools=args[args.indexOf("--tools")+1],rules=args[args.indexOf("--rules")+1];
+    expect(args[args.indexOf("--permission-mode")+1]).toBe("dontAsk");
+    expect(args).toContain("--always-approve");
+    expect(tools).toBe("search_tool,use_tool");
+    expect(rules).toContain("call set_emotion exactly once");
+    expect(rules).toContain("뽀뽀쪽");
+    expect(rules).toContain("Do not call express_emotion");
+  });
 
   it("does not let mismatched full metadata upgrade workspace access",()=>{const{args}=runWorker({permission:":workspace-write",automation:"full"});expect(args[args.indexOf("--permission-mode")+1]).toBe("auto");expect(args[args.indexOf("--rules")+1]).toContain("- Automation: auto");});
 

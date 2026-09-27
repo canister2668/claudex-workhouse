@@ -14,8 +14,19 @@ describe("running conversation history",()=>{
     expect(recentRunningConversationEvents(events,true).map(event=>event.content)).toEqual(["입력 3","출력 3","입력 4","출력 4","입력 5","출력 5","현재 입력","현재 출력"]);
   });
 
-  it("does not count a previous turn without an assistant output",()=>{
+  it("keeps an unanswered previous turn visible without spending the output budget",()=>{
     const events=[...turn(1),{type:"message",content:"중단된 입력",metadata:{role:"user"}},...turn(2),{type:"message",content:"현재 입력",metadata:{role:"user"}}] as any[];
-    expect(recentRunningConversationEvents(events,true).map(event=>event.content)).toEqual(["입력 1","출력 1","입력 2","출력 2","현재 입력"]);
+    expect(recentRunningConversationEvents(events,true).map(event=>event.content)).toEqual(["입력 1","출력 1","중단된 입력","입력 2","출력 2","현재 입력"]);
   });
+
+  it("keeps the interrupted turn directly above the running turn",()=>{
+    const events=[...turn(1),...turn(2),...turn(3),{type:"message",content:"중단된 입력",metadata:{role:"user"}},{type:"message",content:"현재 입력",metadata:{role:"user"}}] as any[];
+    expect(recentRunningConversationEvents(events,true).map(event=>event.content)).toEqual(["입력 1","출력 1","입력 2","출력 2","입력 3","출력 3","중단된 입력","현재 입력"]);
+  });
+
+  it("still shows the latest turns when no previous turn was answered",()=>{
+    const events=[{type:"message",content:"중단된 입력",metadata:{role:"user"}},{type:"message",content:"현재 입력",metadata:{role:"user"}}] as any[];
+    expect(recentRunningConversationEvents(events,true).map(event=>event.content)).toEqual(["중단된 입력","현재 입력"]);
+  });
+
 });

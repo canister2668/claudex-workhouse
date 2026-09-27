@@ -9,11 +9,11 @@
   export let task:{id:string;provider:"codex"|"claude"|"deepseek"|"ollama"|"antigravity"|"grok";title:string;status?:string};
   type Option={label:string;description:string};type Question={id:string;header:string;question:string;options:Option[];isOther:boolean;isSecret:boolean};
   type Request={id:string;questions:Question[];expiresAt:string;title?:string};
-  let requests:Request[]=[];let selected:Record<string,string>={};let custom:Record<string,string>={};let activeQuestion:Record<string,number>={};let collapsed:Record<string,boolean>={};let busy="";let error="";let timer:ReturnType<typeof setInterval>|null=null;let loading=false;
+  let requests:Request[]=[];let selected:Record<string,string>={};let custom:Record<string,string>={};let activeQuestion:Record<string,number>={};let collapsed:Record<string,boolean>={};let busy="";let error="";let timer:ReturnType<typeof setInterval>|null=null;let loading=false;let mounted=false;let loadedTaskId="";let loadedTaskStatus:string|undefined;let reloadAfterCurrent=false;
   const key=(requestId:string,questionId:string)=>`${requestId}:${questionId}`;
   const remaining=(item:Request)=>Math.max(0,Math.ceil((Date.parse(item.expiresAt)-Date.now())/1000));
   const requestKey=(item:Request)=>`user-input:${task.id}:${item.id}`;
-  async function load(){if(loading||document.visibilityState==="hidden")return;loading=true;try{const data=await api(`/api/user-input?taskId=${encodeURIComponent(task.id)}`);requests=upsertStableRows(data.requests??[],requestKey).map(item=>({...item,questions:upsertStableRows(item.questions??[],question=>`question:${task.id}:${item.id}:${question.id}`)}));error="";}catch(e){error=isTransientApiError(e)?"":e instanceof Error?e.message:String(e);}finally{loading=false;}}
+  async function load(){if(document.visibilityState==="hidden")return;if(loading){reloadAfterCurrent=true;return;}loading=true;const requestedTaskId=task.id;try{const data=await api(`/api/user-input?taskId=${encodeURIComponent(task.id)}`);if(task.id!==requestedTaskId)return;requests=upsertStableRows(data.requests??[],requestKey).map(item=>({...item,questions:upsertStableRows(item.questions??[],question=>`question:${task.id}:${item.id}:${question.id}`)}));error="";}catch(e){error=isTransientApiError(e)?"":e instanceof Error?e.message:String(e);}finally{loading=false;if(mounted&&(reloadAfterCurrent||task.id!==requestedTaskId)){reloadAfterCurrent=false;void load();}}}
   function choose(requestId:string,questionId:string,value:string){selected={...selected,[key(requestId,questionId)]:value};}
   function updateCustom(requestId:string,questionId:string,value:string){custom={...custom,[key(requestId,questionId)]:value};selected={...selected,[key(requestId,questionId)]:"__other__"};}
   function answered(requestId:string,question:Question){const value=selected[key(requestId,question.id)];return Boolean(value&&value!=="__other__"||value==="__other__"&&custom[key(requestId,question.id)]?.trim());}
@@ -24,13 +24,15 @@
   function advance(item:Request){const index=questionIndex(item),question=item.questions[index];if(!question||!answered(item.id,question))return;if(index<item.questions.length-1)setQuestion(item,index+1);else void submit(item);}
   function ready(item:Request){return item.questions.every(question=>{const value=selected[key(item.id,question.id)];return Boolean(value&&value!=="__other__"||value==="__other__"&&custom[key(item.id,question.id)]?.trim());});}
   async function submit(item:Request){if(busy||!ready(item))return;busy=item.id;error="";const answers=Object.fromEntries(item.questions.map(question=>{const value=selected[key(item.id,question.id)];return[question.id,{answers:[value==="__other__"?custom[key(item.id,question.id)].trim():value]}];}));try{await api(`/api/tasks/${task.provider}/${encodeURIComponent(task.id)}/user-input/${item.id}`,{method:"POST",headers:{"Idempotency-Key":crypto.randomUUID()},body:JSON.stringify({answers})});requests=requests.filter(value=>value.id!==item.id);for(const question of item.questions){delete selected[key(item.id,question.id)];delete custom[key(item.id,question.id)];}selected={...selected};custom={...custom};}catch(e){error=e instanceof Error?e.message:String(e);await load();}finally{busy="";}}
-  onMount(()=>{const visible=()=>{if(document.visibilityState==="visible")void load();};void load();timer=setInterval(()=>{if(shouldPollAttention(task.status,requests.length))void load();},5000);document.addEventListener("visibilitychange",visible);return()=>{if(timer)clearInterval(timer);document.removeEventListener("visibilitychange",visible);};});
+  $: if(mounted&&loadedTaskId!==task.id){loadedTaskId=task.id;requests=[];selected={};custom={};error="";void load();}
+  $: if(mounted&&loadedTaskStatus!==task.status){loadedTaskStatus=task.status;void load();}
+  onMount(()=>{mounted=true;loadedTaskId=task.id;loadedTaskStatus=task.status;const visible=()=>{if(document.visibilityState==="visible")void load();};void load();timer=setInterval(()=>{if(shouldPollAttention(task.status,requests.length))void load();},5000);document.addEventListener("visibilitychange",visible);return()=>{mounted=false;if(timer)clearInterval(timer);document.removeEventListener("visibilitychange",visible);};});
 </script>
 
 {#if requests.length||error}
   <section class="user-input-stack" aria-label={$t("form.userChoiceNeeded")} aria-live="polite">
     {#each requests as item (requestKey(item))}
-      {@const index=questionIndex(item)}
+      {@const index=Math.min(activeQuestion[item.id]??0,Math.max(0,item.questions.length-1))}
       {@const question=item.questions[index]}
       {@const count=answeredCount(item)}
       <article class:collapsed={collapsed[item.id]}>

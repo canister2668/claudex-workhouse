@@ -44,7 +44,9 @@ describe("push event contract",()=>{
 
   it("requests notification permission directly from the completion toggle gesture",()=>{
     const app=fs.readFileSync("src/web/App.svelte","utf8");
-    expect(app).toContain('onchange={handleCompletionNotificationsChange}');
+    const page=fs.readFileSync("src/web/settings/NotificationsPage.svelte","utf8");
+    expect(page).toContain("handleCompletionNotificationsChange({ currentTarget: input } as unknown as Event)");
+    expect(app).toContain("{handleCompletionNotificationsChange}");
     expect(app).toMatch(/handleCompletionNotificationsChange\(event:Event\).*await enablePush\(\)/);
   });
 

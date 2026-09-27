@@ -93,6 +93,19 @@ describe("quota task reservation persistence",()=>{
     await db.close();
   });
 
+  it("applies the Spark recovery pool only to a Spark reservation",async()=>{
+    const{db}=await fixture(),regular=item(),spark=item();
+    regular.request={...regular.request,model:"gpt-5.6-sol"};
+    spark.request={...spark.request,model:"gpt-5.3-codex-spark"};
+    await db.createQuotaTaskReservation(regular);await db.createQuotaTaskReservation(spark);
+    const quota={codex:{fiveHour:null,sevenDay:{pct:6,resetsAt:null,durationMins:10080},status:"partial" as const,modelPools:[{limitId:"codex_bengalfox",label:"Spark",modelIds:["gpt-5.3-codex-spark"],fiveHour:{pct:2,resetsAt:null,durationMins:300},sevenDay:{pct:14,resetsAt:null,durationMins:10080},status:"ok" as const}]},claude:undefined};
+    const started:string[]=[];
+    await runQuotaReservationPump({store:db,quota,start:async reservation=>{started.push(reservation.id);}});
+    expect(started).toEqual([spark.id]);
+    expect(await db.getQuotaTaskReservation(regular.id)).toMatchObject({status:"waiting-quota",lastQuotaStatus:"unknown"});
+    await db.close();
+  });
+
   it("does not resurrect a cancellation made after a pump read the due row",async()=>{
     const{db}=await fixture(),created=await db.createQuotaTaskReservation(item());
     let release!:()=>void;

@@ -64,7 +64,9 @@ export function buildInlineEmotionCards(input:{
     if(!parsed.hasMarkers){
       const inferred=selectOutputAssets(String(run.id),output,available)[0];
       if(!inferred)continue;
-      cards.set(run.id,{...parsed,scenes:[{id:`${run.id}:inferred`,emotion:inferred.emotion,text:parsed.plainText.trim(),sourceOffset:0,asset:inferred}]});
+      // The inferred scene owns the plain output. Keeping the same text in
+      // leadingText renders it once above the scene and once inside it.
+      cards.set(run.id,{...parsed,leadingText:"",scenes:[{id:`${run.id}:inferred`,emotion:inferred.emotion,text:parsed.plainText.trim(),sourceOffset:0,asset:inferred}]});
       continue;
     }
     const scenes=parsed.scenes.map(scene=>({...scene,asset:resolveInlineEmotionAsset(scene.emotion,available,scene.id)}));

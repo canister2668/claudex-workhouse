@@ -98,3 +98,22 @@ describe("Tailscale Serve authentication",()=>{
     await expect(authenticate(request({...base,origin:"https://wrong.ts.net"}))).rejects.toMatchObject({code:"TAILSCALE_ORIGIN_MISMATCH"});
   });
 });
+
+describe("reverse-proxy (oauth2-proxy) identity",()=>{
+  const secret="s".repeat(48);
+  const base={...accessConfig,root:"/tmp",dataDir:"/tmp",logDir:"/tmp",runDir:"/tmp",dbPath:"/tmp/db",projects:[],claudeBinary:"/tmp/claude",host:"127.0.0.1",port:3410,promptMaxLength:20000,commandTimeoutMs:15000,commandOutputLimit:2097152,externalOrigin:"https://public.example.com",authMode:"cloudflare" as const,proxyAuthSecret:secret};
+  const request=(headers:Record<string,string>)=>({headers,ip:"127.0.0.1",raw:{socket:{remoteAddress:"127.0.0.1"}}}) as any;
+  it("accepts the allowed email only with the shared proxy secret",async()=>{
+    const authenticate=createAuthenticator(base as any,{jwks});
+    await expect(authenticate(request({"x-claudex-proxy-auth":secret,"x-auth-request-email":"Owner@Example.com"}))).resolves.toBe(email);
+    await expect(authenticate(request({"x-claudex-proxy-auth":"wrong","x-auth-request-email":email}))).rejects.toThrow("Reverse-proxy authentication is invalid");
+    await expect(authenticate(request({"x-claudex-proxy-auth":secret,"x-auth-request-email":"other@example.com"}))).rejects.toThrow("not allowed");
+    await expect(authenticate(request({"x-claudex-proxy-auth":secret}))).rejects.toThrow("identity is required");
+  });
+  it("ignores a forged email header without the secret and keeps Cloudflare Access working",async()=>{
+    const authenticate=createAuthenticator(base as any,{jwks});
+    await expect(authenticate(request({"x-auth-request-email":email}))).rejects.toThrow("Missing Cloudflare Access JWT");
+    await expect(authenticate(request({"cf-access-jwt-assertion":await token()}))).resolves.toBe(email);
+    await expect(createAuthenticator({...base,proxyAuthSecret:null} as any,{jwks})(request({"x-claudex-proxy-auth":secret,"x-auth-request-email":email}))).rejects.toThrow("Missing Cloudflare Access JWT");
+  });
+});

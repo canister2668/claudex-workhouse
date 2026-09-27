@@ -1,10 +1,11 @@
 import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
+import type { ProviderId } from "./types.js";
 
 export interface UserInputOption { label:string; description:string; }
 export interface UserInputQuestion { id:string; header:string; question:string; options:UserInputOption[]; isOther:boolean; isSecret:boolean; }
-export interface PendingUserInput { id:string; taskId:string; provider:"codex"; threadId:string; turnId:string; itemId:string; questions:UserInputQuestion[]; requestedAt:string; expiresAt:string; }
+export interface PendingUserInput { id:string; taskId:string; provider:ProviderId; threadId:string; turnId:string; itemId:string; questions:UserInputQuestion[]; requestedAt:string; expiresAt:string; delivery?:"async"; }
 export type UserInputAnswers=Record<string,{answers:string[]}>;
 
 const CONTROL=/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g;
@@ -15,8 +16,8 @@ function writePrivate(target:string,value:unknown){fs.writeFileSync(target,`${JS
 
 export function userInputRecord(taskId:string,params:any):PendingUserInput{
   const questions=(Array.isArray(params?.questions)?params.questions:[]).slice(0,3).map((item:any,index:number)=>({
-    id:clean(item?.id||`question_${index+1}`,80),header:clean(item?.header,80),question:clean(item?.question,1000),
-    options:(Array.isArray(item?.options)?item.options:[]).slice(0,12).map((option:any)=>({label:clean(option?.label,120),description:clean(option?.description,500)})).filter((option:UserInputOption)=>option.label),
+    id:clean(item?.id||`question_${index+1}`,80),header:clean(item?.header,80),question:clean(item?.question??item?.title,1000),
+    options:(Array.isArray(item?.options)?item.options:[]).slice(0,12).map((option:any)=>({label:clean(typeof option==="string"?option:option?.label,120),description:clean(option?.description,500)})).filter((option:UserInputOption)=>option.label),
     isOther:Boolean(item?.isOther),isSecret:Boolean(item?.isSecret)
   })).filter((item:UserInputQuestion)=>item.id&&item.question);
   if(!questions.length)throw new Error("Provider user input request has no valid questions.");

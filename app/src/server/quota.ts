@@ -5,6 +5,17 @@ export type QuotaWindow = {
   durationMins: number | null;
 };
 
+export type CodexQuotaPool = {
+  limitId: string;
+  label: string;
+  modelIds: string[];
+  fiveHour: QuotaWindow | null;
+  sevenDay: QuotaWindow | null;
+  plan?: string | null;
+  exhausted?: boolean;
+  status: "ok" | "partial";
+};
+
 export type ProviderQuota = {
   fiveHour: QuotaWindow | null;
   sevenDay: QuotaWindow | null;
@@ -12,6 +23,7 @@ export type ProviderQuota = {
   exhausted?: boolean;
   error?: string | null;
   status: "ok" | "partial";
+  modelPools?: CodexQuotaPool[];
 };
 
 export type ProviderBalance = {
@@ -67,6 +79,45 @@ function codexWindow(value: any): QuotaWindow | null {
   };
 }
 
+// App-server currently exposes the Spark bucket under an internal product
+// identifier. Keep that translation at the provider boundary: the rest of the
+// application should reason about public model ids, never codename strings.
+const CODEX_LIMIT_MODELS:Record<string,{label:string;modelIds:string[]}>= {
+  codex_bengalfox:{label:"Spark",modelIds:["gpt-5.3-codex-spark"]}
+};
+
+function codexQuotaSnapshot(snapshots:any[]):Omit<ProviderQuota,"modelPools"> {
+  const windows=snapshots.flatMap(limits=>[codexWindow(limits.primary),codexWindow(limits.secondary)]).filter((window):window is QuotaWindow=>Boolean(window));
+  let fiveHour:QuotaWindow|null=null,sevenDay:QuotaWindow|null=null;
+  for(const window of windows){
+    if(window.durationMins===null)continue;
+    if(window.durationMins>=240&&window.durationMins<=360)fiveHour??=window;
+    if(window.durationMins>=9000&&window.durationMins<=11000)sevenDay??=window;
+  }
+  const fallbackPrimary=codexWindow(snapshots[0]?.primary),fallbackSecondary=codexWindow(snapshots[0]?.secondary);
+  if(!fiveHour&&fallbackPrimary?.durationMins===null)fiveHour=fallbackPrimary;
+  if(!sevenDay&&fallbackSecondary?.durationMins===null)sevenDay=fallbackSecondary;
+  return{
+    fiveHour,sevenDay,
+    plan:snapshots.map(limits=>limits.planType).find(value=>typeof value==="string")??null,
+    exhausted:snapshots.some(limits=>typeof limits.rateLimitReachedType==="string"&&limits.rateLimitReachedType.length>0),
+    status:fiveHour&&sevenDay?"ok":"partial"
+  };
+}
+
+export function codexQuotaPoolForModel(quota:ProviderQuota|null|undefined,model:unknown){
+  const id=typeof model==="string"?model.trim().toLowerCase():"";
+  return id?quota?.modelPools?.find(pool=>pool.modelIds.some(modelId=>modelId.toLowerCase()===id))??null:null;
+}
+
+export function codexQuotaForModel(quota:ProviderQuota|null|undefined,model:unknown):ProviderQuota|undefined{
+  if(!quota)return undefined;
+  const pool=codexQuotaPoolForModel(quota,model);
+  if(!pool)return quota;
+  const fiveHour=pool.fiveHour??quota.fiveHour,sevenDay=pool.sevenDay??quota.sevenDay;
+  return{...quota,fiveHour,sevenDay,plan:pool.plan??quota.plan,exhausted:pool.exhausted??quota.exhausted,status:fiveHour&&sevenDay?"ok":"partial"};
+}
+
 // Codex has changed which physical slot contains each limit. In particular,
 // `primary` can be the seven-day window while `secondary` is absent. Prefer
 // the explicit duration and use the old positional convention only when a
@@ -84,33 +135,14 @@ export function mapCodexQuota(result: any): ProviderQuota | null {
   });
   const snapshots = [
     ...canonicalCodexEntries.map(([,value])=>value),
-    compatibleLimits,
-    ...supplementalCodexEntries.map(([,value])=>value)
+    compatibleLimits
   ].filter((value,index,values)=>value&&typeof value==="object"&&values.indexOf(value)===index) as any[];
   if (!snapshots.length) return null;
-
-  const windows = snapshots.flatMap(limits=>[codexWindow(limits.primary),codexWindow(limits.secondary)]).filter((window):window is QuotaWindow=>Boolean(window));
-  let fiveHour: QuotaWindow | null = null;
-  let sevenDay: QuotaWindow | null = null;
-
-  for (const window of windows) {
-    if (window.durationMins === null) continue;
-    if (window.durationMins >= 240 && window.durationMins <= 360) fiveHour ??= window;
-    if (window.durationMins >= 9000 && window.durationMins <= 11000) sevenDay ??= window;
-  }
-
-  const fallbackPrimary = codexWindow(snapshots[0]?.primary);
-  const fallbackSecondary = codexWindow(snapshots[0]?.secondary);
-  if (!fiveHour && fallbackPrimary?.durationMins === null) fiveHour = fallbackPrimary;
-  if (!sevenDay && fallbackSecondary?.durationMins === null) sevenDay = fallbackSecondary;
-
-  return {
-    fiveHour,
-    sevenDay,
-    plan: snapshots.map(limits=>limits.planType).find(value=>typeof value==="string") ?? null,
-    exhausted:snapshots.some(limits=>typeof limits.rateLimitReachedType==="string"&&limits.rateLimitReachedType.length>0),
-    status: fiveHour && sevenDay ? "ok" : "partial"
-  };
+  const modelPools=supplementalCodexEntries.map(([limitId,value])=>{
+    const mapped=codexQuotaSnapshot([value]),identity=CODEX_LIMIT_MODELS[String(limitId).toLowerCase()];
+    return{limitId:String(limitId),label:identity?.label??String(limitId),modelIds:identity?.modelIds??[],...mapped};
+  });
+  return{...codexQuotaSnapshot(snapshots),...(modelPools.length?{modelPools}:{})};
 }
 
 function claudeWindow(value: any, durationMins: number): QuotaWindow | null {
@@ -179,6 +211,28 @@ export function mapDeepseekBalance(body: any): ProviderBalance | null {
   const total = finiteNumber(entry.total_balance);
   if (!currency || total === null) return null;
   return { currency, total, granted: finiteNumber(entry.granted_balance) ?? 0, toppedUp: finiteNumber(entry.topped_up_balance) ?? 0, available: body?.is_available !== false && total > 0 };
+}
+
+
+// A restart drops the in-memory Claude reading, so a throttled usage endpoint
+// leaves the panel with nothing to show at all. Persisting the last good
+// reading keeps it visible, but only while it is still meaningful: the session
+// window moves fast, so it is dropped first, and an hour-old reading is dropped
+// entirely rather than presented as current.
+export const CLAUDE_QUOTA_RESTORE_MAX_AGE_MS=60*60_000;
+export const CLAUDE_QUOTA_RESTORE_FIVE_HOUR_MAX_AGE_MS=15*60_000;
+
+export function restorableClaudeQuota(stored:unknown,now=Date.now()):ProviderQuota|null{
+  if(!stored||typeof stored!=="object")return null;
+  const record=stored as {quota?:unknown;at?:unknown};
+  const at=typeof record.at==="string"?Date.parse(record.at):NaN;
+  if(!Number.isFinite(at))return null;
+  const age=now-at;
+  if(age<0||age>CLAUDE_QUOTA_RESTORE_MAX_AGE_MS)return null;
+  if(!record.quota||typeof record.quota!=="object")return null;
+  const quota=record.quota as ProviderQuota;
+  if(!quota.fiveHour&&!quota.sevenDay)return null;
+  return age>CLAUDE_QUOTA_RESTORE_FIVE_HOUR_MAX_AGE_MS?{...quota,fiveHour:null,status:"partial"}:quota;
 }
 
 export function mapClaudeQuota(body: any): ProviderQuota {

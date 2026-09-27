@@ -30,10 +30,11 @@ const promptParts=workerArgs.slice(hasAutomationArg?3:2);
 const prompt = promptParts.join(" ");
 const compactOperation = prompt.trim().split(/\s+/,1)[0] === "/compact";
 
-// Grok headless sessions cannot answer permission prompts. Its auto mode runs
-// calls accepted by the safety classifier and explicitly reports blocked calls
-// to the model, while acceptEdits incorrectly falls back to an unanswerable
-// interactive prompt for shell writes.
+// Grok headless sessions cannot answer permission prompts. Every executable
+// permission profile must therefore pre-approve the tools that remain after
+// its capability boundary is applied. Plan mode still blocks edits for read
+// tasks, explicit --tools still bounds conversation/browser tasks, and Grok's
+// deny rules, hooks, and admin locks still win over --always-approve.
 const level=grokAutomationLevel(requestedAutomationLevel,permissionProfile);
 const profile={
   mode:level==="read"?"plan":level==="full"?"bypassPermissions":"auto",
@@ -92,13 +93,16 @@ atomicWrite(state);
 spool.append({ type:"task_started", content:`Claudex Workhouse ${providerLabel} worker started.`, threadId:state.sessionId });
 
 const restrictedTools=profile.tools[0]!=="default";
-const args = ["--single",prompt,"--output-format","streaming-messages-json","--include-partial-messages","--permission-mode",profile.mode,"--no-auto-update","--no-memory","--no-subagents"];
+const conversationRuntime=runtimeProfile==="conversation";
+const args = ["--single",prompt,"--output-format","streaming-messages-json","--include-partial-messages","--permission-mode",conversationRuntime?"dontAsk":profile.mode,"--always-approve","--no-auto-update","--no-memory","--no-subagents"];
 // The one file a conversation may open is the attachment the user added to
 // this turn; its path is already in the prompt. Grok's MCP meta-tools stay
 // available under --tools, while the task home exposes only the scoped emotion
-// server in conversation mode.
-const conversationAttachments=runtimeProfile==="conversation"?parseConversationAttachments(productEnv("CONVERSATION_ATTACHMENTS")):[];
-if(runtimeProfile==="conversation")args.push("--disable-web-search","--tools",conversationAttachments.length?"read_file,search_tool,use_tool":"search_tool,use_tool");
+// server in conversation mode. Headless Grok still prompts on the `use_tool`
+// dispatcher in plan/ask modes, and that prompt cannot be answered, so the
+// remaining toolset is pre-approved here. `--tools` is the capability boundary.
+const conversationAttachments=conversationRuntime?parseConversationAttachments(productEnv("CONVERSATION_ATTACHMENTS")):[];
+if(conversationRuntime)args.push("--disable-web-search","--tools",conversationAttachments.length?"read_file,search_tool,use_tool":"search_tool,use_tool");
 else if(restrictedTools)args.push("--tools",profile.tools.join(","));
 // Grok's plan tools need an interactive client to approve the plan. In a
 // headless single-turn session exit_plan_mode fails with a disconnected
@@ -107,7 +111,7 @@ else if(restrictedTools)args.push("--tools",profile.tools.join(","));
 // exclude them.
 else args.push("--disallowed-tools","enter_plan_mode,exit_plan_mode");
 let delegationSettings:unknown;try{delegationSettings=JSON.parse(productEnv("DELEGATION_SETTINGS")??"null");}catch{delegationSettings=null;}
-const sandboxNotice=level==="full"?"Grok is running with explicit full access and no OS filesystem sandbox.":level==="read"?"Grok is restricted to the listed read/search tools; this is a provider tool restriction, not an OS filesystem sandbox.":"Grok auto mode applies its provider safety checks, but this host does not enforce an OS filesystem sandbox.";
+const sandboxNotice=level==="full"?"Grok is running with explicit full access and no OS filesystem sandbox.":level==="read"?"Grok is restricted to the listed read/search tools; this is a provider tool restriction, not an OS filesystem sandbox.":"Grok runs non-interactively with tool calls pre-approved; deny rules, hooks, and admin locks still apply, but this host does not enforce an OS filesystem sandbox.";
 args.push("--rules",runtimeProfile==="conversation"?[conversationAttachments.length?"Claudex Workhouse conversation-only runtime: respond to the supplied conversation prompt. Do not modify files, run commands, browse, delegate work, or turn the exchange into an implementation task.":"Claudex Workhouse conversation-only runtime: respond to the supplied conversation prompt. Do not inspect or modify files, run commands, browse, delegate work, or turn the exchange into an implementation task.",conversationAttachmentInstruction(conversationAttachments),CONVERSATION_EMOTION_INSTRUCTION].filter(Boolean).join("\n\n"):`${delegationDeveloperInstructions(normalizeDelegationSettings(delegationSettings),providerId)}\n\n${executionPolicyTurnInstructions(providerId,level,cwd)}\n${sandboxNotice}`);
 if (model && model !== "default") args.push("--model", model);
 if (effort && effort !== "default") args.push("--effort", effort);

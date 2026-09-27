@@ -14,15 +14,31 @@ function imageEventKey(event:AgentEvent){
 }
 
 export function mergeLiveEvents(current:AgentEvent[],incoming:AgentEvent[],limit=1500){
-  let next=[...current];
+  const next=[...current];
   const eventIds=new Set(current.map(event=>event.eventId).filter((value):value is string=>Boolean(value)));
+  // Anonymous rows by lifecycle signature, oldest first. Built on first use and
+  // kept in step with the loop below, so one flush no longer re-serializes the
+  // whole list once per incoming event.
+  let anonymousRows:Map<string,number[]>|null=null;
+  const anonymousIndex=()=>{
+    if(anonymousRows)return anonymousRows;
+    anonymousRows=new Map();
+    next.forEach((candidate,index)=>{
+      if(candidate.eventId)return;
+      const signature=anonymousLifecycleSignature(candidate);
+      if(!signature)return;
+      const rows=anonymousRows!.get(signature);
+      if(rows)rows.push(index);else anonymousRows!.set(signature,[index]);
+    });
+    return anonymousRows;
+  };
   for(const event of incoming){
     if(event.eventId&&eventIds.has(event.eventId))continue;
     if(event.eventId)eventIds.add(event.eventId);
     const imageKey=imageEventKey(event);
     if(imageKey){
       const match=next.findIndex(candidate=>imageEventKey(candidate)===imageKey);
-      if(match>=0){next[match]={...next[match]!,...event,metadata:{...next[match]!.metadata,...event.metadata}};continue;}
+      if(match>=0){next[match]={...next[match]!,...event,metadata:{...next[match]!.metadata,...event.metadata}};anonymousRows=null;continue;}
     }
     const signature=event.eventId?anonymousLifecycleSignature(event):"";
     // A terminal HTTP snapshot may win the race and render an anonymous hook
@@ -31,19 +47,23 @@ export function mergeLiveEvents(current:AgentEvent[],incoming:AgentEvent[],limit
     // Repeated hooks remain repeated because each replacement consumes one
     // still-anonymous occurrence.
     if(signature){
-      let match=-1;
-      for(let index=next.length-1;index>=0;index--){
-        const candidate=next[index]!;
-        if(!candidate.eventId&&anonymousLifecycleSignature(candidate)===signature){match=index;break;}
-      }
-      if(match>=0){next[match]=event;continue;}
+      const match=anonymousIndex().get(signature)?.pop();
+      if(match!==undefined){next[match]=event;continue;}
     }
     const last=next.at(-1);
-    if(event.type==="message_delta"&&last?.type==="message_delta"&&last.itemId===event.itemId)next=[...next.slice(0,-1),{...last,content:`${last.content}${event.content}`,sequence:event.sequence,eventId:event.eventId}];
-    else next.push(event);
-    if(next.length>limit)next=preserveConversationCards(next,limit);
+    if(event.type==="message_delta"&&last?.type==="message_delta"&&last.itemId===event.itemId)next[next.length-1]={...last,content:`${last.content}${event.content}`,sequence:event.sequence,eventId:event.eventId};
+    else{
+      next.push(event);
+      const index=anonymousRows as Map<string,number[]>|null;
+      if(index&&!event.eventId){
+        const pushedSignature=anonymousLifecycleSignature(event);
+        if(pushedSignature){const rows=index.get(pushedSignature);if(rows)rows.push(next.length-1);else index.set(pushedSignature,[next.length-1]);}
+      }
+    }
   }
-  return next;
+  // Trim once per flush. Trimming after every incoming event re-filtered the
+  // full capped list for each row of a burst; the surviving set is the same.
+  return next.length>limit?preserveConversationCards(next,limit):next;
 }
 
 function snapshotFamily(event:AgentEvent){

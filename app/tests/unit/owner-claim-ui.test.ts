@@ -60,7 +60,13 @@ describe("owner claim UI boundary",()=>{
     const server=fs.readFileSync(path.resolve("src/server/index.ts"),"utf8");
     expect(app).toContain('const params=new URLSearchParams({snapshot:"true"})');
     expect(server).toContain("if(query.snapshot)");
-    expect(server).toContain("return{tasks:projectTasksWithLiveGitAttribution(tasks),partial:false,warnings:[],snapshot:true,unchanged:false,revision:taskListSnapshotRevision}");
+    expect(server).toContain("return{tasks:listRows(tasks),partial:false,warnings:[],snapshot:true,unchanged:false,revision:taskListSnapshotRevision}");
+    expect(server).toContain('const listRows=(tasks:DeckTask[])=>query.view==="none"?[]:projectTasksWithLiveGitAttribution(tasks);');
+  });
+
+  it("keeps the discarded background synchronization response free of task rows",()=>{
+    const app=fs.readFileSync(path.resolve("src/web/App.svelte"),"utf8");
+    expect(app).toContain('void api("/api/tasks?view=none",{}, {caller:"App.backgroundTaskSynchronization"})');
   });
 
   it("mounts the heavy Codex session browser only after Codex is selected",()=>{

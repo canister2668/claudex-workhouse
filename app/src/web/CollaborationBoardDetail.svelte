@@ -53,7 +53,7 @@
   {#if automationStartBlock()&&card.automation.mode!=="auto"}<p class="notice" role="status">{$t(automationStartBlock())}</p>{/if}
   {#each decisionSessions as session}{@const provider=session.provider}
     {#if provider&&session.status==="waiting-approval"}<ApprovalPanel api={api as any} task={{id:session.id,provider,status:session.status,executionHostId:session.executionHostId,title:session.title}}/>{/if}
-    {#if provider&&(session.status==="waiting-user"||session.status==="waiting")}<UserInputPanel api={api as any} task={{id:session.id,provider,title:session.title,status:session.status}}/>{/if}
+    {#if provider}<UserInputPanel api={api as any} task={{id:session.id,provider,title:session.title,status:session.status}}/>{/if}
   {/each}
   {#each waitingCollaborations as session}
     <p class="notice collaboration-wait" role="status">{$t(boardCollaborationWaitingKey(session.status))}<button type="button" onclick={()=>onopensession(session.kind,session.id)}>{$t("collaborationBoard.openCollaborationSession")}</button></p>

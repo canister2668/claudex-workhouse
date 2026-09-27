@@ -239,10 +239,10 @@ function eventRowIdentity(event:AgentEvent){
 // summary; expanding the group still exposes the complete diagnostic trail.
 export function groupProcessEvents(events:DisplayEvent[]):ProcessEventRow[]{
   const rows:ProcessEventRow[]=[];
-  const groups=new Map<ProcessEventGroup["group"],ProcessEventGroup>();
+  const groups=new Map<ProcessEventGroup["group"],ProcessEventGroup>(),rowIndex=new Map<string,number>();
   for(const event of events){
     const group=processGroup(event);
-    if(!group){const id=eventRowIdentity(event),index=rows.findIndex(row=>row.id===id);if(index<0)rows.push({kind:"event",id,event});else rows[index]={kind:"event",id,event};continue;}
+    if(!group){const id=eventRowIdentity(event),index=rowIndex.get(id);if(index===undefined){rowIndex.set(id,rows.length);rows.push({kind:"event",id,event});}else rows[index]={kind:"event",id,event};continue;}
     const existing=groups.get(group);
     if(existing){existing.events.push(event);existing.latest=processEventSummary(event);existing.failed ||= processEventFailed(event);continue;}
     const created:ProcessEventGroup={kind:"group",id:`group-${group}`,group,label:processGroupLabel(group),events:[event],latest:processEventSummary(event),failed:processEventFailed(event)};
@@ -257,34 +257,69 @@ const isAssistant = (event: DisplayEvent) => event.type === "message_completed" 
 export const isRootThreadEvent = (event: Pick<AgentEvent,"threadId">, rootThreadId:string|null|undefined) => !rootThreadId || !event.threadId || event.threadId === rootThreadId;
 const isRootUserEvent = (event: DisplayEvent,rootThreadId:string|null|undefined) => isUser(event) && isRootThreadEvent(event,rootThreadId);
 export const isRootAssistantEvent = (event: DisplayEvent, rootThreadId:string|null|undefined) => isAssistant(event) && isRootThreadEvent(event,rootThreadId);
+const finalCandidateKind=(event:DisplayEvent,rootThreadId:string|null|undefined):"final"|"not-final"|"positional"=>{
+  if(event.type!=="message_completed"||!isRootAssistantEvent(event,rootThreadId))return "not-final";
+  const phase=String(event.metadata?.phase??"");
+  if(phase==="final_answer"||event.metadata?.section==="result")return "final";
+  const nativeType=String(event.metadata?.nativeType??"");
+  if(phase||nativeType&&nativeType!=="assistant")return "not-final";
+  return "positional";
+};
+const plainRootAssistant=(event:DisplayEvent,rootThreadId:string|null|undefined)=>{
+  if(event.type!=="message_completed"||!isRootAssistantEvent(event,rootThreadId)||event.metadata?.phase)return false;
+  const nativeType=String(event.metadata?.nativeType??"");
+  return !nativeType||nativeType==="assistant";
+};
+// Resolves isFinalAssistantOutput for many events against one list in a single
+// linear pass. Calling the per-event form once per card rescanned the whole
+// list for every assistant message, which made long sessions quadratic on
+// every stream flush.
+export function finalAssistantOutputResolver(events:DisplayEvent[],rootThreadId:string|null|undefined,taskSettled=false){
+  let positional:Map<string,boolean>|null=null;
+  const resolvePositional=()=>{
+    const finalByIndex=new Array<boolean>(events.length);
+    let terminalAhead=false,plainAfter=false;
+    for(let index=events.length-1;index>=0;index--){
+      const event=events[index]!;
+      finalByIndex[index]=(terminalAhead||taskSettled)&&!plainAfter;
+      if(event.type==="task_completed"){terminalAhead=true;plainAfter=false;}
+      else if(plainRootAssistant(event,rootThreadId))plainAfter=true;
+    }
+    const byIdentity=new Map<string,boolean>();
+    events.forEach((event,index)=>{
+      const identity=eventRowIdentity(event);
+      if(!byIdentity.has(identity))byIdentity.set(identity,finalByIndex[index]!);
+    });
+    return byIdentity;
+  };
+  return(event:DisplayEvent)=>{
+    const kind=finalCandidateKind(event,rootThreadId);
+    if(kind!=="positional")return kind==="final";
+    positional??=resolvePositional();
+    return positional.get(eventRowIdentity(event))??false;
+  };
+}
 // Codex labels final and commentary messages explicitly. Other providers can
 // omit phase metadata, so only their last root assistant message before the
 // terminal task event is treated as final output.
-export const isFinalAssistantOutput=(event:DisplayEvent,rootThreadId:string|null|undefined,events:DisplayEvent[]=[event],taskSettled=false)=>{
-  if(event.type!=="message_completed"||!isRootAssistantEvent(event,rootThreadId))return false;
-  const phase=String(event.metadata?.phase??"");
-  if(phase==="final_answer"||event.metadata?.section==="result")return true;
-  const nativeType=String(event.metadata?.nativeType??"");
-  if(phase||nativeType&&nativeType!=="assistant")return false;
-  const identity=eventRowIdentity(event);
-  const index=events.findIndex(candidate=>candidate===event||eventRowIdentity(candidate)===identity);if(index<0)return false;
-  const nextTerminal=events.findIndex((candidate,candidateIndex)=>candidateIndex>index&&candidate.type==="task_completed");
-  const end=nextTerminal>=0?nextTerminal:taskSettled?events.length:-1;
-  if(end<0)return false;
-  return !events.slice(index+1,end).some(candidate=>{
-    if(candidate.type!=="message_completed"||!isRootAssistantEvent(candidate,rootThreadId)||candidate.metadata?.phase)return false;
-    const candidateNativeType=String(candidate.metadata?.nativeType??"");
-    return !candidateNativeType||candidateNativeType==="assistant";
-  });
-};
+export const isFinalAssistantOutput=(event:DisplayEvent,rootThreadId:string|null|undefined,events:DisplayEvent[]=[event],taskSettled=false)=>
+  finalAssistantOutputResolver(events,rootThreadId,taskSettled)(event);
+
+// Counts code points by char code: the string iterator was the dominant cost of
+// re-estimating a long session's usage on every stream flush.
+function countOutputCharacters(value:string,counts:{ascii:number;nonAscii:number}){
+  for(let index=0;index<value.length;index++){
+    const code=value.charCodeAt(index);
+    if(code<=127){counts.ascii++;continue;}
+    counts.nonAscii++;
+    if(code>=0xd800&&code<=0xdbff){const next=value.charCodeAt(index+1);if(next>=0xdc00&&next<=0xdfff)index++;}
+  }
+  return counts;
+}
+const estimateFromCounts=(counts:{ascii:number;nonAscii:number})=>Math.max(1,Math.round(counts.ascii/4+counts.nonAscii*.8));
 
 export function estimateOutputTokens(value:string){
-  let ascii=0,nonAscii=0;
-  for(const character of value){
-    if((character.codePointAt(0)??0)>127)nonAscii++;
-    else ascii++;
-  }
-  return value.trim()?Math.max(1,Math.round(ascii/4+nonAscii*.8)):0;
+  return value.trim()?estimateFromCounts(countOutputCharacters(value,{ascii:0,nonAscii:0})):0;
 }
 
 // Claude readings are per-request running totals, while current Codex workers
@@ -345,11 +380,14 @@ export function summarizeTurnOutputUsage(events:DisplayEvent[],rootThreadId:stri
     return{tokens:hasTotal?committedTotal:committedOutput,exact:true,inputTokens:hasTotal&&inputSeen?committedInput:null,outputTokens:committedOutput,cachedInputTokens:cachedSeen?committedCached:null,cacheWriteInputTokens:cacheWriteSeen?committedCacheWrite:null,reasoningTokens:committedReasoning>0?committedReasoning:null,requestCount,updatedAt};
   }
 
-  const text=events
-    .filter(event=>isRootAssistantEvent(event,rootThreadId))
-    .map(event=>event.content)
-    .join("");
-  const estimated=estimateOutputTokens(text);
+  const counts={ascii:0,nonAscii:0};let hasText=false;
+  for(const event of events){
+    if(!isRootAssistantEvent(event,rootThreadId))continue;
+    const content=event.content??"";
+    countOutputCharacters(content,counts);
+    if(!hasText&&content.trim())hasText=true;
+  }
+  const estimated=hasText?estimateFromCounts(counts):0;
   return estimated?{tokens:estimated,exact:false,inputTokens:null,outputTokens:estimated,cachedInputTokens:null,cacheWriteInputTokens:null,reasoningTokens:null,requestCount:null,updatedAt:null}:null;
 }
 
@@ -411,13 +449,17 @@ const latestRootTurnEvent=(events:AgentEvent[],rootThreadId:string|null)=>{
   }
   return null;
 };
-const sameCompletedOutput=(left:DisplayEvent,right:AgentEvent)=>{
-  if(!isAssistant(left)||!isAssistant(right)||left.content.trim()!==right.content.trim())return false;
+const sameCompletedOutput=(left:DisplayEvent,right:AgentEvent,rightContent=right.content.trim())=>{
+  // Trimming only shrinks a string, so a shorter row can never match. This
+  // rejects most rows of a long session without allocating a trimmed copy.
+  if(!isAssistant(left)||!isAssistant(right)||left.content.length<rightContent.length||left.content.trim()!==rightContent)return false;
   return (hasEventScope(left)||hasEventScope(right))&&sameEventScope(left,right);
 };
 const adjacentCompletedOutput=(left:DisplayEvent|undefined,right:AgentEvent)=>Boolean(left&&isAssistant(left)&&isAssistant(right)&&left.content.trim()===right.content.trim()&&sameEventScope(left,right));
 const completedOutputIndex=(rows:DisplayEvent[],event:AgentEvent)=>{
-  for(let index=rows.length-1;index>=0;index--)if(sameCompletedOutput(rows[index],event))return index;
+  if(!isAssistant(event))return -1;
+  const content=event.content.trim();
+  for(let index=rows.length-1;index>=0;index--)if(sameCompletedOutput(rows[index],event,content))return index;
   return -1;
 };
 const sameFinalTurn=(left:AgentEvent,right:AgentEvent)=>{
@@ -508,7 +550,9 @@ export function displayEvents(raw: AgentEvent[], request = "", busy = false, roo
       :event;
     if(isRootUserEvent(visibleEvent,rootThreadId)&&output.some(row=>isRootUserEvent(row,rootThreadId)&&row.content.trim()===visibleEvent.content.trim()&&sameEventScope(row,visibleEvent)))continue;
     const last = output.at(-1);
-    if (last && last.type === visibleEvent.type && last.content === visibleEvent.content && sameEventScope(last,visibleEvent) && !["file_change_started", "file_change_completed"].includes(visibleEvent.type)) continue;
+    // Two agents may receive the same instruction in one parent turn. Their
+    // lifecycle rows can have identical text while naming different children.
+    if (last && last.type === visibleEvent.type && last.content === visibleEvent.content && sameEventScope(last,visibleEvent) && !isParallelAgentEvent(visibleEvent) && !["file_change_started", "file_change_completed"].includes(visibleEvent.type)) continue;
     output.push({ ...visibleEvent });
   }
   return output;
@@ -556,7 +600,8 @@ export function organizeConversation(raw: AgentEvent[], request = "", busy = fal
   if (current.length) buckets.push(current);
 
   return buckets.map((events, turnIndex) => {
-    const rootFinalArrived=events.some(event=>isFinalAssistantOutput(event,rootThreadId,events,!busy));
+    const isFinal=finalAssistantOutputResolver(events,rootThreadId,!busy);
+    const rootFinalArrived=events.some(isFinal);
     const active = busy && turnIndex === buckets.length - 1 && !rootFinalArrived;
     // Child-agent messages and root commentary stay in the process collection.
     // The process fold is open while a turn is active and collapses when it
@@ -564,7 +609,7 @@ export function organizeConversation(raw: AgentEvent[], request = "", busy = fal
     // area. Promoting every root commentary row made live sessions accumulate
     // work-in-progress output alongside (and sometimes below) the final answer.
     const assistants = events.map((event, index) => ({ event, index })).filter(({ event }) => isRootAssistantEvent(event,rootThreadId));
-    const explicitFinal = [...assistants].reverse().find(({ event }) => isFinalAssistantOutput(event,rootThreadId,events,!busy));
+    const explicitFinal = [...assistants].reverse().find(({ event }) => isFinal(event));
     const finalAssistant = explicitFinal ?? (!active ? assistants.at(-1) : undefined);
     // Codex emits token usage, quota, diff and idle notifications after the
     // final answer but before task_completed. They are useful while live, yet

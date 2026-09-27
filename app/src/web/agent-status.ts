@@ -21,6 +21,10 @@ const activeStatuses=new Set(["pending","queued","running","waiting"]);
 const collaborationProviders:AgentProvider[]=["codex","claude","grok","antigravity","deepseek","ollama"];
 
 export function activeAgentStatus(recent:AgentRecentStatus|null|undefined){return Boolean(recent&&activeStatuses.has(recent.status));}
+export function terminalEventSuperseded(recent:AgentRecentStatus,terminalAt:string|null|undefined){
+  const current=Date.parse(recent.updatedAt),terminal=Date.parse(terminalAt??"");
+  return activeStatuses.has(recent.status)&&Number.isFinite(current)&&Number.isFinite(terminal)&&current>terminal;
+}
 export function prioritizeCollaborationStatus(collaboration:AgentRecentStatus|null|undefined,fallback:AgentRecentStatus|null){
   if(activeAgentStatus(collaboration))return collaboration??null;
   if(activeAgentStatus(fallback))return fallback;

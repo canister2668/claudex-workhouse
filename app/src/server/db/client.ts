@@ -217,6 +217,9 @@ export class DeckDatabase {
   }
   listPushTasks(taskIds:string[]=[]){return this.request<Array<Pick<DeckTask,"id"|"provider"|"status"|"executionHostId"|"updatedAt">>>("list_push_tasks",{taskIds:taskIds.slice(0,1000)});}
   listProviderTasks(provider: string, limit = 5000) { return this.request<DeckTask[]>("list_provider_tasks", { provider, limit }); }
+  // One session's rows via tasks_thread_idx. A full provider listing carries
+  // every prompt/result/log and can outlast the request timeout on its own.
+  listThreadTasks(provider:string,threadId:string){return this.request<DeckTask[]>("list_provider_tasks",{provider,threadId});}
   listProviderTaskLinksByThreads(provider:string,threadIds:string[]){return this.request<any[]>("list_provider_task_links_by_threads",{provider,threadIds:threadIds.slice(0,100)});}
   // Rows updated after `since`, for callers that keep their own snapshot and
   // only need the delta. Pair with listProviderTaskIds to notice deletions.
@@ -225,6 +228,7 @@ export class DeckDatabase {
   listProviderTaskRefreshRows(provider:string){return this.request<DeckTask[]>("list_provider_task_refresh_rows",{provider});}
   listActiveTasks() { return this.request<DeckTask[]>("list_active_tasks"); }
   getTask(id: string) { return this.request<DeckTask | null>("get_task", { id }); }
+  getManagedTaskByReference(reference:string,executionHostId:string,workspaceId:string){return this.request<DeckTask|null>("get_managed_task_by_reference",{reference,executionHostId,workspaceId});}
   getNativeTask(provider: string, nativeId: string) { return this.request<DeckTask | null>("get_native_task", { provider, nativeId }); }
   upsertTask(task: DeckTask) { return this.request<DeckTask>("upsert_task", { task:sanitizeTaskForPersistence(task) }); }
   deleteExternalTaskMirror(provider:string,id:string,threadId:string){return this.request<boolean>("delete_external_task_mirror",{provider,id,threadId});}

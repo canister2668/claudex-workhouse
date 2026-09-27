@@ -7,6 +7,7 @@ const windowsTestWorkflow=fs.readFileSync(path.resolve("..",".github","workflows
 const windowsLaunchTest=fs.readFileSync(path.resolve("scripts","test-windows-server-package.ps1"),"utf8");
 const windowsPackager=fs.readFileSync(path.resolve("scripts","package-windows-server.mjs"),"utf8");
 const windowsLauncher=fs.readFileSync(path.resolve("..","launcher","windows","src","main.cpp"),"utf8");
+const windowsPortableUpdater=fs.readFileSync(path.resolve("src","server","windows","portable-updater.ts"),"utf8");
 const npmWorkflow=fs.readFileSync(path.resolve("..",".github","workflows","publish-npm.yml"),"utf8");
 
 describe("release workflow Windows exclusion",()=>{
@@ -124,7 +125,7 @@ describe("unsigned Windows test build workflow contract",()=>{
   });
 
   it("launches both Windows packages and verifies health, commit identity, extraction, and shutdown",()=>{
-    for(const value of["Test-InstallerWizard","Test-InstalledIntegration","Save-WindowScreenshot","CopyFromScreen","installed shortcut target","installed-guide waiting","listenerPid=","Get-NetTCPConnection","Claudex Workhouse 서버","MainWindowHandle","MainWindowTitle","before the user selected Install","launcherArguments = @('--install')","--install-root=","--uninstall', '--quiet","longInstallRoot","LegacyAclFixture","legacy inaccessible-ACL fixture reproduced","/inheritance:r","Claudex Workhouse.lnk","UninstallString","single-exe","Test-PortableDirectStart","portable direct-start test passed","opened the installation wizard","copied its payload into the AppData install root","registered itself in Windows Installed apps","/api/health/live","/api/health/ready","/api/about","commitSha","current.json","Wait-ServerStopped","Stop-TestInstalledServer","ServerPid","TcpClient","AddMinutes(5)","installedPayload=","windows-launcher-error.log"])expect(windowsLaunchTest).toContain(value);
+    for(const value of["Test-InstallerWizard","Test-InstalledIntegration","Assert-PortablePayloadManifest","missing after ZIP extraction","hash differs after ZIP extraction","file count differs after ZIP extraction","Save-WindowScreenshot","CopyFromScreen","installed shortcut target","installed-guide waiting","listenerPid=","Get-NetTCPConnection","Claudex Workhouse 서버","MainWindowHandle","MainWindowTitle","before the user selected Install","launcherArguments = @('--install')","--install-root=","--uninstall', '--quiet","longInstallRoot","LegacyAclFixture","legacy inaccessible-ACL fixture reproduced","/inheritance:r","Claudex Workhouse.lnk","UninstallString","single-exe","Test-PortableDirectStart","portable direct-start test passed","opened the installation wizard","copied its payload into the AppData install root","registered itself in Windows Installed apps","/api/health/live","/api/health/ready","/api/about","commitSha","current.json","Wait-ServerStopped","Stop-TestInstalledServer","ServerPid","TcpClient","AddMinutes(5)","installedPayload=","windows-launcher-error.log"])expect(windowsLaunchTest).toContain(value);
     expect(windowsLaunchTest.match(/-NoProxy/g)).toHaveLength(8);
   });
 
@@ -153,6 +154,20 @@ describe("unsigned Windows test build workflow contract",()=>{
   it("bootstraps a fresh Windows data root without overwriting existing configuration",()=>{
     for(const value of["path.dirname(appDirectory)","claudex-workhouse.json","projects.json",'flag:"wx"',"repairLegacyAcl","protectedConfigs","fs.readFileSync(file)",'repair(file,"F")',"CLAUDEX_WORKHOUSE_APP_ROOT=appRoot"])expect(windowsPackager).toContain(value);
     expect(windowsPackager).not.toContain("fs.accessSync(config,fs.constants.R_OK)");
+  });
+
+  it("ships the provider emotion hook that packaged workers execute",()=>{
+    expect(windowsPackager).toContain('copy(path.join(repoRoot,"hooks","emotion"),path.join(payloadRoot,"hooks","emotion"))');
+    expect(windowsPackager.indexOf('path.join(payloadRoot,"hooks","emotion")')).toBeLessThan(windowsPackager.indexOf("buildWindowsPayloadManifest(payloadRoot,version)"));
+  });
+
+  it("switches Windows updates with a versioned payload manifest and version-aware health",()=>{
+    for(const value of["payload-manifests","payloadManifest:versionedManifest","fs.writeFileSync(path.join(packageRoot,...versionedManifest.split(\"/\")),manifestBody)"]){
+      expect(windowsPackager).toContain(value);
+    }
+    for(const value of["targetManifest=path.join(root,\"payload-manifests\"","atomic(targetManifest,payloadManifestBody)","healthy(request.targetVersion)","healthy(request.sourceVersion)"]){
+      expect(windowsPortableUpdater).toContain(value);
+    }
   });
 
   it("hashes embedded files while writing without a redundant full readback",()=>{

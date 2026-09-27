@@ -1,3 +1,4 @@
+import { persistAsyncUserInput } from "./async-user-input.js";
 import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
@@ -136,6 +137,11 @@ function appendNotification(message: {method:string;params?:any}) {
   }
   if (message.method === "item/started" || message.method === "item/completed") {
     const completed=message.method === "item/completed";
+    if(completed&&p.item?.type==="agentMessage"&&p.item.delivery==="async"&&Array.isArray(p.item.questions)&&p.item.questions.length){
+      const input=persistAsyncUserInput(root,{id:taskId,provider:"codex",threadId:eventThreadId},{id:p.item.id,questions:p.item.questions,turnId:p.turnId??turnId??undefined});
+      spool.append({...base,type:"user_input_required",content:input.questions.map(q=>q.question).join(" · "),metadata:{...base.metadata,requestId:input.id,questions:input.questions,delivery:"async",expiresAt:input.expiresAt}});
+      return;
+    }
     if(!completed){const emotion=codexEmotionForItem(p.item);if(emotion)updateWorkerEmotion(root,"codex",emotion,threadId);}
     if(completed&&isRoot&&p.item?.type==="agentMessage"&&typeof p.item.text==="string"&&p.item.text.trim()){finalAgentMessage={id:typeof p.item.id==="string"?p.item.id:null,text:p.item.text.trim()};finalAgentMessageSpooled=true;}
     if (p.item?.type === "fileChange") {
@@ -255,8 +261,12 @@ try {
   for(const directory of new Set(conversationAttachments.map(item=>path.dirname(item))))if(!runtimeWorkspaceRoots.includes(directory))runtimeWorkspaceRoots.push(directory);
   let developerInstructions=runtimeProfile==="conversation"?[conversationAttachments.length?"Claudex Workhouse conversation-only runtime: answer only the supplied conversation prompt. Do not modify files, run commands, browse, delegate work, or turn the exchange into an implementation task.":"Claudex Workhouse conversation-only runtime: answer only the supplied conversation prompt. Do not inspect or modify files, run commands, browse, delegate work, or turn the exchange into an implementation task.",conversationAttachmentInstruction(conversationAttachments),CONVERSATION_EMOTION_INSTRUCTION].filter(Boolean).join("\n\n"):`${claudexWorkhouseCollaborationInstructions(delegationSettings)}\n\n${executionPolicyTurnInstructions("codex",automationLevel,cwd)}`;
   const common = { cwd:effectiveCwd, runtimeWorkspaceRoots, model: settings.model ?? null, approvalPolicy, sandbox, config:restrictedRuntimeConfig, developerInstructions };
+  // Only the thread ID is read from this response. Without excludeTurns the
+  // app-server returns the whole history on one JSON line, and a thread that
+  // accumulated generated images exceeds the maximum JS string length, which
+  // killed the worker before the turn could start.
   const response = mode === "resume" || mode === "compact"
-    ? await client.request("thread/resume", { threadId: sourceThreadId, ...common }, 30000)
+    ? await client.request("thread/resume", { threadId: sourceThreadId, ...common, excludeTurns: true }, 30000)
     : await client.request("thread/start", { ...common, serviceTier: settings.serviceTier ?? null, ephemeral: false, experimentalRawEvents: false }, 30000);
   threadId = response.thread?.id;
   if (!threadId) throw new Error("Codex app-server returned no thread ID.");
@@ -271,7 +281,7 @@ try {
       }
       if (mode!=="compact"&&message.method === "turn/completed" && message.params?.threadId === threadId && (!turnId || message.params.turn?.id === turnId)) resolve(message.params.turn);
       if(mode==="compact"&&message.params?.threadId===threadId&&((message.method==="item/completed"&&message.params?.item?.type==="contextCompaction")||message.method==="thread/compacted"))resolve({status:"completed"});
-      if (message.method === "error" && message.params?.threadId === threadId) reject(new Error(message.params.error?.message ?? "Codex turn failed."));
+      if (message.method === "error" && message.params?.threadId === threadId && !message.params?.willRetry) reject(new Error(message.params.error?.message ?? "Codex turn failed."));
     };
   });
   if(mode==="compact"){
@@ -297,7 +307,7 @@ try {
   turnId = turn.turn?.id ?? turnId;
   write({ turnId, status: "running",activity:"model_thinking",modelTurnStarted:true });
   const finalTurn = turn.turn?.status && turn.turn.status !== "inProgress" ? turn.turn : await completion;
-  if(Array.isArray(finalTurn?.items)){const item=[...finalTurn.items].reverse().find((value:any)=>value?.type==="agentMessage"&&typeof value.text==="string"&&value.text.trim());if(item){const recovered={id:typeof item.id==="string"?item.id:null,text:item.text.trim()},previous=finalAgentMessage as {id:string|null;text:string}|null;if(!previous||previous.text!==recovered.text){finalAgentMessage=recovered;finalAgentMessageSpooled=false;}else if(!previous.id&&recovered.id)finalAgentMessage=recovered;}}
+  if(Array.isArray(finalTurn?.items)){const item=[...finalTurn.items].reverse().find((value:any)=>value?.type==="agentMessage"&&value.delivery!=="async"&&typeof value.text==="string"&&value.text.trim());if(item){const recovered={id:typeof item.id==="string"?item.id:null,text:item.text.trim()},previous=finalAgentMessage as {id:string|null;text:string}|null;if(!previous||previous.text!==recovered.text){finalAgentMessage=recovered;finalAgentMessageSpooled=false;}else if(!previous.id&&recovered.id)finalAgentMessage=recovered;}}
   const completed=finalTurn?.status === "completed";
   if(completed&&finalAgentMessage&&!finalAgentMessageSpooled){spool.append({type:"message_completed",content:finalAgentMessage.text,threadId,turnId,itemId:finalAgentMessage.id,metadata:{role:"agent",phase:"final_answer",recoveredFromCompletedTurn:true}});finalAgentMessageSpooled=true;}
   finished = true;

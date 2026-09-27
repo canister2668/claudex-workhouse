@@ -98,6 +98,7 @@ export function providerThreadEvents(turns:Array<{task:DeckTask;events:AgentEven
   const cardEvent=(event:AgentEvent)=>event.type==="message"&&event.metadata?.role==="user"
     ||event.type==="message_completed"
     ||event.type==="message_delta"&&!completedCalls.has(`${eventTask(event)}:${outputCall(event)}`)
+    ||["agent_started","agent_progress","agent_completed","agent_failed"].includes(event.type)
     ||event.type==="context_compaction"
     ||event.type==="error"||event.type==="task_failed"||event.type==="task_stopped"
     ||event.metadata?.mediaKind==="image";
@@ -113,11 +114,23 @@ export function providerThreadEvents(turns:Array<{task:DeckTask;events:AgentEven
   return result.filter((_event,index)=>essential.has(index));
 }
 
+export function completedThreadTurnEvents(task:DeckTask,events:AgentEvent[]){
+  const finalAssistant=(event:AgentEvent)=>{
+    const phase=String(event.metadata?.phase??"").toLowerCase(),section=String(event.metadata?.section??"").toLowerCase();
+    return event.type==="message_completed"&&phase==="final_answer"
+      ||event.type==="message"&&event.metadata?.role==="agent"&&(phase==="final_answer"||section==="result");
+  };
+  const assistantMessage=(event:AgentEvent)=>event.type==="message_delta"||event.type==="message_completed"||event.type==="message"&&event.metadata?.role==="agent";
+  const compact=events.filter(event=>!assistantMessage(event)||finalAssistant(event));
+  if(compact.some(finalAssistant)||!task.result?.trim())return compact;
+  return[...compact,normalizeAgentEvent({type:"message",content:task.result,status:task.status,timestamp:task.updatedAt,metadata:{role:"agent",section:"result"}},task.provider)];
+}
+
 export function codexTurnEvents(turns: any[], cwd?: string | null,imageContext?:{root:string;taskId:string;threadId:string|null}): AgentEvent[] {
   const events:AgentEvent[]=[];
   for(const turn of [...turns].reverse())for(const item of turn.items??[]){
     if(item.type==="userMessage")events.push(normalizeAgentEvent({type:"message",content:(item.content??[]).map((part:any)=>part.text??"").filter(Boolean).join("\n"),status:turn.status,metadata:{role:"user",turnId:turn.id,itemId:item.id}},"codex"));
-    else if(item.type==="agentMessage")events.push(normalizeAgentEvent({type:"message_completed",content:item.text??"",status:turn.status,metadata:{role:"agent",phase:item.phase,turnId:turn.id,itemId:item.id}},"codex"));
+    else if(item.type==="agentMessage")events.push(normalizeAgentEvent({type:"message_completed",content:item.text??"",status:turn.status,metadata:{role:"agent",phase:item.phase,delivery:item.delivery,questions:item.questions,turnId:turn.id,itemId:item.id}},"codex"));
     else if(item.type==="commandExecution"){const exitCode=Number.isFinite(item.exitCode)?Number(item.exitCode):null,ok=exitCode!==null?exitCode===0:item.status==="completed"?true:item.status==="failed"?false:null;events.push(normalizeAgentEvent({type:"command_completed",content:item.aggregatedOutput??item.command??"",status:item.status,metadata:{command:item.command,exitCode,ok,source:"provider",turnId:turn.id,itemId:item.id}},"codex"));}
     else if(item.type==="fileChange")for(const change of Array.isArray(item.changes)?item.changes:[]){const d=normalizeCodexChange(change,cwd);events.push(normalizeAgentEvent({type:"file_change_started",content:d.text,status:item.status,metadata:{path:d.path,pathBase:d.pathBase,tool:"codex",additions:d.additions,deletions:d.deletions,kind:d.kind,turnId:turn.id,itemId:item.id}},"codex"));}
     else if(item.type==="mcpToolCall")events.push(normalizeAgentEvent({type:"mcp_tool_result",content:item.error?.message??JSON.stringify(item.result??item.arguments??{}),status:item.status,serverName:item.server,toolName:item.tool,metadata:{turnId:turn.id,itemId:item.id}},"codex"));

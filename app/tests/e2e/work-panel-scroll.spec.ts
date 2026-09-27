@@ -73,12 +73,12 @@ test("work panel follows conversation scrolling while its own scroll stays isola
   await expect(badge).toBeVisible();
   const [drawerBox,navBox,composerBox]=await Promise.all([
     drawer.boundingBox(),
-    page.locator(".primary-nav").boundingBox(),
+    ((page.viewportSize()?.width??0)<=760?page.locator(".primary-nav"):page.locator(".app-sidebar")).boundingBox(),
     page.locator(".composer").boundingBox()
   ]);
   expect(drawerBox!.y+drawerBox!.height).toBeLessThanOrEqual(composerBox!.y);
   if((page.viewportSize()?.width??0)<=760)expect(composerBox!.y+composerBox!.height).toBeLessThanOrEqual(navBox!.y);
-  else expect(navBox!.y+navBox!.height).toBeLessThanOrEqual(drawerBox!.y);
+  else expect(navBox!.x+navBox!.width).toBeLessThanOrEqual(drawerBox!.x);
 
   const conversation=page.locator(".conversation"),heading=page.locator(".task-heading"),composer=page.locator(".composer");
   await expect.poll(()=>conversation.evaluate(element=>element.scrollHeight-element.clientHeight)).toBeGreaterThan(300);

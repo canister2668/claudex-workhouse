@@ -20,11 +20,18 @@
   } from "@lucide/svelte";
   import { mergePairingStatus } from "./pairing-state";
   import { formatDateTime, locale, t } from "./i18n";
+  import AccessActivity from "./AccessActivity.svelte";
   import ExternalAccessWizard from "./ExternalAccessWizard.svelte";
+  import ExternalParticipantSettings from "./ExternalParticipantSettings.svelte";
 
   export let api:(path:string,init?:RequestInit)=>Promise<any>;
   export let onopenworkspace:()=>void=()=>{};
   export let onopensettings:(section:string)=>void=()=>{};
+  // The access log, participant folder, and external-access wizard have their
+  // own settings pages; the host page hides them and renders only devices.
+  export let showAccessActivity=true;
+  export let showParticipants=true;
+  export let showExternalAccess=true;
 
   type HostRole="main-server"|"worker";
   type ConnectionStatus="online"|"offline"|"connecting"|"unknown"|"disabled";
@@ -642,6 +649,8 @@
 </script>
 
 <section class="infrastructure-settings" aria-labelledby="infrastructure-title">
+  {#if showAccessActivity}<AccessActivity {api}/>{/if}
+  {#if showParticipants}<ExternalParticipantSettings {api}/>{/if}
   <div class="section-heading">
     <span>
       <h3 id="infrastructure-title">{$t("infrastructure.title")}</h3>
@@ -678,7 +687,7 @@
     <p class="empty-small">{$t("infrastructure.serverUnavailable")}</p>
   {/if}
 
-  <ExternalAccessWizard {api}/>
+  {#if showExternalAccess}<ExternalAccessWizard {api}/>{/if}
 
 
   <div class="section-heading devices-heading">

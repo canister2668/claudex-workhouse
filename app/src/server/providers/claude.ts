@@ -14,6 +14,7 @@ import { localizedTaskSuffix, normalizeStoredLocale } from "../ui-locale.js";
 import {resolveExecutionPolicy} from "../execution-policy.js";
 import { resolveTranscriptFile } from "../claude-transcript.js";
 import { streamFile } from "../stream-events.js";
+import { readStreamEvents, staleClaudeTerminalSequences } from "../stream-events.js";
 import {CLAUDE_FALLBACK_MODELS} from "../claude-model-catalog.js";
 import {normalizeClaudeExecutionSettings} from "../claude-execution-settings.js";
 import { ProviderTaskSnapshotCache } from "../provider-task-snapshot.js";
@@ -89,11 +90,13 @@ export class ClaudeProvider implements AgentProvider {
   private async refresh(task: DeckTask): Promise<DeckTask> {
     const stateFile=this.stateFile(task.id);let stat:fs.Stats;
     try{stat=fs.statSync(stateFile);}catch{return task;}
+    const prematureTerminal=this.processMatches(task)&&staleClaudeTerminalSequences(readStreamEvents(this.config.dataRoot,task.id).events).size>0;
     const signature={dev:stat.dev,ino:stat.ino,size:stat.size,mtimeMs:stat.mtimeMs},previous=this.workerStateSignatures.get(task.id),same=Boolean(previous&&previous.dev===signature.dev&&previous.ino===signature.ino&&previous.size===signature.size&&previous.mtimeMs===signature.mtimeMs),active=["pending","queued","running","waiting","unknown"].includes(task.status);
-    if(same&&(!active||this.processMatches(task)))return task;
+    if(same&&!prematureTerminal&&(!active||this.processMatches(task)))return task;
     this.workerStateSignatures.set(task.id,signature);
     let state:any;try{state=JSON.parse(fs.readFileSync(stateFile,"utf8"));}catch{return task;}
     const merged:DeckTask={ ...task, threadId: state.sessionId ?? task.threadId, providerSessionId:state.sessionId??task.providerSessionId??task.threadId, status: state.status as UnifiedStatus, updatedAt: state.updatedAt ?? task.updatedAt, result: state.result ?? task.result, error: state.error ?? null, log: stripAnsi(state.log ?? task.log), pid: state.pid ?? task.pid, pgid: state.pgid ?? task.pgid, processStart: state.processStart ?? task.processStart, metadata:{...task.metadata,activity:state.activity ?? task.metadata?.activity,contextUsage:state.contextUsage??task.metadata?.contextUsage,outputUsage:state.outputUsage??task.metadata?.outputUsage,contextCapabilities:state.contextCapabilities??task.metadata?.contextCapabilities} };
+    if(prematureTerminal&&merged.status==="completed"){merged.status="running";merged.result=null;merged.error=null;}
     if(["pending","queued","running","waiting"].includes(merged.status)&&!this.processMatches(merged)){
       const updatedAt=state.startedAt??state.updatedAt??task.updatedAt;merged.status="stopped";merged.updatedAt=updatedAt;
       merged.metadata={...merged.metadata,interruptionCause:"worker-process-lost",interruptionDetectedAt:new Date().toISOString()};
@@ -328,8 +331,8 @@ export class ClaudeProvider implements AgentProvider {
   async deleteSession(task:DeckTask){
     if(task.executionHostId&&task.executionHostId!=="local")throw Object.assign(new Error("Remote Claude sessions cannot be deleted from this host."),{statusCode:409});
     if(!task.threadId||!/^[0-9a-f-]{36}$/i.test(task.threadId))throw Object.assign(new Error("Claude session ID is unavailable."),{statusCode:409});
-    const linked=await this.db.listProviderTasks("claude"),members:DeckTask[]=[];
-    for(const item of linked)if(item.threadId===task.threadId)members.push(item.owned?await this.refresh(item):item);
+    const linked=await this.db.listThreadTasks("claude",task.threadId),members:DeckTask[]=[];
+    for(const item of linked)members.push(item.owned?await this.refresh(item):item);
     if(members.some(item=>["pending","queued","running","waiting","unknown"].includes(item.status)))throw Object.assign(new Error("Stop the Claude session before deleting its record."),{statusCode:409});
     const cwd=task.cwd??members.find(item=>item.cwd)?.cwd;
     if(!cwd||!path.isAbsolute(cwd))throw Object.assign(new Error("Claude session working directory is unavailable."),{statusCode:409});

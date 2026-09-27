@@ -76,6 +76,17 @@ def parse_usage(text: str):
     }
 
 
+# Claude Code 2.1.231 renders a rate-limit banner on the /usage screen instead
+# of any percentage when the account's usage endpoint is throttled. That is a
+# distinct, self-healing state: report it as such so the caller can back off
+# rather than re-probing on the short "unavailable" cadence, which is what keeps
+# the endpoint throttled in the first place.
+RATE_LIMIT_RE = re.compile(r"Usage endpoint is rate limited", re.IGNORECASE)
+
+# Spacing between in-screen retries. Only the tests shorten it.
+RETRY_SPACING_S = float(os.environ.get("CLAUDE_USAGE_RETRY_SECONDS", "6"))
+
+
 def probe(binary: str, cwd: str):
     pid, fd = pty.fork()
     if pid == 0:
@@ -116,8 +127,11 @@ def probe(binary: str, cwd: str):
     usage_sent = False
     exit_sent = False
     result = None
+    rate_limited = False
+    retries = 0
+    retry_at = 0.0
     try:
-        while time.monotonic() - started < 25:
+        while time.monotonic() - started < 60:
             readable, _, _ = select.select([fd], [], [], 0.25)
             if readable:
                 try:
@@ -159,6 +173,20 @@ def probe(binary: str, cwd: str):
                 os.write(fd, b"/usage\r")
                 usage_sent = True
 
+            if usage_sent and RATE_LIMIT_RE.search(text):
+                rate_limited = True
+                # The screen offers an in-place retry. Spend a few spaced
+                # attempts here — a single probe is far cheaper than another
+                # CLI launch — then give up and let the caller cool down.
+                if retries < 3 and time.monotonic() - retry_at > RETRY_SPACING_S:
+                    os.write(fd, b"r")
+                    retries += 1
+                    retry_at = time.monotonic()
+                    del output[:]
+                    continue
+                if time.monotonic() - retry_at > RETRY_SPACING_S:
+                    break
+
             if usage_sent:
                 candidate = parse_usage(text)
                 if candidate["ok"]:
@@ -181,7 +209,13 @@ def probe(binary: str, cwd: str):
             pass
         os.close(fd)
 
-    return result or {"ok": False, "source": "claude-cli-usage", "error": "unavailable"}
+    if result:
+        return result
+    return {
+        "ok": False,
+        "source": "claude-cli-usage",
+        "error": "rate_limited" if rate_limited else "unavailable",
+    }
 
 
 def main():

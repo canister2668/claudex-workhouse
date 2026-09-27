@@ -29,7 +29,7 @@ test("workspace instructions stay compact until their mobile panel is opened",as
   await page.goto("/");
   const more=page.getByRole("button",{name:"추가 작업",exact:true});if(await more.isVisible())await more.click();
   await page.getByRole("button",{name:"설정 열기",exact:true}).click();
-  const settings=page.getByRole("dialog",{name:"설정"});await settings.getByRole("button",{name:"작업공간",exact:true}).click();
+  const settings=page.getByRole("region",{name:"설정"});await settings.getByRole("button",{name:"작업공간·프로젝트",exact:true}).click();
   const instructionButton=settings.getByRole("button",{name:"Demo 지침"});await expect(instructionButton).toBeVisible();
   await expect(settings.locator(".instruction-panel")).toHaveCount(0);
   await instructionButton.click();

@@ -20,14 +20,28 @@ function executable(value: string): string | null {
 
 // Claudex Workhouse owns its Claude runtime. It deliberately does not inspect VS Code
 // extension directories: an editor update/removal must never break this server.
+export function claudeBinaryCandidates(configured:string,dataRoot=DATA_ROOT,platform:NodeJS.Platform=process.platform,override=env("CLAUDE_BIN")?.trim()):string[]{
+  const managedName=platform==="win32"?"claude.exe":"claude";
+  // The managed runtime under `runtime/claude-bin` is what auto-update keeps
+  // current and what the System tab reports, so it outranks `claudeBinary`.
+  // That configured path is usually an install-time leftover: one install kept
+  // running 2.1.231 from `runtime/bin/claude` for weeks while the updater had
+  // already installed 2.1.278, and nothing in the product could show the gap.
+  // An explicit `CLAUDEX_WORKHOUSE_CLAUDE_BIN` is a deliberate per-run choice
+  // and still wins, exactly as it does for Codex.
+  return [override,path.join(dataRoot,"runtime","claude-bin",managedName),configured.trim(),path.join(dataRoot,"runtime","bin",managedName),managedName].filter((value):value is string=>Boolean(value));
+}
+
 export function resolveClaudeBinary(configured: string): string {
-  const requested = env("CLAUDE_BIN")?.trim() || configured.trim();
-  const managedName=process.platform==="win32"?"claude.exe":"claude";
-  const resolved = executable(requested) || executable(path.join(DATA_ROOT, "runtime", "claude-bin", managedName)) || executable(path.join(DATA_ROOT, "runtime", "bin", managedName)) || executable(process.platform==="win32"?"claude.exe":"claude");
+  for(const candidate of claudeBinaryCandidates(configured)){
+    const resolved=executable(candidate);
+    if(resolved)return resolved;
+  }
+  const managedName=process.platform==="win32"?"claude.exe":"claude",requested=env("CLAUDE_BIN")?.trim()||configured.trim();
   // Keep the control plane bootable for the first-run installer even before a
   // runtime volume is mounted. Provider status reports unavailable and actual
   // task creation remains the authoritative failure boundary.
-  return resolved ?? (path.isAbsolute(requested) ? requested : path.resolve(DATA_ROOT,requested||path.join("runtime","claude-bin",managedName)));
+  return path.isAbsolute(requested)?requested:path.resolve(DATA_ROOT,requested||path.join("runtime","claude-bin",managedName));
 }
 
 // The emotion catalog must read the very directory the static file server
@@ -98,6 +112,8 @@ export type AppConfig = z.infer<typeof configSchema> & {
   emotionStateFile: string;
   emotionAssetsDir: string;
   emotionAssetBaseUrl: string;
+  /** Shared secret a trusted reverse proxy (nginx + oauth2-proxy) sends alongside X-Auth-Request-Email. */
+  proxyAuthSecret?: string|null;
   projects: ProjectConfig[];
 };
 
@@ -159,6 +175,14 @@ export function applyManagedTempEnvironment(config: Pick<AppConfig,"tempDir"|"ca
   process.env.pnpm_config_store_dir=path.join(config.cacheDir,"pnpm");
 }
 
+export function loadProxyAuthSecret(dataRoot:string=DATA_ROOT):string|null{
+  let value=env("PROXY_AUTH_SECRET")?.trim()??"";
+  if(!value){try{value=fs.readFileSync(path.join(dataRoot,"secrets","reverse-proxy-auth-secret"),"utf8").trim();}catch{/* Reverse-proxy identity stays disabled without a secret. */}}
+  if(!value)return null;
+  if(value.length<32)throw new Error("The reverse-proxy auth secret must contain at least 32 characters.");
+  return value;
+}
+
 function migrateLegacyEmotionState(root:string,legacyStateFile:unknown){
   if(typeof legacyStateFile!=="string"||!path.isAbsolute(legacyStateFile))return;
   const targetDir=path.join(root,"data","emotion"),legacyDir=path.dirname(legacyStateFile);
@@ -202,6 +226,7 @@ export function loadConfig(): AppConfig {
     emotionStateFile:path.join(DATA_ROOT,"data","emotion","state.json"),
     emotionAssetsDir:resolveEmotionAssetsDir(APP_ROOT),
     emotionAssetBaseUrl:new URL(raw.externalOrigin).origin,
+    proxyAuthSecret:loadProxyAuthSecret(),
     root: APP_ROOT,
     appRoot:APP_ROOT,
     dataRoot:DATA_ROOT,

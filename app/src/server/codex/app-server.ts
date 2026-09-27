@@ -1,11 +1,11 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
-import readline from "node:readline";
 import fs from "node:fs";
 import path from "node:path";
 import { redactSensitiveText } from "../events.js";
 import {EXTERNAL_MCP_BUNDLE_ENV,externalMcpForCodex,readExternalMcpBundle} from "../external-mcp-bundle.js";
 import{EMOTION_MCP_PROFILE_HEADER,EMOTION_MCP_SERVER_ID,EMOTION_MCP_TASK_HEADER,validEmotionTaskId,validatedEmotionMcpUrl}from"../emotion-mcp-policy.js";
 import{managedCodexBinary,managedCodexRuntimeState}from"../codex-runtime.js";
+import { BoundedLineReader, leadingJsonRpcId, maxAppServerLineBytes, type OversizedLine } from "./bounded-line-reader.js";
 
 type Pending = { resolve(value: any): void; reject(error: Error): void; timer: NodeJS.Timeout };
 export type AppServerNotification = { method: string; params?: any };
@@ -92,8 +92,7 @@ export class CodexAppServerClient {
     // rejected by `send`, and the child's own `exit` handler fails the rest, so
     // there is nothing further to do here beyond not crashing.
     this.child.stdin.on("error", () => {});
-    const lines = readline.createInterface({ input: this.child.stdout });
-    lines.on("line", (line) => this.handleLine(line));
+    BoundedLineReader.attach(this.child.stdout, maxAppServerLineBytes(), { onLine: (line) => this.handleLine(line), onOversized: (line) => this.handleOversizedLine(line) });
     this.child.once("exit", (code, signal) => {
       const diagnostic=this.diagnostic();
       this.failAll(new Error(`Codex app-server exited (${signal ?? code ?? "unknown"}).${diagnostic?` ${diagnostic}`:""}`));
@@ -203,6 +202,20 @@ export class CodexAppServerClient {
       return;
     }
     if (message.method) this.onNotification?.(message);
+  }
+
+  /**
+   * Fails only the request an oversized response answered. An oversized
+   * notification is dropped: the stream stays in sync because the reader
+   * resumes at the next newline.
+   */
+  private handleOversizedLine(line: OversizedLine) {
+    const id = leadingJsonRpcId(line.head), pending = id === null ? undefined : this.pending.get(id);
+    const megabytes = Math.ceil(line.bytes / (1024 * 1024));
+    this.stderr = `${this.stderr}\n[claudex-workhouse] dropped an oversized app-server message (${megabytes} MiB)${id === null ? "" : ` for request ${id}`}.`.slice(-16000);
+    if (id === null || !pending) return;
+    this.pending.delete(id); clearTimeout(pending.timer);
+    pending.reject(Object.assign(new Error(`Codex app-server response was too large to read (${megabytes} MiB).`), { code: "APP_SERVER_RESPONSE_TOO_LARGE" }));
   }
 
   private failAll(error: Error) {

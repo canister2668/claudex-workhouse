@@ -9,11 +9,16 @@ export type ClaudeModelCatalogSnapshot={models:ClaudeModelCatalogItem[];fetchedA
 const CATALOG_FRESH_MS=300_000;
 const FAILED_REFRESH_RETRY_MS=300_000;
 
+// Used only when the /model picker probe fails and no cached snapshot exists.
+// Keep it aligned with the current picker rows so a failed probe does not
+// silently hide the newest models.
 export const CLAUDE_FALLBACK_MODELS:ClaudeModelCatalogItem[]=[
   {id:"default",displayName:"Default",description:"Claude Code runtime default model",source:"runtime"},
-  {id:"claude-opus-5",displayName:"Opus 5",description:"Claude Code Opus 5",source:"runtime"},
-  {id:"claude-opus-4-8",displayName:"Opus 4.8",description:"Claude Code Opus 4.8",source:"runtime"},
-  {id:"claude-sonnet-5",displayName:"Sonnet 5",description:"Claude Code Sonnet 5",source:"runtime"}
+  {id:"claude-opus-5-5",displayName:"Opus 5.5",description:"Claude Code Opus 5.5",source:"runtime"},
+  {id:"claude-opus-5[1m]",displayName:"Opus 5 · 1M",description:"Claude Code Opus 5 with 1M context",source:"runtime"},
+  {id:"claude-fable-5-1",displayName:"Fable 5.1",description:"Claude Code Fable 5.1",source:"runtime"},
+  {id:"claude-sonnet-5",displayName:"Sonnet 5",description:"Claude Code Sonnet 5",source:"runtime"},
+  {id:"claude-haiku-4-5",displayName:"Haiku 4.5",description:"Claude Code Haiku 4.5",source:"runtime"}
 ];
 
 function runtimeOnly(models:ClaudeModelCatalogItem[]){return models.filter(item=>item.source!=="custom");}
@@ -65,8 +70,13 @@ export class ClaudeModelCatalog{
         const timer=setTimeout(()=>{child.kill("SIGTERM");finish(new Error("Claude model resolver timed out."));},30_000);timer.unref?.();
         child.stdout.setEncoding("utf8");child.stderr.setEncoding("utf8");child.stdout.on("data",chunk=>stdout=`${stdout}${chunk}`.slice(-131072));child.stderr.on("data",chunk=>stderr=`${stderr}${chunk}`.slice(-2000));child.once("error",error=>finish(new Error(sanitizeSensitiveText(error.message))));child.once("exit",code=>code===0?finish():finish(new Error(`Claude model resolver failed (${code}): ${sanitizeSensitiveText(stderr)}`)));
       });
+      // An unreadable picker row fails the probe instead of shortening the
+      // catalog, so the last good snapshot stays in place until the parser is
+      // taught the new layout.
+      if(result?.error==="picker-parse-incomplete")throw new Error(`Claude model picker layout was not fully understood (${Array.isArray(result.unmapped)?result.unmapped.length:0} unmapped rows).`);
       if(!result?.ok||!Array.isArray(result.models)||!result.models.length)throw new Error("Claude model picker was unavailable.");
       const runtime:ClaudeModelCatalogItem[]=result.models.filter((item:any)=>typeof item?.id==="string"&&typeof item?.displayName==="string").map((item:any)=>({id:item.id,displayName:item.displayName,description:typeof item.description==="string"?item.description:"",source:"runtime"}));
+      if(!runtime.some(item=>item.id!=="default"))throw new Error("Claude model picker returned no concrete models.");
       const snapshot={models:runtime,fetchedAt:new Date().toISOString(),stale:false,source:"claude-cli-model-picker"};this.memory=snapshot;await this.db.putCache("claude-model-catalog",snapshot,snapshot.fetchedAt,new Date(Date.now()+86_400_000).toISOString(),"2").catch(()=>false);return snapshot;
     }catch(error){
       const cached=this.memory??await this.readStored();if(cached){const snapshot={...cached,stale:true,source:cached.source.startsWith("fallback:")?cached.source:"cache"};this.memory=snapshot;return snapshot;}

@@ -32,7 +32,7 @@ test("empty temporary storage does not consume the remaining settings height",as
   await page.getByRole("button",{name:"설정 열기",exact:true}).click();
   const settings=page.locator(".global-settings");
   // Artifact cleanup is a sub-tab of the storage settings tab.
-  await settings.getByRole("button",{name:"저장소",exact:true}).click();
+  await settings.getByRole("button",{name:"저장소·Proton Drive",exact:true}).click();
   await settings.getByRole("button",{name:"산출물 정리",exact:true}).click();
   const cleanup=settings.locator(".cleanup"),empty=cleanup.getByText("아직 검사하지 않았습니다. 임시 세션 파일을 확인할 때만 검사를 시작하세요.",{exact:true});
   await expect(empty).toBeVisible();

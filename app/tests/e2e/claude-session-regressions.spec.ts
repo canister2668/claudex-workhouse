@@ -47,11 +47,14 @@ test("keeps Claude classification on the latest turn and restores tabs after lea
   await expect.poll(()=>claudeCard.locator(".meta").evaluate(element=>getComputedStyle(element).flexWrap)).toBe("nowrap");
   await expect(claudeCard.locator(".session-model-chip.model")).toHaveText("claude-opus-5");
   await expect(claudeCard.locator(".session-model-badges")).toContainText("중간");
-  await page.locator(".filters.sub button").filter({hasText:"완료"}).click();
+  // Status and agent filters live behind the 필터 popover; the five view tabs cover the common intents.
+  const openFilters=async()=>{const trigger=page.getByRole("button",{name:"필터",exact:true});if((await trigger.getAttribute("aria-expanded"))!=="true")await trigger.click();};
+  await openFilters();
+  await page.getByRole("group",{name:"필터"}).getByLabel("상태").selectOption("done");
   await expect(page.getByRole("button",{name:/Claude old completed/})).toHaveCount(0);
-  await page.locator(".filters.sub button").filter({hasText:"전체"}).click();
+  await page.getByRole("group",{name:"필터"}).getByLabel("상태").selectOption("");
 
-  await page.locator(".filters").first().getByRole("button",{name:"Codex",exact:true}).click();
+  await page.getByRole("navigation",{name:"엔진 필터"}).getByRole("button",{name:"Codex",exact:true}).click();
   const codexCard=page.getByRole("button",{name:/Codex detail fixture/});
   const codexList=page.locator(".session-list.session-browser-list");
   await expect(codexList).toBeVisible();
@@ -72,7 +75,8 @@ test("keeps Claude classification on the latest turn and restores tabs after lea
   await page.locator(".agent-avatar-slot.claude .recent-session-list.active-list button").click();
   await page.locator(".brand-back").click();
   await expect(page.getByRole("navigation",{name:"엔진 필터"})).toBeVisible();
-  await expect(page.locator(".filters").first().getByRole("button",{name:"Claude",exact:true})).toBeVisible();
+  await openFilters();
+  await expect(page.getByRole("navigation",{name:"엔진 필터"}).getByRole("button",{name:"Claude",exact:true})).toBeVisible();
   expect(pageErrors).toEqual([]);
 });
 

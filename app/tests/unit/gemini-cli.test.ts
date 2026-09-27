@@ -2,7 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import {afterAll,describe,expect,it} from "vitest";
-import {classifyGeminiCliError,geminiApprovalMode,geminiCliArguments,geminiCliExitFailure,geminiShellAvailable,resolveGeminiCliEntry,resolveGeminiSessionFile,ripgrepAvailable} from "../../src/server/gemini-cli-runtime";
+import {classifyGeminiCliError,geminiApprovalMode,geminiCliArguments,geminiCliExitFailure,geminiCliResultFailure,geminiShellAvailable,resolveGeminiCliEntry,resolveGeminiSessionFile,ripgrepAvailable} from "../../src/server/gemini-cli-runtime";
 import {geminiContextUsage,geminiModelBreakdown,geminiOutputUsage,geminiToolEndEvent,geminiToolShape,geminiToolStartEvent,geminiToolSummary,geminiUsage} from "../../src/server/gemini-cli-events";
 
 /**
@@ -124,6 +124,10 @@ describe("Gemini CLI failures",()=>{
     expect(classifyGeminiCliError("Vertex AI API has not been used in project 12 before").code).toBe("VERTEX_API_DISABLED");
     expect(classifyGeminiCliError("RESOURCE_EXHAUSTED: quota exceeded").code).toBe("VERTEX_QUOTA_EXHAUSTED");
     expect(classifyGeminiCliError("something odd happened").code).toBe("GEMINI_CLI_FAILED");
+  });
+  it("recovers a concrete provider failure from stderr when the result message is empty",()=>{
+    expect(geminiCliResultFailure(undefined,"Attempt 1 failed with status 429: RESOURCE_EXHAUSTED")).toEqual({code:"VERTEX_QUOTA_EXHAUSTED",message:"Vertex AI is rate limiting or has exhausted quota for this project."});
+    expect(geminiCliResultFailure(undefined,"terminal warning only")).toEqual({code:"GEMINI_CLI_FAILED",message:"Gemini CLI failed without a message."});
   });
 });
 

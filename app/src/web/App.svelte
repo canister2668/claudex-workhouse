@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Activity, ArrowRightLeft, Bot, EllipsisVertical, FileText, GitBranch, GitPullRequest, Check, ChevronDown, ChevronLeft, ChevronUp, CircleAlert, Clipboard, Clock3, CloudOff, Gauge, Globe, House, KanbanSquare, Link2, LoaderCircle, MessagesSquare, MonitorSmartphone, Pencil, Plus, RefreshCw, Search, Send, Settings, Square, SquareTerminal, Trash2, X, Zap } from "@lucide/svelte";
+  import { Activity, ArrowRightLeft, Bot, EllipsisVertical, FileText, GitBranch, GitPullRequest, Check, ChevronDown, ChevronLeft, ChevronUp, CircleAlert, Clipboard, Clock3, CloudOff, Gauge, Globe, House, KanbanSquare, Link2, LoaderCircle, MessagesSquare, Pencil, Plus, RefreshCw, Search, Send, Settings, SlidersHorizontal, Square, SquareTerminal, Trash2, X, Zap } from "@lucide/svelte";
   import { onDestroy, onMount, tick } from "svelte";
   import { type AgentEvent } from "./events";
   import { pageBlock } from "./pager";
@@ -27,18 +27,15 @@
   import SessionSettingsFields from "./SessionSettingsFields.svelte";
   import { currentViewportBand, defaultSessionHeadingCollapsed, installKeyboardInset, popoverPlacement } from "./mobile-viewport";
   import { dismissOnOutside } from "./outside-dismiss";
-  import { dragScrollX } from "./drag-scroll";
   import { applyChromePhase, bottomChromeProgress, chromeCollapse, chromeSlide, chromeVisible, configureImmersiveChrome, immersiveChromeEnabled, revealImmersiveChrome, IMMERSIVE_END_HEADING_MIN_HEIGHT, setChromeBlocking, updateChromeDistance } from "./immersive-chrome";
   import { shouldAutoFoldSessionChrome } from "./scroll-navigation";
-  import { AVATAR_COLLAPSE_DELAYS, AVATAR_TRAY_SHAPES, normalizeAvatarCollapseDelay, readAvatarTrayShape, writeAvatarTrayShape, type AvatarTrayShape } from "./avatar-notice";
+  import { normalizeAvatarCollapseDelay, readAvatarTrayShape, writeAvatarTrayShape, type AvatarTrayShape } from "./avatar-notice";
   import InfrastructureSettings from "./InfrastructureSettings.svelte";
-  import ArtifactSettings from "./ArtifactSettings.svelte";
+  import ClaudeCloudSessions from "./ClaudeCloudSessions.svelte";
   import ProjectWorkspaceSettings from "./ProjectWorkspaceSettings.svelte";
   import WorkspaceViewer from "./WorkspaceViewer.svelte";
   import type { WorkspaceViewerLayoutState } from "./workspace-viewer-layout";
   import GitSettings from "./GitSettings.svelte";
-  import ProtonDriveSettings from "./ProtonDriveSettings.svelte";
-  import SnapshotSettings from "./SnapshotSettings.svelte";
   import McpServerSettings from "./McpServerSettings.svelte";
   import AboutLicenses from "./AboutLicenses.svelte";
   import HandoffDialog from "./HandoffDialog.svelte";
@@ -52,7 +49,7 @@
   import OwnerClaim from "./OwnerClaim.svelte";
   import ContextMeter from "./ContextMeter.svelte";
   import { latestContextUsage, type ContextUsage } from "./context-usage";
-  import { quotaIsStale, quotaNeedsRetry, quotaRetryDelay } from "./quota-retry";
+  import { quotaForProviderModel, quotaIsStale, quotaNeedsRetry, quotaRetryDelay } from "./quota-retry";
   import WorkModeChips from "./WorkModeChips.svelte";
   import { permissionForWorkMode, workModeOf, type WorkMode } from "./work-mode";
   import AutomationLevelChips from "./AutomationLevelChips.svelte";
@@ -91,15 +88,34 @@
   import HistorySearchResults from "./HistorySearchResults.svelte";
   import { sharedTaskPrompt } from "./share-target";
   import PullRequestDialog from "./PullRequestDialog.svelte";
-  import { PALETTES, SKINS, TEXT_SIZES, normalizePalette, normalizeSkin, normalizeTextSize, type Palette, type Skin, type TextSize } from "./ui-theme";
+  import { normalizePalette, normalizeSkin, normalizeTextSize, type Palette, type Skin, type TextSize } from "./ui-theme";
   import { liveWorkRedesignEnabled } from "./ui-feature-flags";
   import { providerDisplayName } from "./provider-display";
+  import StatusBadge from "./ui/StatusBadge.svelte";
+  import Switch from "./ui/Switch.svelte";
+  import ModelPicker from "./ModelPicker.svelte";
+  import SettingsView from "./settings/SettingsView.svelte";
+  import GeneralDisplayPage from "./settings/GeneralDisplayPage.svelte";
+  import NotificationsPage from "./settings/NotificationsPage.svelte";
+  import ExecutionPolicyPage from "./settings/ExecutionPolicyPage.svelte";
+  import ProviderPage from "./settings/ProviderPage.svelte";
+  import StoragePage from "./settings/StoragePage.svelte";
+  import AccessSecurityPage from "./settings/AccessSecurityPage.svelte";
+  import SystemUpdatePage from "./settings/SystemUpdatePage.svelte";
+  import ExternalParticipantSettings from "./ExternalParticipantSettings.svelte";
+  import { isProviderPage, normalizeSettingsPage, providerOfPage, providerPage, type ProviderTab, type SettingsPageId } from "./settings/settings-nav";
+  import { countSettingChanges } from "./settings/settings-changes";
+  import { SETTINGS_GROUPS, settingsPageLabel } from "./settings/settings-nav";
+  import CommandPalette from "./CommandPalette.svelte";
+  import { isPaletteShortcut, type PaletteCommand } from "./command-palette";
+  import { SESSION_VIEW_TABS, groupSessions, viewTabStatusFilter, type SessionViewTab } from "./session-groups";
+  import { taskBadgeState } from "./ui/status-badge";
 
   type Status = "pending" | "queued" | "running" | "waiting" | "completed" | "failed" | "stopped" | "unknown";
   type ProviderId="codex"|"claude"|"deepseek"|"ollama"|"antigravity"|"grok";
   const conversationProviders:ProviderId[]=["codex","claude","grok","antigravity","deepseek","ollama"];
   type ConnectionAuthProvider="codex"|"claude"|"antigravity"|"grok";
-  type Task = { id:string; provider:ProviderId; nativeId:string; threadId:string|null; projectId:string; title:string; prompt?:string; status:Status; createdAt:string; updatedAt:string; result?:string|null; error?:string|null; log?:string; owned:boolean; ownership?:string|null; source?:string|null; jobId?:string|null; cwd?:string|null; requestedModel?:string|null; requestedReasoningEffort?:string|null; requestedServiceTier?:string|null; permissionProfile?:string|null; settingsUpdatedAt?:string|null; executionHostId?:string|null;workspaceId?:string|null;workChainId?:string|null;sourceSessionId?:string|null;metadata?:Record<string,any>;preview?:string;previewSource?:"result"|"error"|"log"|"prompt";listProjection?:boolean };
+  type Task = { id:string; provider:ProviderId; nativeId:string; threadId:string|null; projectId:string; title:string; prompt?:string; status:Status; createdAt:string; updatedAt:string; result?:string|null; error?:string|null; log?:string; owned:boolean; ownership?:string|null; source?:string|null; jobId?:string|null; cwd?:string|null; requestedModel?:string|null;effectiveModel?:string|null; requestedReasoningEffort?:string|null; requestedServiceTier?:string|null; permissionProfile?:string|null; settingsUpdatedAt?:string|null; executionHostId?:string|null;workspaceId?:string|null;workChainId?:string|null;sourceSessionId?:string|null;metadata?:Record<string,any>;preview?:string;previewSource?:"result"|"error"|"log"|"prompt";listProjection?:boolean };
   const isAuthProvider=(provider:ProviderId):provider is "codex"|"claude"|"grok"=>provider==="codex"||provider==="claude"||provider==="grok";
   const isConnectionAuthProvider=(provider:ProviderId):provider is ConnectionAuthProvider=>provider==="codex"||provider==="claude"||provider==="antigravity"||provider==="grok";
   type Project = { id:string; name:string; enabled:boolean; error:string|null };
@@ -140,26 +156,46 @@
   $: setChromeBlocking("claude",chromeBlocking);
   $: chromeHidden=immersiveActive&&!$chromeVisible;
   $: bottomChromeHidden=immersiveActive&&$bottomChromeProgress<=0;
-  // Below this width the brand, avatars and five actions stop fitting on one row.
-  const TOPBAR_OVERFLOW_WIDTH=760;
-  // Six provider avatars plus the utilities squeeze the nav long before the
-  // overflow width, and the labels start wrapping mid-word. Above this width the
-  // tabs keep icon+label; below it only the icon shows and the label stays as
-  // the accessible name and the tooltip.
-  const NAV_LABEL_WIDTH=1180;
-  // The phone topbar cannot hold brand, avatars and five actions at once, so the
-  // ambient utilities collapse into one overflow sheet. New task keeps its own
-  // slot at the far right: it is the only primary action up here.
+  // At and below this width the header's views give way to a bottom tab bar;
+  // the ambient utilities (usage, settings, search, refresh) and the secondary
+  // views move into one "더보기" sheet.
+  const MOBILE_NAV_WIDTH=760;
   let overflowOpen=false,overflowStyle="",overflowTrigger:HTMLButtonElement|undefined,overflowMenu:HTMLDivElement|undefined;
-  $: compactTopbar=viewportWidth<=TOPBAR_OVERFLOW_WIDTH;
-  $: navIconOnly=viewportWidth<NAV_LABEL_WIDTH&&!compactTopbar;
-  $: if(!compactTopbar&&overflowOpen)closeOverflow();
-  function placeOverflow(){
-    if(!overflowTrigger||!overflowMenu)return;
-    const band=currentViewportBand(),rect=overflowTrigger.getBoundingClientRect();
-    const width=Math.min(260,Math.max(180,band.width-16));
-    const spot=popoverPlacement({top:rect.top,bottom:rect.bottom,left:rect.right-width},{width,height:overflowMenu.scrollHeight},band);
-    overflowStyle=`left:${spot.left}px;top:${spot.top}px;width:${width}px;max-height:${spot.maxHeight}px`;
+  $: compactShell=viewportWidth<=MOBILE_NAV_WIDTH;
+  $: if(!compactShell&&overflowOpen)closeOverflow();
+  function placeSheet(trigger:HTMLElement|undefined,menu:HTMLElement|undefined,maxWidth=260){
+    if(!trigger||!menu)return"";
+    const band=currentViewportBand(),rect=trigger.getBoundingClientRect();
+    const width=Math.min(maxWidth,Math.max(180,band.width-16));
+    const spot=popoverPlacement({top:rect.top,bottom:rect.bottom,left:rect.right-width},{width,height:menu.scrollHeight},band);
+    return`left:${spot.left}px;top:${spot.top}px;width:${width}px;max-height:${spot.maxHeight}px`;
+  }
+  function placeOverflow(){overflowStyle=placeSheet(overflowTrigger,overflowMenu);}
+  // ⌘K / Ctrl+K command palette.
+  let paletteOpen=false;
+  function openPalette(){closeOverflow();paletteOpen=true;}
+  const paletteKey=(event:KeyboardEvent)=>{if(!isPaletteShortcut(event))return;event.preventDefault();paletteOpen=!paletteOpen;};
+  function paletteCommands():PaletteCommand[]{
+    const navigate=$t("palette.group.navigate"),newTask=$t("palette.group.newTask"),settingsGroup=$t("palette.group.settings"),recent=$t("palette.group.recent");
+    const commands:PaletteCommand[]=[
+      {id:"nav:home",group:navigate,label:$t("nav.home"),run:openOverview},
+      {id:"nav:sessions",group:navigate,label:$t("nav.sessions"),run:openSessions},
+      {id:"nav:conversation",group:navigate,label:$t("nav.conversation"),run:openConversations},
+      {id:"nav:board",group:navigate,label:$t("collaborationBoard.title"),run:()=>openCollaborationBoard()},
+    ];
+    commands.push({id:"nav:settings",group:navigate,label:$t("settings.title"),keywords:[$t("a11y.openSettings")],run:openGlobalSettings});
+    for(const provider of creatableProviders)commands.push({id:`new:${provider}`,group:newTask,label:$t("palette.newTaskWith",{name:providerDisplayName(provider)}),keywords:[provider,$t("task.create")],run:()=>void openOverviewCreate(provider as any)});
+    for(const group of SETTINGS_GROUPS)for(const page of group.pages){const label=settingsPageLabel(page,$t,providerDisplayName);commands.push({id:`settings:${page}`,group:settingsGroup,label:$t("palette.openSettingsPage",{name:label}),hint:$t(group.labelKey),keywords:[label,page],run:()=>{globalTab=page;openGlobalSettings();}});}
+    for(const task of latestThreadRows(tasks).slice().sort((a,b)=>b.updatedAt.localeCompare(a.updatedAt)).slice(0,8))commands.push({id:`task:${task.id}`,group:recent,label:task.title||$t("task.untitled"),hint:`${providerDisplayName(task.provider)} · ${ago(task.updatedAt)}`,keywords:[task.provider],run:()=>void openTask(task)});
+    return commands;
+  }
+  // Session filter popover: every filter that used to be its own row.
+  let filtersOpen=false,filtersStyle="",filtersTrigger:HTMLButtonElement|undefined,filtersMenu:HTMLDivElement|undefined;
+  function closeFilters(){if(!filtersOpen)return;filtersOpen=false;try{filtersMenu?.hidePopover();}catch{}}
+  function toggleFilters(){
+    if(filtersOpen)return closeFilters();
+    filtersOpen=true;
+    requestAnimationFrame(()=>{try{filtersMenu?.showPopover();}catch{}filtersStyle=placeSheet(filtersTrigger,filtersMenu,360);});
   }
   // The phone session actions grew past what one row can hold, and every
   // arrangement that kept them all on screen either cut a label, hid the last
@@ -278,17 +314,57 @@
     codexRef?.closeDetail();codexDetailOpen=false;
   }
   let closeOverlayView=()=>{};
+  // Whether an overlay-only view (the browser) owns the screen; shared nav
+  // markup reads this so the public build never names the overlay's state.
+  let overlayViewOpen=false;
   const resetPageScroll=()=>requestAnimationFrame(()=>window.scrollTo({top:0,left:0,behavior:"instant"}));
-  function openOverview(){exitTaskBulkMode();exitConversationBulkMode();closeCurrentDetail();engine="all";closeOverlayView();collaborationBoardOpen=false;overviewOpen=true;resetPageScroll();void refresh();}
-  function openSessions(){closeCurrentDetail();closeOverlayView();collaborationBoardOpen=false;overviewOpen=false;resetPageScroll();if(engine==="conversation")selectEngine("all");}
-  function openConversations(){closeCurrentDetail();closeOverlayView();collaborationBoardOpen=false;selectEngine("conversation");}
-  function openCollaborationBoard(card?:CollaborationBoardCard){exitTaskBulkMode();exitConversationBulkMode();closeCurrentDetail();closeOverlayView();overviewOpen=false;collaborationBoardInitialCardId=card?.id??null;collaborationBoardOpen=true;resetPageScroll();}
+  function openOverview(){if(globalOpen&&!closeGlobalSettings())return;exitTaskBulkMode();exitConversationBulkMode();closeCurrentDetail();engine="all";closeOverlayView();collaborationBoardOpen=false;overviewOpen=true;resetPageScroll();void refresh();}
+  function openSessions(){if(globalOpen&&!closeGlobalSettings())return;closeCurrentDetail();closeOverlayView();collaborationBoardOpen=false;overviewOpen=false;resetPageScroll();if(engine==="conversation")selectEngine("all");}
+  function openConversations(){if(globalOpen&&!closeGlobalSettings())return;closeCurrentDetail();closeOverlayView();collaborationBoardOpen=false;selectEngine("conversation");}
+  function openCollaborationBoard(card?:CollaborationBoardCard){if(globalOpen&&!closeGlobalSettings())return;exitTaskBulkMode();exitConversationBulkMode();closeCurrentDetail();closeOverlayView();overviewOpen=false;collaborationBoardInitialCardId=card?.id??null;collaborationBoardOpen=true;resetPageScroll();}
   async function promoteSelectedToBoard(){if(!selected)return;const source=selected;try{const card=await createBoardCard(api,{title:source.title||$t("session.untitled"),description:source.prompt??"",boardStatus:"in_progress",priority:"normal",workspaceId:source.workspaceId??null,targetBranch:"",roles:{implementer:{provider:source.provider,permissionProfile:source.permissionProfile??(source.provider==="codex"?":workspace":":workspace-write")},reviewer:{provider:source.provider==="claude"?"codex":"claude",permissionProfile:":read-only"}},sourceTaskId:source.id});openCollaborationBoard(card)}catch(error){window.alert(error instanceof Error?error.message:String(error))}}
   async function openOrPromoteSelectedBoard(){if(!selected?.workChainId)return promoteSelectedToBoard();try{openCollaborationBoard(await getBoardCard(api,selected.workChainId))}catch{await promoteSelectedToBoard()}}
   function selectEngine(value:typeof engine){closeOverlayView();overviewOpen=false;if(engine===value)return;exitTaskBulkMode();exitConversationBulkMode();if(value!=="codex"){codexRef?.closeDetail();codexDetailOpen=false;}engine=value;applyCreateDefaultsForTab(value);if(value!=="codex")void refresh();}
   const codexStatusFor=(value:typeof statusFilter):typeof codexStatus=>value==="active"?"running":value==="done"?"completed":value;
   function statusSelected(value:typeof statusFilter){return engine==="codex"?codexStatus===codexStatusFor(value):statusFilter===value;}
   function selectStatus(value:typeof statusFilter){if(engine==="codex")codexStatus=codexStatusFor(value);else statusFilter=value;}
+  // View tabs collapse the engine and status layers into five intents. The
+  // remaining filters live behind the 필터 popover and show up as chips.
+  $: currentStatus=engine==="codex"?(codexStatus==="running"?"active":codexStatus==="completed"?"done":codexStatus):statusFilter;
+  $: viewTab=(engine==="collaboration-work"?"collaboration":currentStatus==="active"?"active":currentStatus==="waiting"?"waiting":currentStatus==="failed"?"failed":"all") as SessionViewTab;
+  function selectViewTab(tab:SessionViewTab){
+    closeFilters();
+    if(tab==="collaboration"){selectEngine("collaboration-work");return;}
+    if(engine==="collaboration-work")selectEngine("all");
+    selectStatus(viewTabStatusFilter(tab));
+  }
+  type FilterChip={id:string;label:string;clear:()=>void};
+  // The arguments are unused: they only make the reactive call below re-run.
+  function activeFilterChips(..._inputs:unknown[]):FilterChip[]{
+    const chips:FilterChip[]=[];
+    if(currentStatus==="done")chips.push({id:"status",label:`${$t("sessions.filterStatus")}: ${$t("task.status.completed")}`,clear:()=>selectStatus("")});
+    if(engine==="codex"){
+      if(codexProjectFilter)chips.push({id:"project",label:`${$t("session.project")}: ${projectName(codexProjectFilter)}`,clear:()=>codexProjectFilter=""});
+      if(codexSourceFilter)chips.push({id:"source",label:`${$t("session.source")}: ${codexSourceFilter}`,clear:()=>codexSourceFilter=""});
+      if(codexOwnershipFilter)chips.push({id:"owner",label:`${$t("session.owner")}: ${codexOwnershipFilter}`,clear:()=>codexOwnershipFilter=""});
+      if(codexModelFilter)chips.push({id:"model",label:`${$t("session.model")}: ${codexModelFilter}`,clear:()=>codexModelFilter=""});
+    }else if(engine!=="conversation"&&engine!=="collaboration-work"){
+      if(hostFilter)chips.push({id:"host",label:`${$t("session.host")}: ${hostName(hostFilter)}`,clear:()=>hostFilter=""});
+      if(workspaceFilter)chips.push({id:"workspace",label:`${$t("session.workspace")}: ${workspaces.find(item=>item.id===workspaceFilter)?.displayName??workspaceFilter}`,clear:()=>workspaceFilter=""});
+      if(ownershipFilter)chips.push({id:"owner",label:`${$t("session.owner")}: ${ownershipFilter}`,clear:()=>ownershipFilter=""});
+      if(sourceFilter)chips.push({id:"source",label:`${$t("session.source")}: ${sourceFilter}`,clear:()=>sourceFilter=""});
+      if(chainFilter)chips.push({id:"chain",label:`${$t("session.workChain")}: ${chainFilter.slice(0,8)}…`,clear:()=>chainFilter=""});
+    }
+    return chips;
+  }
+  // Passing every input keeps the chips in sync; the markup used to call
+  // activeFilterChips() bare, which never re-ran, so 필터 지우기 looked broken.
+  $: filterChips=activeFilterChips(engine,currentStatus,codexProjectFilter,codexSourceFilter,codexOwnershipFilter,codexModelFilter,hostFilter,workspaceFilter,ownershipFilter,sourceFilter,chainFilter,workspaces,projects,hosts,$t);
+  function clearAllFilters(){hostFilter="";workspaceFilter="";ownershipFilter="";sourceFilter="";chainFilter="";codexProjectFilter="";codexSourceFilter="";codexOwnershipFilter="";codexModelFilter="";if(currentStatus==="done")selectStatus("");}
+  const groupBrowserItems=(entries:BrowserListItem[])=>groupSessions(entries.map(entry=>({status:entry.kind==="task"?entry.task.status:entry.collaboration.status,updatedAt:entry.updatedAt,entry})));
+  const recentFor=(provider:ProviderId)=>provider==="codex"?codexRecent:provider==="claude"?claudeRecent:provider==="grok"?grokRecent:provider==="antigravity"?antigravityRecent:provider==="deepseek"?deepseekRecent:ollamaRecent;
+  const agentStateKey=(recent:AgentRecentStatus|null)=>recent&&(active.has(recent.status)||recent.status==="failed"||recent.status==="completed")?`status.badge.${taskBadgeState(recent.status)}`:"sidebar.agentIdle";
+  const agentStateTone=(recent:AgentRecentStatus|null)=>recent&&(active.has(recent.status)||recent.status==="failed"||recent.status==="completed")?taskBadgeState(recent.status):"idle";
   let page = 1;
   const PAGE_SIZE = 20;
   $: { engine; statusFilter; taskSearchQuery; page = 1; }
@@ -310,7 +386,7 @@
     finally{quotaLoading=false;}
   }
   async function loadQuotaReservations(){const data=await api("/api/quota-reservations",{}, {caller:"App.quotaReservations"});quotaReservations=data.reservations??[];}
-  const quotaPeak = () => Math.max(quota?.claude?.fiveHour?.pct ?? 0, quota?.claude?.sevenDay?.pct ?? 0, quota?.codex?.fiveHour?.pct ?? 0, quota?.codex?.sevenDay?.pct ?? 0, quota?.grok?.fiveHour?.pct ?? 0, quota?.grok?.sevenDay?.pct ?? 0, quota?.antigravity?.fiveHour?.pct ?? 0, quota?.antigravity?.sevenDay?.pct ?? 0, quota?.ollama?.fiveHour?.pct ?? 0, quota?.ollama?.sevenDay?.pct ?? 0);
+  const quotaPeak = () => Math.max(quota?.claude?.fiveHour?.pct ?? 0, quota?.claude?.sevenDay?.pct ?? 0, quota?.codex?.fiveHour?.pct ?? 0, quota?.codex?.sevenDay?.pct ?? 0, ...(quota?.codex?.modelPools??[]).flatMap((pool:any)=>[pool?.fiveHour?.pct??0,pool?.sevenDay?.pct??0]), quota?.grok?.fiveHour?.pct ?? 0, quota?.grok?.sevenDay?.pct ?? 0, quota?.antigravity?.fiveHour?.pct ?? 0, quota?.antigravity?.sevenDay?.pct ?? 0, quota?.ollama?.fiveHour?.pct ?? 0, quota?.ollama?.sevenDay?.pct ?? 0);
   const quotaPct=(value:unknown)=>typeof value==="number"&&Number.isFinite(value)?formatQuotaPercentage(value,$locale):"?";
   const barClass = (pct:number|null) => (pct??0) >= 90 ? "crit" : (pct??0) >= 70 ? "warn" : "ok";
   const fmtReset = (iso:string|null,label?:string|null) => {
@@ -418,34 +494,21 @@
   const globalPrefs=(()=>{try{return JSON.parse(localStorage.getItem("deck-global-settings")||"{}")}catch{return{}}})();
   const persistedCodexAutomation=[globalPrefs.codexAutomation,globalPrefs.codexPermission,savedPrefs.codexAutomation,savedPrefs.codexPermission];
   const conversationPrefs=(()=>{try{return JSON.parse(localStorage.getItem("deck-conversation-prefs")||"{}")}catch{return{}}})();
-  type GlobalTab="infrastructure"|"account"|"defaults"|"characters"|"workspace"|"storage"|"display"|"system"|"about"|string;
-  type StorageTab="artifacts"|"snapshots";
-  type AccountTab="providers"|"git"|"proton";
-  type DefaultsTab="general"|ProviderId;
-  type GlobalTabGroup="daily"|"connection"|"storage"|"system";
-  type DisplayTab="screen"|"notifications";
+  // Settings pages: one id per page of the full-page settings view. The old
+  // modal tab ids still arrive from storage and deep links and are mapped.
+  type GlobalTab=SettingsPageId;
+  type StorageTab="artifacts"|"snapshots"|"proton";
   type DelegationLaunchMode="managed"|"direct";
   type DelegationSettings={version:3;claude:{launchMode:DelegationLaunchMode;model:string;reasoningEffort:string};codex:{launchMode:DelegationLaunchMode;model:string|null;reasoningEffort:string|null;serviceTier:"priority"|null};deepseek:{launchMode:"managed";model:string|null;reasoningEffort:string|null};ollama:{launchMode:"managed";model:string|null;reasoningEffort:string|null};antigravity:{launchMode:"managed";model:string|null;reasoningEffort:string|null};grok:{launchMode:"managed";model:string|null;reasoningEffort:string|null}};
 
   type AntigravityExecutionSettings={version:1;backend:"consumer"|"vertex"|"vertex-agent";vertex:{projectId:string;location:string;credentialsPath:string;creditsUrl:string}};
   const DEFAULT_DELEGATION_SETTINGS:DelegationSettings={version:3,claude:{launchMode:"managed",model:"claude-opus-5",reasoningEffort:"default"},codex:{launchMode:"managed",model:null,reasoningEffort:null,serviceTier:null},deepseek:{launchMode:"managed",model:null,reasoningEffort:null},ollama:{launchMode:"managed",model:null,reasoningEffort:null},antigravity:{launchMode:"managed",model:null,reasoningEffort:null},grok:{launchMode:"managed",model:null,reasoningEffort:null}};
   const EMPTY_GLOBAL_MODELS:GlobalModelSettings=emptyGlobalModelSettings();
-  // Grouped by how the tab saves: "daily" tabs use the sticky save row, the rest write immediately.
-  const GLOBAL_TABS:Array<{id:GlobalTab;labelKey:string;group:GlobalTabGroup}>=[{id:"defaults",labelKey:"settings.defaults",group:"daily"},{id:"characters",labelKey:"settings.characters",group:"daily"},{id:"display",labelKey:"settings.display",group:"daily"},{id:"account",labelKey:"settings.account",group:"connection"},{id:"mcp",labelKey:"mcp.settingsTab",group:"connection"},{id:"infrastructure",labelKey:"settings.infrastructure",group:"connection"},{id:"workspace",labelKey:"settings.workspace",group:"connection"},{id:"storage",labelKey:"settings.storage.title",group:"storage"},{id:"system",labelKey:"settings.system",group:"system"},{id:"about",labelKey:"settings.about",group:"system"}];
-  const DEFAULTS_TABS:Array<{id:DefaultsTab;label:string}>=[{id:"general",label:"settings.defaults.general"},{id:"codex",label:"Codex"},{id:"claude",label:"Claude"},{id:"grok",label:"Grok"},{id:"antigravity",label:"Antigravity"},{id:"deepseek",label:"DeepSeek"},{id:"ollama",label:"Ollama"}];
-  const DISPLAY_TABS:Array<{id:DisplayTab;labelKey:string}>=[{id:"screen",labelKey:"settings.display.screen"},{id:"notifications",labelKey:"settings.notifications"}];
-  const STORAGE_TABS:Array<{id:StorageTab;labelKey:string}>=[{id:"artifacts",labelKey:"settings.artifacts"},{id:"snapshots",labelKey:"settings.storage"}];
-  const savedDisplayTab=localStorage.getItem("deck-display-settings-tab") as DisplayTab|null;
-  const ACCOUNT_TABS:Array<{id:AccountTab;labelKey:string}>=[{id:"providers",labelKey:"provider.connections"},{id:"git",labelKey:"settings.git"},{id:"proton",labelKey:"proton.title"}];
   const savedStorageTab=localStorage.getItem("deck-storage-settings-tab") as StorageTab|null;
-  const savedAccountTab=localStorage.getItem("deck-account-settings-tab") as AccountTab|null;
-  const savedGlobalTab=localStorage.getItem("deck-global-settings-tab") as GlobalTab|null;
-  const savedDefaultsTab=localStorage.getItem("deck-defaults-settings-tab") as DefaultsTab|null;
-  let globalOpen=false,settingsClosePrompt=false,globalTab:GlobalTab=GLOBAL_TABS.some(item=>item.id===savedGlobalTab)?savedGlobalTab!:"defaults",globalBaseline:Record<string,string>={},characterSettings:CharacterSettings=structuredClone(DEFAULT_CHARACTERS),charactersLoaded=false,charactersLoading=false,providerOutfits:Record<ProviderId,string[]>={codex:["Gpt-Codex","Gpt-Sol"],claude:["normal","capy"],grok:["Grok"],antigravity:["Antigravity","Gemma-e4b"],deepseek:["DeepSeek","Ollama"],ollama:["Ollama","DeepSeek","Antigravity","Gemma-e4b"]},globalSaving=false,globalSaveNotice="";
-  let defaultsTab:DefaultsTab=DEFAULTS_TABS.some(item=>item.id===savedDefaultsTab)?savedDefaultsTab!:"general";
-  let displayTab:DisplayTab=DISPLAY_TABS.some(item=>item.id===savedDisplayTab)?savedDisplayTab!:"screen";
-  let storageTab:StorageTab=STORAGE_TABS.some(item=>item.id===savedStorageTab)?savedStorageTab!:"artifacts";
-  let accountTab:AccountTab=ACCOUNT_TABS.some(item=>item.id===savedAccountTab)?savedAccountTab!:"providers";
+  const savedGlobalTab=localStorage.getItem("deck-global-settings-tab");
+  let globalOpen=false,settingsClosePrompt=false,globalTab:GlobalTab=normalizeSettingsPage(savedGlobalTab,"general"),globalBaseline:Record<string,string>={},characterSettings:CharacterSettings=structuredClone(DEFAULT_CHARACTERS),charactersLoaded=false,charactersLoading=false,providerOutfits:Record<ProviderId,string[]>={codex:["Gpt-Codex","Gpt-Sol"],claude:["normal","capy"],grok:["Grok"],antigravity:["Antigravity","Gemma-e4b"],deepseek:["DeepSeek","Ollama"],ollama:["Ollama","DeepSeek","Antigravity","Gemma-e4b"]},globalSaving=false,globalSaveNotice="";
+  let providerSettingsTab:ProviderTab="defaults";
+  let storageTab:StorageTab=savedStorageTab==="artifacts"||savedStorageTab==="snapshots"||savedStorageTab==="proton"?savedStorageTab:"artifacts";
   let localeSaving=false,localeNotice="";
   async function chooseLocale(event:Event){
     const next=(event.currentTarget as HTMLSelectElement).value as SupportedLocale;
@@ -638,7 +701,6 @@
   let ownerClaimStatusError="";
   let retryOwnerClaimStatus=()=>{};
   let error = "";
-  let quickCreate=false;
   let createBackdropPointer:BackdropPointer|null=null;
   let createOpen = false;let createOpening=false;let createLocationLoading=false;let createLocationError="";let createError="";let createKind:"single"|"parallel"|"review"|"conversation"="single";let reviewDepth:"basic"|"deep"="basic";let reviewFinalization:"primary"|"side-by-side"|"raw"="primary";let reviewApplyFixes=true;let collaborationTimeoutMinutes=30;let conversationTimeoutMinutes=Number(conversationPrefs.timeoutMinutes)||30;let debateMaxTurns=Number(conversationPrefs.maxRounds)||5;let debateUnlimited=conversationPrefs.unlimited===true;let debateUnlimitedConfirmed=false;let debateKind:"discussion"|"artifact-review"=conversationPrefs.kind==="artifact-review"?"artifact-review":"discussion";let conversationFlow:"guided"|"automatic"=conversationPrefs.flow==="automatic"?"automatic":"guided";let conversationTurnLength:"compact"|"rich"="rich";let conversationAllowModelUserCall=conversationPrefs.allowModelUserCall===true;let conversationConclusionRequested=false;let conversationConclusionPath="";let conversationEnabled:Record<ProviderId,boolean>=Object.fromEntries(conversationProviders.map(provider=>[provider,conversationPrefs.enabled?.[provider]??(provider==="codex"||provider==="claude")])) as Record<ProviderId,boolean>;const savedConversationTone=(provider:ProviderId)=>TONE_PRESETS.some(item=>item.id===conversationPrefs.tonePresets?.[provider])?conversationPrefs.tonePresets[provider] as TonePreset:null;/* A null entry keeps that participant on the global character preset. The panel used to carry one shared global/session switch plus a per-provider select, so a single overridden participant silently moved every other one off its global tone. */let conversationTonePresets:Record<ProviderId,TonePreset|null>=Object.fromEntries(conversationProviders.map(provider=>[provider,conversationPrefs.useGlobalTone===false?savedConversationTone(provider):null])) as Record<ProviderId,TonePreset|null>;let conversationCustomTones:Record<ProviderId,string|null>=Object.fromEntries(conversationProviders.map(provider=>[provider,null])) as Record<ProviderId,string|null>;let conversationFirstProvider:ProviderId=conversationProviders.includes(conversationPrefs.firstProvider)?conversationPrefs.firstProvider:conversationProviders.includes(globalDefaultProvider)?globalDefaultProvider:"codex";let conversationUserNickname=typeof conversationPrefs.userNickname==="string"&&conversationPrefs.userNickname.trim()?conversationPrefs.userNickname.slice(0,40):$t("conversation.userDefault");let conversationCodexModel=conversationPrefs.codexModel??globalPrefs.codexModel??savedPrefs.codexModel??"";let conversationCodexEffort=conversationPrefs.codexEffort??globalPrefs.codexEffort??savedPrefs.codexEffort??"";let conversationClaudeModel=conversationPrefs.claudeModel??globalPrefs.claudeModel??savedPrefs.claudeModel??"claude-opus-4-8";let conversationClaudeEffort=conversationPrefs.claudeEffort??globalPrefs.claudeEffort??savedPrefs.claudeEffort??"medium";let conversationCompatibleModels:Record<CompatibleExecutionProvider,string>={grok:conversationPrefs.grokModel??globalCompatibleModels.grok,antigravity:conversationPrefs.antigravityModel??globalCompatibleModels.antigravity,deepseek:conversationPrefs.deepseekModel??globalCompatibleModels.deepseek,ollama:conversationPrefs.ollamaModel??globalCompatibleModels.ollama};let conversationCompatibleEfforts:Record<CompatibleExecutionProvider,string>={grok:conversationPrefs.grokEffort??globalCompatibleEfforts.grok,antigravity:conversationPrefs.antigravityEffort??globalCompatibleEfforts.antigravity,deepseek:conversationPrefs.deepseekEffort??globalCompatibleEfforts.deepseek,ollama:conversationPrefs.ollamaEffort??globalCompatibleEfforts.ollama};
   let reviewEnabled:Record<ProviderId,boolean>=Object.fromEntries(conversationProviders.map(provider=>[provider,savedPrefs.reviewEnabled?.[provider]??(provider==="codex"||provider==="claude")])) as Record<ProviderId,boolean>;
@@ -861,6 +923,8 @@
   // Pass `tasks` explicitly so Svelte tracks the polling result as a reactive
   // dependency. Reads hidden inside taskRecent() are otherwise evaluated once.
   $: avatarTasks=avatarSessionRows(tasks,collaborationBoardOpen?collaborationBoardCardIds:undefined,sessionClassificationContext);
+  $: activeTaskCount=latestThreadRows(tasks).filter(task=>active.has(task.status)).length;
+  $: activeConversationCount=collaborations.filter(item=>item.mode==="debate"&&["starting","running","waiting-user","cancel-requested"].includes(item.status)).length;
   $: if(!selectedCollaboration)collaborationRecent={};
   $: claudeTaskRecent=taskRecent("claude",avatarTasks);
   $: codexTaskRecent=chooseProviderRecent(taskRecent("codex",avatarTasks),codexSessionRecent);
@@ -971,6 +1035,26 @@
     setTimeout(()=>target.classList.remove("field-flash"),900);
   }
   const createSayTarget=(name:string)=>name==="workspace"?"workspace":name==="provider"||name==="first"||name==="others"||name==="participants"||name==="primary"?"provider":name==="automation"?"automation":name==="mode"?"workmode":name==="turns"?"turns":name==="method"?"method":name==="flow"?"flow":name==="finish"?"finish":name;
+  // The composer states the task as one sentence whose values are the
+  // controls: <agent·model> in <workspace> with <automation>. Model, effort and
+  // tier live in per-provider variables, so these adapters pick the pair for
+  // the current agent and write back to the same variable the payload reads.
+  let createAdvancedOpen=false;
+  const createModelsFor=(provider:ProviderId)=>provider==="codex"?availableCodexModels():provider==="claude"?availableClaudeModels():availableCompatibleModels(provider as CompatibleExecutionProvider);
+  const createModelFor=(provider:ProviderId)=>provider==="codex"?createModel:provider==="claude"?createClaudeModel:createCompatibleModel(provider as CompatibleExecutionProvider);
+  function setCreateModel(value:string){if(createProvider==="codex"){createModel=value;createModelChanged();}else if(createProvider==="claude")createClaudeModel=value;else setCreateCompatibleModel(createProvider as CompatibleExecutionProvider,value);}
+  const createEffortsFor=(provider:ProviderId)=>provider==="codex"?(createModelInfo()?.supportedReasoningEfforts??[]):provider==="claude"?claudeEfforts:compatibleEffortOptions(provider as CompatibleExecutionProvider);
+  const createEffortFor=(provider:ProviderId)=>provider==="codex"?createEffort:provider==="claude"?createClaudeEffort:createCompatibleEfforts[provider as CompatibleExecutionProvider];
+  function setCreateEffort(value:string){if(createProvider==="codex")createEffort=value;else if(createProvider==="claude")createClaudeEffort=value;else createCompatibleEfforts={...createCompatibleEfforts,[createProvider]:value};}
+  const createHasPriority=()=>createProvider==="codex"&&Boolean(createModelInfo()?.serviceTiers?.some((item:any)=>item.id==="priority"));
+  // The branch is whatever the workspace is on: the create payload has no
+  // branch field, so the composer only shows it.
+  const createBranch=()=>{const branch=workspaces.find(item=>item.id===createWorkspace)?.lastGitStatus?.branch;return typeof branch==="string"&&branch?branch:null;};
+  // Slot values only drive the Korean particles; the rendered tokens are the controls.
+  $: createComposerParts=tracked(createProvider,createWorkspace,workspaces,createAutomationNow,$t)?buildSay($t("create.composerSentence"),{agent:providerDisplayName(createProvider),workspace:createWorkspaceLabel(),automation:automationLabel(createAutomationNow)}):[];
+  $: createAdvancedSummary=tracked(createProvider,createModel,createEffort,createClaudeEffort,createCompatibleEfforts,createTier,createHost,createWorkspace,workspaces,hosts,createCodexWorkMode,createClaudeWorkMode,createCompatibleWorkModes,$t)
+    ?[createEffortFor(createProvider)?effortLabel(createEffortFor(createProvider)):"",createHasPriority()&&createTier==="priority"?$t("model.fast"):"",createHostLabel(),createBranch()??"",createWorkModeFor(createProvider)==="plan"?$t("workMode.plan"):""].filter(Boolean).join(" · "):"";
+  const sameLocalDay=(iso:string)=>{const day=new Date(iso),today=new Date();return day.getFullYear()===today.getFullYear()&&day.getMonth()===today.getMonth()&&day.getDate()===today.getDate();};
   function setCreateTurns(value:number){debateMaxTurns=Math.min(100,Math.max(1,Math.round(Number.isFinite(value)?value:1)));}
   function syncCreateWorkspace(){
     const current=createLocations().find(item=>item.id===createWorkspace);
@@ -1062,7 +1146,6 @@
   }
   async function openCreate(){
     if(createOpening){createOpen=true;return;}
-    quickCreate=false;
     applyGlobalDefaultsToCreate();
     createGoogleSearchMode="off";
     applyCreateDefaultsForTab(engine);conversationTurnLength="rich";createError="";
@@ -1080,10 +1163,11 @@
       createProvider=fallbackProvider(createProvider,availability);reconcileProviderSelections(availability);
     }finally{createOpening=false;}
   }
-  async function openQuickCreate(){await openCreate();chooseCreateKind("single");chooseCreateAutomation("codex","auto");chooseCreateAutomation("claude","auto");quickCreate=true;}
+  async function openQuickCreate(){await openCreate();chooseCreateKind("single");chooseCreateAutomation("codex","auto");chooseCreateAutomation("claude","auto");}
   async function openOverviewCreate(provider:"codex"|"claude"){await openCreate();chooseCreateKind("single");createProvider=fallbackProvider(provider,providerConnections);}
   async function openOverviewReview(){await openCreate();chooseReviewKind();}
-  function openOverviewWorker(){globalTab="infrastructure";openGlobalSettings();}
+  async function openCreateInWorkspace(workspace:Workspace){await openCreate();chooseCreateKind("single");createHost=workspace.hostId;createProject=workspace.projectId;createWorkspace=workspace.id;}
+  function openOverviewWorker(){globalTab="hosts";openGlobalSettings();}
   async function openVscodeContext(){
     const context=vscodeContextFromLocation(location);
     if(!context)return false;
@@ -1121,8 +1205,16 @@
   const defaultSettingsSignature=()=>JSON.stringify({globalDefaultProvider,globalCodexModel,globalCodexEffort,globalCodexTier,globalCodexWorkMode,globalCodexAutomation,globalClaudeModel,globalClaudeEffort,globalClaudeWorkMode,globalClaudeAutomation,globalCompatibleModels,globalCompatibleEfforts,globalCompatibleWorkModes,globalCompatibleAutomation,delegationSettings,globalModelSettings,allowPaidCredits,claudeSwitchModelsOnFlag,antigravityExecution});
   const displaySettingsSignature=()=>JSON.stringify({theme,palette,skin,sessionTextSize,conversationTextSize,codexAvatar,showAvatars,showSpeech,collapseCompleted,notifications,vibration,rememberLast,enterToSend,avatarAutoCollapse,avatarCollapseDelayMs,scrollAutoSwitch,immersiveScroll,hideLocalPaths,pushPreferences});
   const characterSettingsSignature=()=>JSON.stringify(characterSettings);
-  const globalTabDirty=(tab:GlobalTab)=>tab==="defaults"?globalBaseline.defaults!==defaultSettingsSignature():tab==="characters"?globalBaseline.characters!==characterSettingsSignature():tab==="display"?globalBaseline.display!==displaySettingsSignature():false;
-  const globalDirty=()=>GLOBAL_TABS.some(item=>globalTabDirty(item.id));
+  const defaultsDirty=()=>Boolean(globalBaseline.defaults)&&globalBaseline.defaults!==defaultSettingsSignature();
+  const charactersDirty=()=>Boolean(globalBaseline.characters)&&globalBaseline.characters!==characterSettingsSignature();
+  const displayDirty=()=>Boolean(globalBaseline.display)&&globalBaseline.display!==displaySettingsSignature();
+  const globalTabDirty=(tab:GlobalTab)=>tab==="policy"?defaultsDirty():isProviderPage(tab)?defaultsDirty()||charactersDirty():tab==="general"||tab==="notifications"?displayDirty():false;
+  const globalDirty=()=>defaultsDirty()||charactersDirty()||displayDirty();
+  const settingsChangeCount=()=>countSettingChanges(globalBaseline,{defaults:defaultSettingsSignature(),characters:characterSettingsSignature(),display:displaySettingsSignature()});
+  const settingsDirtyPages=()=>new Set<SettingsPageId>((["general","notifications","policy","provider-claude","provider-codex","provider-antigravity","provider-grok","provider-deepseek","provider-ollama"] as SettingsPageId[]).filter(globalTabDirty));
+  const settingsPageUsesSaveBar=(tab:GlobalTab)=>tab==="general"||tab==="notifications"||tab==="policy"||isProviderPage(tab);
+  const settingsProviderStates=()=>Object.fromEntries(providerAccounts.map(item=>[item.provider,item.state])) as Partial<Record<ProviderId,"connected"|"disconnected"|"unknown"|"unavailable">>;
+  function revertGlobalSettings(){restoreGlobalBaseline();globalSaveNotice="";}
   function captureGlobalBaseline(){globalBaseline={defaults:defaultSettingsSignature(),characters:characterSettingsSignature(),display:displaySettingsSignature()};}
   function restoreGlobalBaseline(){
     try{const value=JSON.parse(globalBaseline.defaults);globalDefaultProvider=value.globalDefaultProvider;globalCodexModel=value.globalCodexModel;globalCodexEffort=value.globalCodexEffort;globalCodexTier=value.globalCodexTier;globalCodexWorkMode=value.globalCodexWorkMode;globalCodexAutomation=value.globalCodexAutomation;globalClaudeModel=value.globalClaudeModel;globalClaudeEffort=value.globalClaudeEffort;globalClaudeWorkMode=value.globalClaudeWorkMode;globalClaudeAutomation=value.globalClaudeAutomation;globalCompatibleModels=value.globalCompatibleModels??globalCompatibleModels;globalCompatibleEfforts=value.globalCompatibleEfforts??globalCompatibleEfforts;globalCompatibleWorkModes=value.globalCompatibleWorkModes??globalCompatibleWorkModes;globalCompatibleAutomation=value.globalCompatibleAutomation??globalCompatibleAutomation;delegationSettings=value.delegationSettings??delegationSettings;globalModelSettings=value.globalModelSettings??globalModelSettings;allowPaidCredits=value.allowPaidCredits===true;claudeSwitchModelsOnFlag=value.claudeSwitchModelsOnFlag!==false;antigravityExecution=structuredClone(value.antigravityExecution??antigravityExecution);}catch{}
@@ -1149,17 +1241,22 @@
   async function testAntigravityExecution(){if(antigravityExecutionTesting)return;antigravityExecutionTesting=true;antigravityExecutionNotice="";try{await api("/api/system-settings/antigravity-execution",{method:"PUT",headers:{"Idempotency-Key":uuid()},body:JSON.stringify(antigravityExecution)});const result=await api("/api/system-settings/antigravity-execution/test",{method:"POST",headers:{"Idempotency-Key":uuid()}});await loadProviderAccounts(true);geminiCliReadiness=result.geminiCli??null;if(!result.ok)throw new Error(result.error||$t("antigravityExecution.testFailed"));applyAntigravityCatalog(await api("/api/system-settings/models"));antigravityExecutionLoaded=true;geminiCliReadiness=result.geminiCli??null;antigravityExecutionNotice=$t("antigravityExecution.testSuccess",{count:result.models});}catch(e){antigravityExecutionNotice=e instanceof Error?e.message:String(e);}finally{antigravityExecutionTesting=false;}}
   async function loadPathDisplay(){const wasClean=!globalBaseline.display||globalBaseline.display===displaySettingsSignature();try{const data=await api("/api/system-settings/path-display");hideLocalPaths=data.hideLocalPaths===true;if(wasClean)globalBaseline.display=displaySettingsSignature();}catch{/* Keep the last local display preference if the server is temporarily unavailable. */}}
   function selectGlobalTab(tab:GlobalTab){globalTab=tab;localStorage.setItem("deck-global-settings-tab",tab);
-    if(tab==="account"){void loadProviderAccounts();void loadCompatibleProviderSettings();void loadAntigravityExecutionSettings();}else if(tab==="infrastructure"||tab==="workspace")void loadHostData();else if(tab==="system"){void loadRuntimes();void loadApplicationUpdate();void loadSetupPreferences();}else if(tab==="characters")void loadCharacterSettings();else if(tab==="defaults"){void loadGlobalModelSettings();void loadDelegationSettings();void loadCreditUsageSettings();void loadClaudeExecutionSettings();void loadAntigravityExecutionSettings();}else if(tab==="display")void loadPathDisplay();}
-  function selectDefaultsTab(tab:DefaultsTab){defaultsTab=tab;localStorage.setItem("deck-defaults-settings-tab",tab);}
-  function selectDisplayTab(tab:DisplayTab){displayTab=tab;localStorage.setItem("deck-display-settings-tab",tab);}
-  function selectStorageTab(tab:StorageTab){storageTab=tab;localStorage.setItem("deck-storage-settings-tab",tab);}
-  function selectAccountTab(tab:AccountTab){accountTab=tab;localStorage.setItem("deck-account-settings-tab",tab);}
+    if(tab==="policy"||isProviderPage(tab)){void loadGlobalModelSettings();void loadDelegationSettings();void loadCreditUsageSettings();void loadClaudeExecutionSettings();void loadAntigravityExecutionSettings();}
+    if(isProviderPage(tab)){void loadProviderAccounts();void loadCompatibleProviderSettings();void loadCharacterSettings();void loadRuntimes();void loadClaudeModelCatalog();}
+    else if(tab==="hosts"||tab==="workspace")void loadHostData();
+    else if(tab==="system"){void loadRuntimes();void loadApplicationUpdate();void loadSetupPreferences();}
+    else if(tab==="general")void loadPathDisplay();}
+  function openProviderSettings(provider:ProviderId,tab:ProviderTab="defaults"){providerSettingsTab=tab;globalTab=providerPage(provider);openGlobalSettings();}
+  // "다시 연결" on an agent page: the same login method the connection card
+  // offers first, so the header button never differs from the card.
+  function reconnectProvider(provider:ProviderId){if(provider==="codex")void startProviderLogin("codex","device");else if(provider==="claude")void startProviderLogin("claude","subscription");else if(provider==="grok")void startProviderLogin("grok","device");else if(provider==="antigravity")void startProviderLogin("antigravity",antigravityUsesVertex?"google-cloud":"google-oauth");}
+  $: localStorage.setItem("deck-storage-settings-tab",storageTab);
   function resumeSetup(){if(resumeSetupAfterSettings){resumeSetupAfterSettings=false;setupRequired=true;}}
   async function loadSetupPreferences(){try{const data=await api("/api/system-settings/setup");setupShowOnStartup=data.preferences?.showOnStartup!==false;}catch(value){setupPreferenceNotice=value instanceof Error?value.message:String(value);}}
   async function setSetupStartupVisibility(showOnStartup:boolean){if(setupPreferenceBusy)return;setupShowOnStartup=showOnStartup;setupPreferenceBusy=true;setupPreferenceNotice="";try{const data=await api("/api/system-settings/setup",{method:"PUT",headers:{"Idempotency-Key":uuid()},body:JSON.stringify({version:1,showOnStartup})});setupShowOnStartup=data.preferences.showOnStartup;setupPreferenceNotice=$t(showOnStartup?"setup.autoShowEnabled":"setup.autoShowDisabled");}catch(value){setupShowOnStartup=!showOnStartup;setupPreferenceNotice=value instanceof Error?value.message:String(value);}finally{setupPreferenceBusy=false;}}
   function reopenSetup(){globalOpen=false;resumeSetupAfterSettings=false;setupRequired=true;}
   function dismissSetup(){setupRequired=false;resumeSetupAfterSettings=false;setupShowOnStartup=false;void setSetupStartupVisibility(false);}
-  function closeGlobalSettings(){if(globalDirty()){settingsClosePrompt=true;return;}globalOpen=false;resumeSetup();}
+  function closeGlobalSettings(){if(globalDirty()){settingsClosePrompt=true;return false;}globalOpen=false;resumeSetup();return true;}
   function discardAndCloseGlobalSettings(){restoreGlobalBaseline();settingsClosePrompt=false;globalOpen=false;resumeSetup();}
   async function saveAndCloseGlobalSettings(){if(await saveGlobalSettings()){settingsClosePrompt=false;globalOpen=false;resumeSetup();}}
   function updateCharacter(provider:ProviderId,patch:Partial<CharacterSettings["providers"]["codex"]>){characterSettings={...characterSettings,providers:{...characterSettings.providers,[provider]:{...characterSettings.providers[provider],...patch}}};}
@@ -1292,7 +1389,7 @@
     finally{compatibleProviderSaving=null;}
   }
   function openGlobalSettings(){globalOpen=true;settingsClosePrompt=false;globalSaveNotice="";captureGlobalBaseline();selectGlobalTab(globalTab);}
-  function openProviderConnections(){createOpen=false;globalTab="account";openGlobalSettings();}
+  function openProviderConnections(){createOpen=false;openProviderSettings(createProvider,"account");}
   function stopAuthStream(provider:ConnectionAuthProvider){authStreams[provider]?.close();delete authStreams[provider];}
   function openAuthWindow(provider:ConnectionAuthProvider){try{const popup=window.open("about:blank",`claudex-workhouse-auth-${provider}`);if(!popup)return;popup.opener=null;popup.document.title=providerName(provider);popup.document.body.textContent=$t("auth.preparingPage");authWindows[provider]=popup;}catch{/* The inline official link remains available when popups are blocked. */}}
   function forwardAuthWindow(provider:ConnectionAuthProvider,url:string|null){const popup=authWindows[provider];if(!url||!popup||popup.closed)return;try{popup.location.replace(url);}catch{try{popup.location.href=url;}catch{}}delete authWindows[provider];}
@@ -1369,7 +1466,7 @@
     source.addEventListener("runtime-update",message=>{try{const event=JSON.parse((message as MessageEvent).data),provider=event.provider as ProviderId;if(!conversationProviders.includes(provider))return;const name=event.name??providerDisplayName(provider),version=event.latest??event.current??$t("common.unavailable"),type=String(event.type);enqueueAvatarNotice(provider,{key:`runtime:${event.sequence}:${type}`,emotion:type==="auto_update_completed"?"happy":type==="auto_update_failed"?"sad":"confused",line:$t(type==="auto_update_completed"?"runtime.toastCompleted":type==="auto_update_failed"?"runtime.toastFailed":"runtime.toastAvailable",{name}),statusLine:$t(type==="auto_update_completed"?"runtime.toastCompletedDetail":type==="auto_update_failed"?"runtime.toastFailedDetail":"runtime.toastAvailableDetail",{version})});if(type==="auto_update_completed")void loadRuntimes();}catch{}});
   }
   function startModelCatalogEvents(){modelCatalogSource?.close();const source=new EventSource("/api/model-catalog/events");modelCatalogSource=source;source.addEventListener("model-catalog",message=>{try{const event=JSON.parse((message as MessageEvent).data),provider=event.provider as ProviderId;if(!conversationProviders.includes(provider)||event.type!=="models_discovered")return;const first=event.models?.[0]?.displayName??event.models?.[0]?.id??"",count=Number(event.count)||1;enqueueAvatarNotice(provider,{key:`models:${event.sequence}:${provider}`,emotion:"happy",line:$t(count===1?"model.discoveredOne":"model.discoveredMany",{provider:providerDisplayName(provider),model:first,count}),statusLine:$t("model.discoveredAction"),action:{type:"open-provider-models",provider}});}catch{}});}
-  function handleAvatarNoticeAction(action:AvatarNoticeAction){if(action.type!=="open-provider-models")return;globalTab="defaults";selectDefaultsTab(action.provider);openGlobalSettings();}
+  function handleAvatarNoticeAction(action:AvatarNoticeAction){if(action.type!=="open-provider-models")return;openProviderSettings(action.provider,"defaults");}
   let refreshRunning=false;
   let refreshQueued=false;
   let taskSynchronizationStartedAt=0;
@@ -1378,7 +1475,7 @@
     if(taskSynchronizationRunning||Date.now()-taskSynchronizationStartedAt<30000)return;
     taskSynchronizationRunning=true;
     taskSynchronizationStartedAt=Date.now();
-    void api("/api/tasks",{}, {caller:"App.backgroundTaskSynchronization"})
+    void api("/api/tasks?view=none",{}, {caller:"App.backgroundTaskSynchronization"})
       .then(()=>{void refresh(true);})
       .catch(()=>{})
       .finally(()=>{taskSynchronizationRunning=false;taskSynchronizationStartedAt=Date.now();});
@@ -1519,6 +1616,7 @@
   function stopLive(){if(terminalDrainTimer){clearTimeout(terminalDrainTimer);terminalDrainTimer=null;}liveScope++;liveUnsubscribe?.();liveUnsubscribe=null;}
   function startLive(){stopLive();if(!selected?.owned){liveStatus="History";return;}if(!active.has(selected.status)||document.visibilityState!=="visible"){liveStatus=active.has(selected.status)?"Delayed":"History";return;}liveStatus="Delayed";const taskId=selected.id,provider=selected.provider,scope=liveScope,current=()=>liveScope===scope&&selected?.id===taskId;liveUnsubscribe=subscribeTaskLiveness({provider,taskId,after:lastLiveSequence,onChange:()=>{},onStatus:(status)=>{if(current())liveStatus=status==="live"?"Live":"Delayed";},onEvent:(event)=>{if(current())receiveLive(event);},onResync:()=>{if(!current())return;liveStatus="Delayed";if(selected)void loadThreadEvents(selected,true,true);void reconcileSelectedStatus();}});}
   async function openTask(task:Task,exact=false) {
+    if(globalOpen&&!closeGlobalSettings())return;
     collaborationBoardOpen=false;
     if(task.provider==="codex"&&task.threadId&&(!task.executionHostId||task.executionHostId==="local")){stopLive();discardLive();selected=null;events=[];engine="codex";await tick();await codexRef?.openTaskSession(task);return;}
     codexRef?.closeDetail();codexDetailOpen=false;stopLive();discardLive();engine=task.provider;let latest=exact?task:latestThreadMember(tasks,task);if(latest.listProjection)try{const data=await api(`/api/tasks/${latest.provider}/${encodeURIComponent(latest.id)}/snapshot`,{}, {caller:"App.openTask.snapshot"});if(data?.task){latest=data.task;taskState.upsert(latest);}}catch(value){error=value instanceof Error?value.message:String(value);return;}selected=latest;events=[];lastLiveSequence=0;liveIds.clear();startLive();await loadThreadEvents(latest,true,true);
@@ -1622,7 +1720,7 @@
       return true;
     }
     if(params.get("view")==="host"){
-      globalTab="infrastructure";
+      globalTab="hosts";
       openGlobalSettings();
       history.replaceState(null,"",location.pathname);
       return true;
@@ -1757,7 +1855,8 @@
   async function createAssist(){if(!selected||!assistTargetModel||!assistPrompt.trim()||!assistSourceContent.trim()||sending)return;sending=true;try{const data=await api(`/api/tasks/${selected.provider}/${encodeURIComponent(selected.id)}/assist`,{method:"POST",headers:{"Idempotency-Key":uuid()},body:JSON.stringify({targetProvider:assistTargetProvider,executionHostId:selected.executionHostId??"local",workspaceId:selected.workspaceId,title:$t("assist.sessionTitle",{title:selected.title}),prompt:assistPrompt,sourceContent:assistSourceContent,model:assistTargetModel,reasoningEffort:assistTargetEffort,serviceTier:assistTargetTier})});selectedAssistId=data.session.id;collaborations=[data.session,...collaborations.filter(item=>item.id!==data.session.id)];assistOpen=false;assistPrompt="";assistSourceContent="";}catch(e){error=e instanceof Error?e.message:String(e)}finally{sending=false;}}
   async function openCollaboration(id:string){codexRef?.closeDetail();codexDetailOpen=false;stopLive();discardLive();selected=null;events=[];selectedCollaboration=id;}
   function submitFollowupKey(event:KeyboardEvent){if(!shouldSubmitOnEnter(event,enterToSend)||sending||(!followup.trim()&&!msgAttachments.length))return;event.preventDefault();void sendFollowup();}
-  function submitCreateKey(event:KeyboardEvent){const permission=createPermissionFor(createProvider),reviewDanger=(createKind==="parallel"||createKind==="review")&&reviewFullAutoSelected();if(!shouldSubmitOnEnter(event,enterToSend)||sending||!createPrompt.trim()||createConnectionBlocked||(createKind==="single"&&permission===":danger-full-access"&&!dangerConfirmed)||(reviewDanger&&!dangerConfirmed))return;event.preventDefault();void createTask();}
+  // ⌘Enter / Ctrl+Enter always starts; a bare Enter follows the "Enter to send" preference.
+  function submitCreateKey(event:KeyboardEvent){const permission=createPermissionFor(createProvider),reviewDanger=(createKind==="parallel"||createKind==="review")&&reviewFullAutoSelected();const modifierEnter=event.key==="Enter"&&(event.metaKey||event.ctrlKey)&&!event.altKey&&!event.isComposing;if(!(modifierEnter||shouldSubmitOnEnter(event,enterToSend))||sending||!createPrompt.trim()||createConnectionBlocked||(createKind==="single"&&permission===":danger-full-access"&&!dangerConfirmed)||(reviewDanger&&!dangerConfirmed))return;event.preventDefault();void createTask();}
   async function action(kind:"message"|"fork"|"stop") {
     if(!selected||sending)return;
     sending=true;followupStarting=kind==="message";
@@ -1883,26 +1982,32 @@
       // being a phone, and must never hide the composer while the soft keyboard
       // is up.
       const trackViewport=()=>{viewportWidth=window.innerWidth;viewportHeight=window.visualViewport?.height??window.innerHeight;keyboardOpen=document.documentElement.hasAttribute("data-keyboard-open");};
+      // focusout also fires synchronously when Svelte removes a focused node
+      // (closing the command palette), i.e. mid-teardown, where writing state
+      // throws state_unsafe_mutation. Defer focus-driven reads past the flush.
+      const trackViewportAfterFocus=()=>queueMicrotask(trackViewport);
       const coarseQuery=window.matchMedia("(pointer:coarse)");
       const trackPointer=(event:MediaQueryListEvent)=>{coarsePointer=event.matches;};
       trackViewport();
       window.addEventListener("resize",trackViewport);
       window.visualViewport?.addEventListener("resize",trackViewport);
-      window.addEventListener("focusin",trackViewport);
-      window.addEventListener("focusout",trackViewport);
+      window.addEventListener("focusin",trackViewportAfterFocus);
+      window.addEventListener("focusout",trackViewportAfterFocus);
       coarseQuery.addEventListener("change",trackPointer);
-      const overflowReposition=()=>{if(overflowOpen)placeOverflow();};
+      const overflowReposition=()=>{if(overflowOpen)placeOverflow();if(filtersOpen)filtersStyle=placeSheet(filtersTrigger,filtersMenu,360);};
+      window.addEventListener("keydown",paletteKey);
       window.addEventListener("resize",overflowReposition);
       window.visualViewport?.addEventListener("resize",overflowReposition);
       window.visualViewport?.addEventListener("scroll",overflowReposition);
       const removeViewportTracking=()=>{
+        window.removeEventListener("keydown",paletteKey);
         window.removeEventListener("resize",overflowReposition);
         window.visualViewport?.removeEventListener("resize",overflowReposition);
         window.visualViewport?.removeEventListener("scroll",overflowReposition);
         window.removeEventListener("resize",trackViewport);
         window.visualViewport?.removeEventListener("resize",trackViewport);
-        window.removeEventListener("focusin",trackViewport);
-        window.removeEventListener("focusout",trackViewport);
+        window.removeEventListener("focusin",trackViewportAfterFocus);
+        window.removeEventListener("focusout",trackViewportAfterFocus);
         coarseQuery.removeEventListener("change",trackPointer);
       };
       startRuntimeUpdateEvents();startModelCatalogEvents();
@@ -1968,10 +2073,10 @@
 
 <svelte:head><meta name="color-scheme" content="dark light" /></svelte:head>
 
-{#snippet topbarUtilities(labelled:boolean)}
+{#snippet shellUtilities(labelled:boolean)}
   <button type="button" data-popup-trigger="quota" class="icon-button quota-btn {barClass(quotaPeak())}" class:labelled class:active={quotaOpen} aria-label={$t("quota.title")} title={$t("quota.title")} onclick={()=>{closeOverflow();quotaOpen=!quotaOpen;if(quotaOpen)void loadQuota(true);}}><Gauge size={19}/>{#if labelled}<span>{$t("quota.title")}</span>{/if}</button>
-  <button type="button" class="icon-button" class:labelled class:active={globalOpen} aria-label={$t("a11y.openSettings")} title={$t("settings.title")} onclick={()=>{closeOverflow();openGlobalSettings();}}><Settings size={19}/>{#if labelled}<span>{$t("settings.title")}</span>{/if}</button>
-  {#if !selected&&!selectedCollaboration&&!codexDetailOpen}<button type="button" class="icon-button" class:labelled class:active={searchOpen} aria-label={$t("a11y.openSearch")} title={$t("common.search")} onclick={()=>{closeOverflow();searchOpen=!searchOpen;if(searchOpen)overviewOpen=false;else updateSearchQuery("");}}><Search size={19}/>{#if labelled}<span>{$t("common.search")}</span>{/if}</button>{/if}
+  <button type="button" class="icon-button" class:labelled class:active={globalOpen} aria-label={$t("a11y.openSettings")} title={$t("settings.title")} onclick={()=>{closeOverflow();if(globalOpen)closeGlobalSettings();else openGlobalSettings();}}><Settings size={19}/>{#if labelled}<span>{$t("settings.title")}</span>{/if}</button>
+  <button type="button" class="icon-button" class:labelled aria-label={$t("a11y.openSearch")} title={$t("palette.open")} onclick={()=>{closeOverflow();openPalette();}}><Search size={19}/>{#if labelled}<span>{$t("palette.open")}</span>{/if}</button>
   <button type="button" class="icon-button" class:labelled aria-label={$t("common.refresh")} title={$t("common.refresh")} disabled={refreshRunning} onclick={()=>{closeOverflow();void refresh();}}><RefreshCw size={19} class={refreshRunning?"spin":""}/>{#if labelled}<span>{$t("common.refresh")}</span>{/if}</button>
 {/snippet}
 
@@ -2016,101 +2121,7 @@
   </section>
 {/snippet}
 
-{#if !ownerClaimChecked}
-<main class="claim-bootstrap" aria-live="polite"><LoaderCircle class="spin" size={30}/><strong>{$t("ownerClaim.scanning")}</strong></main>
-{:else if ownerClaimStatusError}
-<main class="claim-bootstrap" role="alert"><CircleAlert size={30}/><strong>{ownerClaimStatusError}</strong><button type="button" onclick={retryOwnerClaimStatus}>{$t("common.retry")}</button></main>
-{:else if ownerClaimRequired}
-<OwnerClaim {api} initialStatus={ownerClaimInitial} onclaimed={retryOwnerClaimStatus}/>
-{:else}
-<div class="shell" inert={Boolean(workspaceViewer)&&(workspaceViewerLayout.layout==="window"||workspaceViewerLayout.layout==="fullscreen")} class:detail-open={selected||selectedCollaboration||codexDetailOpen} class:session-detail-open={selected||codexDetailOpen} class:chrome-drawer-enabled={immersiveActive} class:chrome-immersive={chromeHidden} style={immersiveActive?`--chrome-progress:${$bottomChromeProgress}`:""} class:overview-open={overviewOpen&&!selected&&!selectedCollaboration&&!codexDetailOpen} class:viewer-columns={Boolean(workspaceViewer)&&workspaceViewerLayout.layout==="columns"} class:viewer-rows={Boolean(workspaceViewer)&&workspaceViewerLayout.layout==="rows"} class:viewer-layout-reversed={Boolean(workspaceViewer)&&workspaceViewerLayout.reversed}>
-  <header class="topbar">
-    <div class="brand" aria-label={$t("brand.name")}>
-      <span class="brand-nav-slot">
-        {#if selectedCollaboration}<button class="brand-back" aria-label={$t("common.back")} onclick={()=>{selectedCollaboration=null;revealImmersiveChrome();}}><ChevronLeft size={22}/></button>
-        {:else if selected}<button class="brand-back" aria-label={$t("common.back")} onclick={()=>{stopLive();discardLive();selected=null;selectedAssistId=null;events=[];liveStatus="History";revealImmersiveChrome();}}><ChevronLeft size={22}/></button>
-        {:else if engine==="codex"&&codexDetailOpen}<button class="brand-back" aria-label={$t("session.title")} onclick={()=>{codexRef?.closeDetail();revealImmersiveChrome();}}><ChevronLeft size={22}/></button>
-        {:else}<img class="brand-app-icon" src="/icons/favicon.svg" alt="" aria-hidden="true"/>{/if}
-      </span>
-      <span class="brand-copy"><strong><span class="brand-full">{$t("brand.name")}</span><span class="brand-short">{$t("brand.shortName")}</span></strong><small>{$t("brand.subtitle")}</small></span>
-    </div>
-    <nav class="primary-nav" class:icon-only={navIconOnly} aria-label={$t("nav.primary")}>
-      <button type="button" class:active={overviewOpen} onclick={openOverview} aria-label={$t("nav.home")} title={$t("nav.home")}><House size={17}/><span class="nav-label">{$t("nav.home")}</span></button>
-      <button type="button" class:active={collaborationBoardOpen} onclick={()=>openCollaborationBoard()} aria-label={$t("collaborationBoard.title")} title={$t("collaborationBoard.title")}><KanbanSquare size={17}/><span class="nav-label">{$t("collaborationBoard.title")}</span></button>
-      <button type="button" class:active={!overviewOpen&&!collaborationBoardOpen&&engine!=="conversation"} onclick={openSessions} aria-label={$t("nav.sessions")} title={$t("nav.sessions")}><SquareTerminal size={17}/><span class="nav-label">{$t("nav.sessions")}</span></button>
-      <button type="button" class:active={!overviewOpen&&!collaborationBoardOpen&&engine==="conversation"} onclick={openConversations} aria-label={$t("nav.conversation")} title={$t("nav.conversation")}><MessagesSquare size={17}/><span class="nav-label">{$t("nav.conversation")}</span></button>
-    </nav>
-    <div class="top-actions">
-      <AgentAvatarDock codex={codexRecent} claude={claudeRecent} grok={grokRecent} deepseek={deepseekRecent} ollama={ollamaRecent} antigravity={antigravityRecent} connectedProviders={connectedAvatarProviders} activeByProvider={avatarActive} completedByProvider={avatarCompleted} sessionsLoading={avatarSessionsLoading} sessionsError={avatarSessionsError} onSelect={openRecentSession} onStatusChange={updateAvatarTaskStatus} onOpen={avatarPanelOpen} {showAvatars} {showSpeech} {codexAvatar} {avatarAutoCollapse} {avatarCollapseDelayMs} {avatarTrayShape} statusSuspended={quotaOpen||globalOpen||createOpen} streamSuspendedProviders={collaborationStreamOwners} onCodexAvatarChange={changeCodexAvatar} onAvatarOutfitChange={changeAvatarOutfit} onNoticeAction={handleAvatarNoticeAction} backgroundNotifications={notifications} {vibration} runtimeNotices={runtimeAvatarNotices}/>
-      {#if compactTopbar}
-        <button type="button" bind:this={overflowTrigger} data-popup-trigger="overflow" class="icon-button" class:active={overflowOpen} aria-label={$t("nav.moreActions")} title={$t("nav.moreActions")} aria-haspopup="menu" aria-expanded={overflowOpen} onclick={toggleOverflow}><EllipsisVertical size={19}/></button>
-      {:else}
-        {@render topbarUtilities(false)}
-      {/if}
-      <button class="new-button" aria-label={$t("task.create")} onclick={openCreate}>{#if createOpening}<LoaderCircle class="spin" size={19}/>{:else}<Plus size={19}/>{/if}<span>{$t("task.create")}</span></button>
-    </div>
-    {#if compactTopbar}
-      <div bind:this={overflowMenu} class="topbar-overflow" popover="manual" role="menu" aria-label={$t("nav.moreActions")} style={overflowStyle} use:dismissOnOutside={{onDismiss:closeOverflow,triggerSelector:'[data-popup-trigger="overflow"]'}}>
-        {@render topbarUtilities(true)}
-      </div>
-    {/if}
-  </header>
-  {#if providerAccountsLoaded&&providerAccounts.filter(item=>item.provider==="codex"||item.provider==="claude").length===2&&providerAccounts.filter(item=>item.provider==="codex"||item.provider==="claude").every(item=>item.state==="disconnected")&&!selected&&!codexDetailOpen}
-    <div class="provider-setup-notice"><span><strong>{$t("provider.connectionRequired")}</strong><small>{$t("provider.connectionRequiredBody")}</small></span><button type="button" onclick={openGlobalSettings}>{$t("provider.connectionSettings")}</button></div>
-  {/if}
-  {#if (claudeCatalogLoading||claudeCatalogRefreshing||isClaudeCatalogFallback(claudeCatalogMeta)||claudeModelTransitions.length)&&!selected&&!selectedCollaboration&&!codexDetailOpen}
-    <div class="model-filter-notice" role="status" aria-live="polite">
-      {#if claudeCatalogLoading||claudeCatalogRefreshing}<LoaderCircle class="spin" size={18}/>{:else}<CircleAlert size={18}/>{/if}<span><strong>{$t(claudeCatalogLoading||claudeCatalogRefreshing?"model.catalogCheckingTitle":claudeModelTransitions.length?"model.catalogTransitionTitle":"model.catalogDelayTitle")}</strong><small>{$t(claudeCatalogLoading||claudeCatalogRefreshing?"model.catalogCheckingBody":claudeModelTransitions.length?(isClaudeCatalogFallback(claudeCatalogMeta)?"model.catalogTransitionFallbackBody":"model.catalogTransitionBody"):"model.catalogFallbackBody",{models:claudeModelTransitionText()})}</small></span>
-      <button type="button" disabled={claudeCatalogLoading||claudeCatalogRefreshing} onclick={refreshClaudeModelCatalog}><RefreshCw size={14} class={claudeCatalogRefreshing?"spin":""}/>{$t(claudeCatalogLoading||claudeCatalogRefreshing?"model.loading":"model.catalogRetry")}</button>
-    </div>
-  {/if}
-  {#if quotaOpen}
-    <div class="quota-pop" role="status" use:dismissOnOutside={{onDismiss:()=>quotaOpen=false,triggerSelector:'[data-popup-trigger="quota"]'}}>
-      <header><strong>{$t("quota.title")}</strong><span class="quota-actions"><button class="icon-button" aria-label={$t("common.refresh")} title={$t("common.refresh")} disabled={quotaLoading} onclick={()=>void loadQuota(true)}><RefreshCw size={15} class={quotaLoading?"spin":""}/></button></span></header>
-      {#if quotaLoading&&!quota}<p class="quota-note">{$t("common.loading")}</p>{/if}
-      {#each [["codex","Codex",quota?.codex],["claude","Claude",quota?.claude],["grok","Grok",quota?.grok],["antigravity","Gemini",quota?.antigravity],["deepseek","DeepSeek",quota?.deepseek],["ollama","Ollama Cloud",quota?.ollama]] as [cls,name,q]}
-        <section>
-          <span class="engine {cls}">{name}</span>{#if q?.plan}<em class="plan">{q.plan}</em>{/if}
-          {#if q?.fiveHour}
-            <div class="quota-line"><span>{$t("quota.fiveHours")}</span><div class="qbar"><i class={barClass(q.fiveHour.pct)} style={`width:${Math.min(100,q.fiveHour.pct??0)}%`}></i></div><span class="pct">{quotaPct(q.fiveHour.pct)}%</span></div>
-            {@const fiveHourReset=fmtReset(q.fiveHour.resetsAt,q.fiveHour.resetLabel)}
-            {#if fiveHourReset}<p class="reset">{fiveHourReset}</p>{/if}
-          {/if}
-          {#if q?.sevenDay}
-            <div class="quota-line"><span>{$t("quota.weekly")}</span><div class="qbar"><i class={barClass(q.sevenDay.pct)} style={`width:${Math.min(100,q.sevenDay.pct??0)}%`}></i></div><span class="pct">{quotaPct(q.sevenDay.pct)}%</span></div>
-            {@const sevenDayReset=fmtReset(q.sevenDay.resetsAt,q.sevenDay.resetLabel)}
-            {#if sevenDayReset}<p class="reset">{sevenDayReset}</p>{/if}
-          {/if}
-          {#if q?.balance}
-            <div class="quota-balance" class:depleted={!q.balance.available}>
-              <strong>{$t("quota.balance")}</strong>
-              <span>{formatCurrency(q.balance.total,q.balance.currency,$locale)}</span>
-              <small>{$t("quota.balanceSplit",{toppedUp:formatCurrency(q.balance.toppedUp,q.balance.currency,$locale),granted:formatCurrency(q.balance.granted,q.balance.currency,$locale)})}</small>
-            </div>
-            {#if !q.balance.available}<p class="quota-note warn-text">{$t("quota.balanceDepleted")}</p>{/if}
-          {/if}
-          {#if q?.quotaMode==="vertex-credit"}<p class="quota-note vertex-quota-note"><strong>{$t("antigravityExecution.vertexCreditTitle")}</strong><span>{$t("antigravityExecution.vertexQuotaScope",{project:q.projectId,location:q.location})}</span><small>{$t("antigravityExecution.vertexCreditBody")}</small><a href={q.creditsUrl||`https://console.cloud.google.com/billing?project=${encodeURIComponent(String(q.projectId??""))}`} target="_blank" rel="noopener noreferrer">{$t("antigravityExecution.vertexCreditOpen")}</a></p>
-          {:else if q?.limitsAvailable===false}<p class="quota-note">{$t(q?.balance?"quota.prepaidLimits":"quota.accountLimitsUnavailable")}</p>{:else if !quotaLoading && !q?.fiveHour && !q?.sevenDay}<p class="quota-note">{$t("quota.noData")}</p>{/if}
-          {#if q?.error === "rate_limited"}<p class="quota-note warn-text">{$t("quota.rateLimited")}</p>
-          {:else if q?.error}<p class="quota-note warn-text">{$t("quota.unavailable")} · {$t("quota.retrying")}</p>
-          {:else if q?.status === "partial"&&q?.limitsAvailable!==false}<p class="quota-note">{$t("quota.partial")}</p>{/if}
-        </section>
-      {/each}
-      {#if quota?.fetchedAt}<p class="fetched">{formatDateTime(quota.fetchedAt,$locale)}</p>{/if}
-    </div>
-  {/if}
-
-  {#if searchOpen && !selected && !selectedCollaboration && !codexDetailOpen}
-    <div class="searchbar"><Search size={18}/><input value={query} oninput={(event)=>updateSearchQuery(event.currentTarget.value)} placeholder={$t("historySearch.placeholder")} use:focusNode/>{#if query}<button class="icon-button" aria-label={$t("common.clear")} onclick={()=>updateSearchQuery("")}><X size={18}/></button>{/if}</div>
-  {/if}
-
-  {#if error}<button class="error-band" onclick={()=>error=""}><CloudOff size={18}/><span>{error}</span><X size={17}/></button>{/if}
-  {#if taskSettingsNotice}<button class="settings-save-band" aria-live="polite" onclick={()=>taskSettingsNotice=""}><Check size={18}/><span>{taskSettingsNotice}</span><X size={17}/></button>{/if}
-
-  {#if !selected&&!selectedCollaboration}
-    {#if searchOpen&&query.trim()}
-      <HistorySearchResults {api} {query} {workspaces} initialProvider={engine==="codex"||engine==="claude"?engine:""} onopen={openHistoryResult}/>
-    {:else}
+{#snippet browserShell()}
     <section class="browser-shell" class:codex-browser={engine==="codex"&&!codexDetailOpen}>
       <div class="quota-reservation-list" aria-label={$t("quotaReservation.list")}>
         {#each quotaReservations.filter(item=>item.status!=="started"&&item.status!=="cancelled") as item (item.id)}
@@ -2138,47 +2149,60 @@
     {:else if overviewOpen}
       {@const overviewTasks=tasks.filter(task=>sessionMatchesConversationScope(task,"regular",tasks,sessionClassificationContext))}
       {@const overviewActive=latestThreadRows(overviewTasks).filter(task=>active.has(task.status))}
-      {@const overviewCompleted=latestThreadRows(overviewTasks).filter(task=>task.status==="completed").slice(0,3)}
-      <main class="overview-page">
+      {@const overviewWaiting=overviewActive.filter(task=>task.status==="waiting")}
+      {@const overviewRunning=overviewActive.filter(task=>task.status!=="waiting")}
+      {@const overviewCompleted=latestThreadRows(overviewTasks).filter(task=>task.status==="completed").slice(0,5)}
+      {@const overviewCompletedToday=latestThreadRows(overviewTasks).filter(task=>task.status==="completed"&&sameLocalDay(task.updatedAt)).length}
+      {@const overviewDirty=workspaces.filter(item=>Boolean(item.lastGitStatus?.dirty)).length}
+      {@const overviewOnline=hosts.filter(item=>item.status==="online"||item.status==="connected").length}
+      <main class="overview-page home-page">
+        <header class="home-head">
+          <div><h1>{$t("nav.home")}</h1><p class="home-line">{$t("home.summaryLine",{running:overviewRunning.length,waiting:overviewWaiting.length})}</p></div>
+          <button type="button" class="ui-btn ui-btn-primary home-new" onclick={()=>void openCreate()}><Plus size={16}/>{$t("nav.newTask")}</button>
+        </header>
+        <div class="home-kpis">
+          <button type="button" class="home-kpi" onclick={()=>{openSessions();selectViewTab("active");}}><strong>{overviewRunning.length}</strong><span>{$t("home.kpi.running")}</span></button>
+          <button type="button" class="home-kpi" onclick={()=>{openSessions();selectViewTab("all");}}><strong>{overviewCompletedToday}</strong><span>{$t("home.kpi.completedToday")}</span></button>
+          <button type="button" class="home-kpi" class:warn={overviewDirty>0} onclick={()=>{globalTab="workspace";openGlobalSettings();}}><strong>{overviewDirty}</strong><span>{$t("home.kpi.uncommitted")}</span></button>
+          <button type="button" class="home-kpi" class:err={hosts.length>0&&overviewOnline<hosts.length} onclick={openOverviewWorker}><strong>{overviewOnline}<small>/{hosts.length}</small></strong><span>{$t("home.kpi.workers")}</span></button>
+        </div>
         <div class="overview-grid">
           <div class="overview-main">
-          <section class="overview-panel overview-active" class:overview-active-empty={!overviewActive.length}>
-            <header><div><span class="overview-kicker">{$t("overview.active")}</span><h2>{$t("overview.activeTitle")}</h2></div><span class="overview-count">{$t("overview.activeCount",{count:overviewActive.length})}</span></header>
-            {#if overviewActive.length}
+          {#if overviewWaiting.length}
+          <section class="overview-panel home-attention">
+            <header><div><h2>{$t("home.needsAttention")}</h2></div><span class="overview-count">{overviewWaiting.length}</span></header>
+            <div class="home-attention-list">
+              {#each overviewWaiting as task (task.id)}
+                <button type="button" onclick={()=>openTask(task)}><StatusBadge state="attention"/><span class="home-row-copy"><strong>{task.title||$t("task.untitled")}</strong><small>{providerDisplayName(task.provider)} · {workspaces.find(item=>item.id===task.workspaceId)?.displayName??projectLabel(task)} · {ago(task.updatedAt)}</small></span><span class="home-row-open">{$t("home.open")} ›</span></button>
+              {/each}
+            </div>
+          </section>
+          {/if}
+          <section class="overview-panel overview-active" class:overview-active-empty={!overviewRunning.length}>
+            <header><div><span class="overview-kicker">{$t("overview.active")}</span><h2>{$t("overview.activeTitle")}</h2></div><span class="overview-count">{$t("overview.activeCount",{count:overviewRunning.length})}</span></header>
+            {#if overviewRunning.length}
               <div class="overview-task-stack">
-                {#each overviewActive as task}
-                  <TaskLivenessPanel {task} {api} density={overviewActive.length===1?"full":overviewActive.length===2?"medium":(overviewExpandedTaskId??overviewActive[0]?.id)===task.id?"full":"compact"} hostName={hostName(task.executionHostId)} workspaceName={workspaces.find(item=>item.id===task.workspaceId)?.displayName??projectLabel(task)} onopen={()=>openTask(task)} onexpand={()=>overviewExpandedTaskId=task.id}/>
+                {#each overviewRunning as task (task.id)}
+                  <TaskLivenessPanel {task} {api} density={overviewExpandedTaskId===task.id?"full":"compact"} hostName={hostName(task.executionHostId)} workspaceName={workspaces.find(item=>item.id===task.workspaceId)?.displayName??projectLabel(task)} onopen={()=>openTask(task)} onexpand={()=>overviewExpandedTaskId=task.id}/>
                 {/each}
               </div>
             {:else}
               <div class="overview-empty"><Check size={22}/><strong>{$t("overview.noActive")}</strong><span>{$t("overview.noActiveBody")}</span></div>
             {/if}
           </section>
-          <CollaborationBoardPanel {api} {workspaces} executionConfig={collaborationBoardExecutionConfig()} onopen={openCollaborationBoard} onopenall={()=>openCollaborationBoard()}/>
-          </div>
-          <aside class="overview-side">
-            <section class="overview-panel overview-workers">
-              <header><div><h2>{$t("overview.workers")}</h2></div><span class="overview-muted">{$t("overview.justUpdated")}</span></header>
-              <div class="overview-worker-list">
-                {#each hosts as host}
-                  {@const hostActiveCount=latestThreadRows(tasks).filter(task=>active.has(task.status)&&(task.executionHostId??"local")===host.id).length}
-                  {@const hostProviders=[...new Set(latestThreadRows(tasks).filter(task=>(task.executionHostId??"local")===host.id).map(task=>providerDisplayName(task.provider)))]}
-                  <div class:worker-offline={host.status!=="online"&&host.status!=="connected"}><span><strong><i class:online={host.status==="online"||host.status==="connected"}></i>{host.displayName}</strong><small>{$t("overview.heartbeat",{time:host.lastSeenAt?ago(host.lastSeenAt):$t("common.unknown")})}</small><small>{hostActiveCount?$t("overview.hostActive",{count:hostActiveCount}):$t("overview.hostIdle")}{#if hostProviders.length} · {hostProviders.join(" · ")}{/if}</small></span>{#if host.status!=="online"&&host.status!=="connected"}<button type="button" onclick={openOverviewWorker}>{$t("overview.diagnoseHost")}</button>{/if}</div>
-                {:else}
-                  <p class="overview-side-empty">{$t("overview.noWorkers")}</p>
-                {/each}
-              </div>
-            </section>
             <section class="overview-panel overview-recent">
               <header><div><h2>{$t("overview.recent")}</h2></div><button type="button" onclick={openSessions}>{$t("overview.allSessions")} ›</button></header>
               <div class="overview-recent-list">
-                {#each overviewCompleted as task}
+                {#each overviewCompleted as task (task.id)}
                   <button type="button" onclick={()=>openTask(task)}><span><Check size={15}/></span><strong>{task.title||$t("task.untitled")}</strong><small>{ago(task.updatedAt)}</small></button>
                 {:else}
                   <p class="overview-side-empty">{$t("overview.noRecent")}</p>
                 {/each}
               </div>
             </section>
+          <CollaborationBoardPanel {api} {workspaces} executionConfig={collaborationBoardExecutionConfig()} onopen={openCollaborationBoard} onopenall={()=>openCollaborationBoard()}/>
+          </div>
+          <aside class="overview-side">
             <section class="overview-panel overview-quick">
               <header><div><h2>{$t("overview.quickCreate")}</h2></div></header>
               <div class="overview-quick-grid">
@@ -2192,24 +2216,65 @@
                 <button type="button" onclick={openOverviewWorker}><strong>{$t("overview.connectWorker")}</strong><small>{$t("overview.connectWorkerBody")}</small></button>
               </div>
             </section>
+            <section class="overview-panel home-workspaces">
+              <header><div><h2>{$t("nav.workspaces")}</h2></div><button type="button" onclick={()=>{globalTab="workspace";openGlobalSettings();}}>{$t("settings.title")} ›</button></header>
+              <div class="home-workspace-list">
+                {#each workspaces.slice(0,8) as workspace (workspace.id)}
+                  <button type="button" title={$t("home.newTaskIn")} onclick={()=>void openCreateInWorkspace(workspace)}><span class="home-row-copy"><strong>{workspace.displayName}</strong><small class="mono">{workspace.lastGitStatus?.branch??hostName(workspace.hostId)}</small></span>{#if workspace.lastGitStatus?.dirty}<span class="home-dirty warn-text">{$t("home.workspaceDirty",{count:Array.isArray(workspace.lastGitStatus?.changedFiles)?workspace.lastGitStatus.changedFiles.length:0})}</span>{:else}<span class="home-dirty">{$t("home.workspaceClean")}</span>{/if}</button>
+                {:else}
+                  <p class="overview-side-empty">{$t("home.noWorkspaces")}</p>
+                {/each}
+              </div>
+            </section>
+            <section class="overview-panel overview-workers">
+              <header><div><h2>{$t("overview.workers")}</h2></div><span class="overview-muted">{$t("overview.justUpdated")}</span></header>
+              <div class="overview-worker-list">
+                {#each hosts as host}
+                  {@const hostActiveCount=latestThreadRows(tasks).filter(task=>active.has(task.status)&&(task.executionHostId??"local")===host.id).length}
+                  {@const hostProviders=[...new Set(latestThreadRows(tasks).filter(task=>(task.executionHostId??"local")===host.id).map(task=>providerDisplayName(task.provider)))]}
+                  <div class:worker-offline={host.status!=="online"&&host.status!=="connected"}><span><strong><i class:online={host.status==="online"||host.status==="connected"}></i>{host.displayName}</strong><small>{$t("overview.heartbeat",{time:host.lastSeenAt?ago(host.lastSeenAt):$t("common.unknown")})}</small><small>{hostActiveCount?$t("overview.hostActive",{count:hostActiveCount}):$t("overview.hostIdle")}{#if hostProviders.length} · {hostProviders.join(" · ")}{/if}</small></span>{#if host.status!=="online"&&host.status!=="connected"}<button type="button" onclick={openOverviewWorker}>{$t("overview.diagnoseHost")}</button>{/if}</div>
+                {:else}
+                  <p class="overview-side-empty">{$t("overview.noWorkers")}</p>
+                {/each}
+              </div>
+            </section>
           </aside>
         </div>
       </main>
     {:else}
     {#if engine!=="codex"||!codexDetailOpen}
-    <div class="filterbar">
+    <div class="sessions-head">
+      <div class="sessions-toolbar">
+        <label class="sessions-search"><Search size={16}/><input value={query} oninput={(event)=>updateSearchQuery(event.currentTarget.value)} placeholder={$t("sessions.searchPlaceholder")} aria-label={$t("sessions.searchPlaceholder")}/>{#if query}<button type="button" class="icon-button" aria-label={$t("common.clear")} onclick={()=>{updateSearchQuery("");searchOpen=false;}}><X size={15}/></button>{/if}</label>
+        {#if query.trim()}<button type="button" class="ui-btn ui-btn-sm" class:active={searchOpen} aria-pressed={searchOpen} onclick={()=>{searchOpen=!searchOpen;}}>{$t("sessions.searchHistory")}</button>{/if}
+        <button type="button" bind:this={filtersTrigger} data-popup-trigger="session-filters" class="ui-btn ui-btn-sm sessions-filter-button" class:active={filtersOpen||filterChips.length>0} aria-haspopup="true" aria-expanded={filtersOpen} onclick={toggleFilters}><SlidersHorizontal size={14}/><span>{$t("sessions.filter")}</span>{#if filterChips.length}<b class="nav-count">{filterChips.length}</b>{/if}</button>
+        {#if engine==="conversation"||engine==="collaboration-work"}
+          {#if engine==="conversation"}<button type="button" class="ui-btn ui-btn-sm ui-btn-ghost" aria-expanded={conversationDocumentsOpen} onclick={()=>conversationDocumentsOpen=!conversationDocumentsOpen} disabled={!conversationDocuments.length}><FileText size={14}/>{$t("conclusion.manage",{count:conversationDocuments.length})}</button>{/if}
+          {#if !conversationBulkMode}<button type="button" class="ui-btn ui-btn-sm ui-btn-ghost" onclick={startConversationBulkMode} disabled={!(engine==="conversation"?visibleCollaborations(true):visibleWorkCollaborations()).some(canBulkDeleteConversation)}>{$t("bulk.select")}</button>{/if}
+        {:else if !taskBulkMode}
+          <button type="button" class="ui-btn ui-btn-sm ui-btn-ghost" onclick={startTaskBulkMode} disabled={!grouped().some(canBulkDeleteTask)}>{$t("bulk.select")}</button>
+        {/if}
+      </div>
       {#if engine!=="conversation"}
-      <nav class="filters" aria-label={$t("session.engineFilter")}>
+      <!-- One click to another model's sessions, as before the redesign. -->
+      <nav class="filters engine-tabs" aria-label={$t("session.engineFilter")}>
         {#each [["all",$t("nav.all")],["collaboration-work",$t("nav.collaborationWork")],["conversation-linked",$t("nav.linkedSessions")],["codex","Codex"],["claude","Claude"],["grok","Grok"],["antigravity","Gemini"],["deepseek","DeepSeek"],["ollama","Ollama"]] as item}
           <button class:active={engine===item[0]} onclick={()=>selectEngine(item[0] as typeof engine)}>{item[1]}</button>
         {/each}
       </nav>
       {/if}
-      <nav class="filters sub" aria-label={$t("session.statusFilter")}>
-        {#each [["",$t("common.all")],["active",$t("task.status.running")],["waiting",$t("task.status.waiting")],["done",$t("task.status.completed")],["failed",$t("task.status.failed")]] as item}
-          <button class:active={statusSelected(item[0] as typeof statusFilter)} onclick={()=>selectStatus(item[0] as typeof statusFilter)}>{item[1]}</button>
-        {/each}
+      <nav class="session-view-tabs" aria-label={$t("session.statusFilter")}>
+        {#each SESSION_VIEW_TABS as tab (tab)}<button type="button" class:active={viewTab===tab} aria-current={viewTab===tab?"page":undefined} onclick={()=>selectViewTab(tab)}>{$t(`sessions.viewTab.${tab}`)}</button>{/each}
       </nav>
+      {#if filterChips.length}
+        <div class="filter-chips" role="list" aria-label={$t("sessions.filter")}>
+          {#each filterChips as chip (chip.id)}<span class="filter-chip" role="listitem">{chip.label}<button type="button" aria-label={$t("sessions.removeFilter",{label:chip.label})} onclick={chip.clear}><X size={12}/></button></span>{/each}
+          <button type="button" class="filter-chips-clear" onclick={clearAllFilters}>{$t("sessions.clearFilters")}</button>
+        </div>
+      {/if}
+    </div>
+    <div bind:this={filtersMenu} class="session-filter-pop" popover="manual" role="group" aria-label={$t("sessions.filter")} style={filtersStyle} use:dismissOnOutside={{onDismiss:closeFilters,triggerSelector:'[data-popup-trigger="session-filters"]'}}>
+      <label class="session-filter-field">{$t("sessions.filterStatus")}<select value={currentStatus} onchange={(event)=>selectStatus((event.currentTarget as HTMLSelectElement).value as typeof statusFilter)}>{#each [["",$t("common.all")],["active",$t("task.status.running")],["waiting",$t("task.status.waiting")],["done",$t("task.status.completed")],["failed",$t("task.status.failed")]] as item}<option value={item[0]}>{item[1]}</option>{/each}</select></label>
       {#if engine==="codex"}
       <div class="session-select-filters" role="region" aria-label={$t("session.filters")}>
         <label>{$t("session.project")}<select bind:value={codexProjectFilter}><option value="">{$t("common.all")}</option>{#each projects as item}<option value={item.id}>{item.name}</option>{/each}</select></label>
@@ -2230,35 +2295,29 @@
     {/if}
     {#if codexMounted}<div class="codex-session-pane" hidden={engine!=="codex"}><CodexSessions active={engine==="codex"} {api} bind:this={codexRef} bind:status={codexStatus} bind:projectId={codexProjectFilter} bind:source={codexSourceFilter} bind:ownership={codexOwnershipFilter} bind:model={codexModelFilter} sessionScope="regular" classificationContext={sessionClassificationContext} {taskState} {query} {enterToSend} {scrollAutoSwitch} {projects} {workspaces} {hosts} modelOptions={availableCodexModels()} providerQuota={quota?.codex??null} {codexAvatar} onDetail={(o)=>codexDetailOpen=o} onRecentStatus={(recent)=>codexSessionRecent=recent} onOpenTask={(task)=>openTask(task)} onOpenFile={openConversationFile}/></div>{/if}
     {#if engine!=="codex"}<main class="task-list session-browser-list">
+      {#if searchOpen&&query.trim()}
+        <HistorySearchResults {api} {query} {workspaces} initialProvider={engine==="claude"?"claude":""} onopen={openHistoryResult}/>
+      {:else}
       {#if engine==="conversation"||engine==="collaboration-work"}
-      <div class="bulk-session-toolbar" class:active={conversationBulkMode}>
-        {#if conversationBulkMode}
+      {#if conversationBulkMode}
           {@const selectableOnPage=conversationPageSessions().filter(canBulkDeleteConversation)}
           {@const pageFullySelected=selectableOnPage.length>0&&selectableOnPage.every(item=>conversationBulkSelected.has(item.id))}
+      <div class="bulk-session-toolbar active">
           <span>{$t("bulk.selected",{count:conversationBulkSelected.size})}</span>
           <button onclick={toggleConversationPageBulk} disabled={!selectableOnPage.length}>{$t(pageFullySelected?"bulk.unselectPage":"bulk.selectPage")}</button>
           <button onclick={exitConversationBulkMode}>{$t("common.cancel")}</button>
           <button class="destructive" onclick={openConversationBulkDelete} disabled={!conversationBulkSelected.size}><Trash2 size={16}/>{$t("common.delete")}</button>
-        {:else}
-          <span>{$t("bulk.description")}</span>
-          {#if engine==="conversation"}<button aria-expanded={conversationDocumentsOpen} onclick={()=>conversationDocumentsOpen=!conversationDocumentsOpen} disabled={!conversationDocuments.length}><FileText size={16}/>{$t("conclusion.manage",{count:conversationDocuments.length})}</button>{/if}
-          <button onclick={startConversationBulkMode} disabled={!(engine==="conversation"?visibleCollaborations(true):visibleWorkCollaborations()).some(canBulkDeleteConversation)}><Trash2 size={16}/>{$t("bulk.deleteMultiple")}</button>
-        {/if}
       </div>
+      {/if}
       {#if engine==="conversation"&&conversationDocumentsOpen}<ConversationDocumentManager documents={conversationDocuments} deletingId={conversationDocumentDeleting} onopen={openManagedConversationDocument} ondelete={deleteManagedConversationDocument} onclose={()=>conversationDocumentsOpen=false}/>{/if}
-      {:else}
-      <div class="bulk-session-toolbar" class:active={taskBulkMode}>
-        {#if taskBulkMode}
+      {:else if taskBulkMode}
           {@const selectableOnPage=taskPageSessions().filter(canBulkDeleteTask)}
           {@const pageFullySelected=selectableOnPage.length>0&&selectableOnPage.every(task=>taskBulkSelected.has(taskSessionKey(task)))}
+      <div class="bulk-session-toolbar active">
           <span>{$t("bulk.selected",{count:taskBulkSelected.size})}</span>
           <button onclick={toggleTaskPageBulk} disabled={!selectableOnPage.length}>{$t(pageFullySelected?"bulk.unselectPage":"bulk.selectPage")}</button>
           <button onclick={exitTaskBulkMode}>{$t("common.cancel")}</button>
           <button class="destructive" onclick={openTaskBulkDelete} disabled={!taskBulkSelected.size}><Trash2 size={16}/>{$t("common.delete")}</button>
-        {:else}
-          <span>{$t("bulk.description")}</span>
-          <button onclick={startTaskBulkMode} disabled={!grouped().some(canBulkDeleteTask)}><Trash2 size={16}/>{$t("bulk.deleteMultiple")}</button>
-        {/if}
       </div>
       {/if}
       {#if loading && !browserRows.length}<div class="empty"><RefreshCw class="spin" size={24}/><p>{$t("task.loading")}</p></div>
@@ -2269,7 +2328,9 @@
         {@const cur = Math.min(page, pageCount)}
         {@const pageEntries = list.slice((cur-1)*PAGE_SIZE, cur*PAGE_SIZE)}
         <WorkspaceGitOverview items={gitOverviewForAllSessions()}/>
-        {#each pageEntries as entry (`${entry.kind}:${entry.id}`)}
+        {#each groupBrowserItems(pageEntries) as group (group.key)}
+        <h3 class="session-group-head"><span>{$t(`sessions.group.${group.key}`)}</span><small>{group.items.length}</small></h3>
+        {#each group.items as {entry} (`${entry.kind}:${entry.id}`)}
           {#if entry.kind==="collaboration"}
             {@const item=entry.collaboration}
             {@const bulkEligible=canBulkDeleteConversation(item)}
@@ -2278,7 +2339,7 @@
               {#if conversationBulkMode}<span class="bulk-check" class:checked={bulkChecked} aria-hidden="true">{#if bulkChecked}<Check size={17}/>{/if}</span>{:else}<span class="status-mark s-{item.status}">{#if item.status==="completed"}<Check size={17}/>{:else if item.status==="partial"||item.status==="failed"}<CircleAlert size={17}/>{:else}<Activity size={17}/>{/if}</span>{/if}
               <span class="task-copy">
                 <strong>{item.title}</strong>
-                <span class="meta"><span class="collab-badge">{collaborationModeLabel(item)}</span><span>{$t("collaboration.participantCount",{count:Array.isArray(item.metadata?.enabledProviders)?item.metadata.enabledProviders.length:2})}</span><span>{item.currentStep}</span><span>{$t(`collaboration.${item.status}`)}</span>{#if conversationBulkMode&&!bulkEligible}<span class="bulk-disabled-reason">{$t("bulk.runningUnavailable")}</span>{/if}<span>{ago(item.updatedAt)}</span></span>
+                <span class="meta"><span class="collab-badge">{collaborationModeLabel(item)}</span><span>{$t("collaboration.participantCount",{count:Array.isArray(item.metadata?.enabledProviders)?item.metadata.enabledProviders.length:2})}</span><span>{item.currentStep}</span><StatusBadge size="sm" state={taskBadgeState(item.status)}/>{#if conversationBulkMode&&!bulkEligible}<span class="bulk-disabled-reason">{$t("bulk.runningUnavailable")}</span>{/if}<span>{ago(item.updatedAt)}</span></span>
                 <span class="preview">{collaborationPreview(item)} · {$t("collaboration.deleteLinkedWarning")}</span>
               </span>
             </button>
@@ -2300,7 +2361,7 @@
                 {#if collaborations.some(item=>item.mode==="assist"&&item.sourceTaskId===task.id)}<span class="assist-badge">{$t(task.provider==="codex"?"assist.reviewOnce":"assist.opinionOnce",{name:providerNickname(task.provider==="codex"?"claude":"codex")})}</span>{/if}
                 <span class="host-badge">{hostName(task.executionHostId)}</span>
                 <span>{projectLabel(task)}</span>
-                {#if !active.has(task.status)}<span>{labels[task.status]}</span>{/if}
+                <StatusBadge size="sm" state={taskBadgeState(task.status)}/>
                 {#if turnCount(task)>1}<span>{$t("conversation.turnCount",{count:turnCount(task)})}</span>{/if}
                 {#if taskBulkMode&&!bulkEligible}<span class="bulk-disabled-reason">{taskDeleteUnavailableLabel(task)}</span>{/if}
                 <span>{ago(task.updatedAt)}</span>
@@ -2318,6 +2379,7 @@
           </button>
           {/if}
         {/each}
+        {/each}
         {#if pageCount > 1}
           {@const blk = pageBlock(cur, pageCount)}
           <nav class="pager" aria-label={$t("pagination.label")}>
@@ -2327,13 +2389,13 @@
           </nav>
         {/if}
       {/if}
+      {/if}
     </main>{/if}
     {/if}
     </section>
-    {/if}
-  {:else if selectedCollaboration}
-    <main class="detail collaboration-detail"><CollaborationTimeline collaborationId={selectedCollaboration} {api} {codexAvatar} quotaByProvider={quota} {enterToSend} onproviderstatus={(statuses)=>collaborationRecent=statuses} onopen={(task)=>openTask(task)} onopenfile={openConversationFile}/></main>
-  {:else}
+{/snippet}
+
+{#snippet sessionDetail()}
     {#if selected}
     <main class="detail">
       <div class="detail-main">
@@ -2349,7 +2411,6 @@
            still earns a banner, because its origin is not reachable elsewhere. -->
       {#if selected.sourceSessionId}<div class="handoff-banner"><span><strong>{$t("handoff.received")}</strong><small>{$t("handoff.sourceSession",{id:shortId(selected.sourceSessionId)})}</small></span><button type="button" onclick={()=>openChainSession(selected!.sourceSessionId!)}>{$t("handoff.openSource")}</button></div>{/if}
       <ApprovalPanel {api} task={selected}/>
-      <UserInputPanel {api} task={selected}/>
       <TaskRecoveryCard {api} task={selected} onstarted={recoveredTaskStarted}/>
       {#if taskNeedsProviderAuth(selected)}
         <div class="session-auth-recovery">
@@ -2359,7 +2420,7 @@
         </div>
       {/if}
       {#if !followupStarting}<TaskOutcomeSummary {api} task={selected} events={visibleConversationEvents} mobileCollapsible={canContinue()&&selected.owned} mobileExpanded={outcomeMobileExpanded} mobileDismissed={outcomeMobileDismissed} hideOnWide onclose={()=>{outcomeMobileExpanded=false;outcomeMobileDismissed=true;}}/>{/if}
-      {#key selected.threadId??selected.id}<Conversation provider={selected.provider} events={visibleConversationEvents} request={selected.prompt} requestTimestamp={selected.createdAt} responseTimestamp={selected.updatedAt} busy={followupStarting||active.has(selected.status) && liveStatus!=="History"} liveMode={followupStarting?"Delayed":liveStatus} rootThreadId={selected.provider==="codex"?selected.threadId??null:null} providerQuota={quota?.[selected.provider]??null} persistedOutputUsage={selected.metadata?.outputUsage} {scrollAutoSwitch} onScrollDirection={handleConversationScroll} onRevealChrome={revealChrome} onScrollActivity={handleScrollActivity} runningHistoryVisible={Boolean(selected.provider==="claude"&&active.has(selected.status)&&selected.threadId)} runningHistoryExpanded={showRunningHistory} ontogglerunninghistory={()=>setShowRunningHistory(!showRunningHistory)} {transcriptTruncated} {transcriptHistoryLoading} transcriptCanLoadMore={transcriptTurns<24} onloadtranscripthistory={loadEarlierTranscript} workspaceId={selected.workspaceId??null} workspacePath={conversationWorkspacePath(selected)} executionHostId={selected.executionHostId??"local"} workspaceTargets={workspaces} sourceTaskId={selected.id} onopenfile={openConversationFile}/>{/key}
+      {#key selected.threadId??selected.id}<Conversation provider={selected.provider} providerModel={selected.effectiveModel??selected.requestedModel??selected.metadata?.model??null} events={visibleConversationEvents} request={selected.prompt} requestTimestamp={selected.createdAt} responseTimestamp={selected.updatedAt} busy={followupStarting||active.has(selected.status) && liveStatus!=="History"} liveMode={followupStarting?"Delayed":liveStatus} rootThreadId={selected.provider==="codex"?selected.threadId??null:null} providerQuota={quota?.[selected.provider]??null} persistedOutputUsage={selected.metadata?.outputUsage} {scrollAutoSwitch} onScrollDirection={handleConversationScroll} onRevealChrome={revealChrome} onScrollActivity={handleScrollActivity} runningHistoryVisible={Boolean(selected.provider==="claude"&&active.has(selected.status)&&selected.threadId)} runningHistoryExpanded={showRunningHistory} ontogglerunninghistory={()=>setShowRunningHistory(!showRunningHistory)} {transcriptTruncated} {transcriptHistoryLoading} transcriptCanLoadMore={transcriptTurns<24} onloadtranscripthistory={loadEarlierTranscript} workspaceId={selected.workspaceId??null} workspacePath={conversationWorkspacePath(selected)} executionHostId={selected.executionHostId??"local"} workspaceTargets={workspaces} sourceTaskId={selected.id} onopenfile={openConversationFile}/>{/key}
       {#if selectedAssistId}<CollaborationTimeline collaborationId={selectedAssistId} {api} {codexAvatar} quotaByProvider={quota} {enterToSend} embedded onopen={(task)=>openTask(task)} onclose={()=>selectedAssistId=null}/>{/if}
       <div class="bottom-chrome-drawer" inert={bottomChromeHidden} use:chromeSlide>
       <div bind:this={sessionMenu} class="session-actions-sheet" popover="manual" role="menu" aria-label={$t("nav.moreActions")} style={sessionMenuStyle} use:dismissOnOutside={{onDismiss:closeSessionMenu,triggerSelector:'[data-popup-trigger="session-actions"]'}}>
@@ -2372,6 +2433,7 @@
       </div>
       {#if chainOpen&&selected.workChainId}<WorkChainTimeline {api} chainId={selected.workChainId} onopen={openChainSession}/>{/if}
       {#if selected.owned&&selected.threadId}<MessageQueue bind:this={messageQueueRef} {api} provider={selected.provider} taskId={selected.id} threadId={selected.threadId} active={active.has(selected.status)} onstarted={queuedTaskStarted}/>{/if}
+      <UserInputPanel {api} task={selected}/>
       {#if canContinue()&&selected.owned}
         <form class="composer with-attach" inert={bottomChromeHidden} onsubmit={(event)=>{event.preventDefault();sendFollowup()}}>
           <div class="chat-settings-bar">
@@ -2417,10 +2479,11 @@
           <h2>{$t("session.current")}</h2>
           <dl>
             <div><dt>{$t("session.provider")}</dt><dd>{providerDisplayName(selected.provider)}</dd></div>
-            <div><dt>{$t("common.status")}</dt><dd class="state-text s-{selected.status}">{labels[selected.status]}</dd></div>
+            <div><dt>{$t("common.status")}</dt><dd><StatusBadge state={taskBadgeState(selected.status,{delayed:liveStatus==="Delayed"&&active.has(selected.status)})}/></dd></div>
             <div><dt>{$t("workspace.label")}</dt><dd>{projectLabel(selected)}</dd></div>
             <div><dt>{$t("conversation.lastEvent",{time:""})}</dt><dd>{ago(selected.updatedAt)}</dd></div>
-            <div><dt>{$t("session.worker")}</dt><dd>{["online","connected"].includes(hosts.find(host=>host.id===(selected!.executionHostId??"local"))?.status??"")?$t("common.normal"):$t("common.unknown")}</dd></div>
+            <!-- Connection details only appear when something is wrong; a healthy Worker says nothing. -->
+            {#if workerOnline(selected.executionHostId)===false}<div><dt>{$t("session.worker")}</dt><dd class="err-text">{$t("status.offline")} · {hostName(selected.executionHostId)}</dd></div>{/if}
           </dl>
         </section>
         {#if !followupStarting&&["completed","failed"].includes(selected.status)&&hasTaskOutcomeDetails(taskOutcomeSummary(selected,visibleConversationEvents))}<TaskOutcomeSummary {api} task={selected} events={visibleConversationEvents} rail/>{/if}
@@ -2451,6 +2514,198 @@
       </aside>
     </main>
     {/if}
+{/snippet}
+
+{#if !ownerClaimChecked}
+<main class="claim-bootstrap" aria-live="polite"><LoaderCircle class="spin" size={30}/><strong>{$t("ownerClaim.scanning")}</strong></main>
+{:else if ownerClaimStatusError}
+<main class="claim-bootstrap" role="alert"><CircleAlert size={30}/><strong>{ownerClaimStatusError}</strong><button type="button" onclick={retryOwnerClaimStatus}>{$t("common.retry")}</button></main>
+{:else if ownerClaimRequired}
+<OwnerClaim {api} initialStatus={ownerClaimInitial} onclaimed={retryOwnerClaimStatus}/>
+{:else}
+<div class="shell" inert={Boolean(workspaceViewer)&&(workspaceViewerLayout.layout==="window"||workspaceViewerLayout.layout==="fullscreen")} class:settings-open={globalOpen} class:detail-open={!globalOpen&&(selected||selectedCollaboration||codexDetailOpen)} class:session-detail-open={!globalOpen&&(selected||codexDetailOpen)} class:chrome-drawer-enabled={immersiveActive} class:chrome-immersive={chromeHidden} style={immersiveActive?`--chrome-progress:${$bottomChromeProgress}`:""} class:overview-open={!globalOpen&&overviewOpen&&!selected&&!selectedCollaboration&&!codexDetailOpen} class:viewer-columns={Boolean(workspaceViewer)&&workspaceViewerLayout.layout==="columns"} class:viewer-rows={Boolean(workspaceViewer)&&workspaceViewerLayout.layout==="rows"} class:viewer-layout-reversed={Boolean(workspaceViewer)&&workspaceViewerLayout.reversed}>
+{#snippet brandBlock()}
+    <div class="brand" aria-label={$t("brand.name")}>
+      <span class="brand-nav-slot">
+        {#if globalOpen}<button class="brand-back" aria-label={$t("settings.close")} onclick={()=>closeGlobalSettings()}><ChevronLeft size={22}/></button>
+        {:else if selectedCollaboration}<button class="brand-back" aria-label={$t("common.back")} onclick={()=>{selectedCollaboration=null;revealImmersiveChrome();}}><ChevronLeft size={22}/></button>
+        {:else if selected}<button class="brand-back" aria-label={$t("common.back")} onclick={()=>{stopLive();discardLive();selected=null;selectedAssistId=null;events=[];liveStatus="History";revealImmersiveChrome();}}><ChevronLeft size={22}/></button>
+        {:else if engine==="codex"&&codexDetailOpen}<button class="brand-back" aria-label={$t("session.title")} onclick={()=>{codexRef?.closeDetail();revealImmersiveChrome();}}><ChevronLeft size={22}/></button>
+        {:else}<img class="brand-app-icon" src="/icons/favicon.svg" alt="" aria-hidden="true"/>{/if}
+      </span>
+      <span class="brand-copy"><strong><span class="brand-full">{$t("brand.name")}</span><span class="brand-short">{$t("brand.shortName")}</span></strong><small>{$t("brand.subtitle")}</small></span>
+    </div>
+{/snippet}
+
+{#snippet agentDock()}
+  <!-- One dock instance: it owns avatar status streams, notices and vibration,
+       so it renders in the sidebar or, on phones, in the top bar - never both. -->
+  <AgentAvatarDock codex={codexRecent} claude={claudeRecent} grok={grokRecent} deepseek={deepseekRecent} ollama={ollamaRecent} antigravity={antigravityRecent} connectedProviders={connectedAvatarProviders} activeByProvider={avatarActive} completedByProvider={avatarCompleted} sessionsLoading={avatarSessionsLoading} sessionsError={avatarSessionsError} onSelect={openRecentSession} onStatusChange={updateAvatarTaskStatus} onOpen={avatarPanelOpen} {showAvatars} {showSpeech} {codexAvatar} {avatarAutoCollapse} {avatarCollapseDelayMs} {avatarTrayShape} statusSuspended={quotaOpen||globalOpen||createOpen} streamSuspendedProviders={collaborationStreamOwners} onCodexAvatarChange={changeCodexAvatar} onAvatarOutfitChange={changeAvatarOutfit} onNoticeAction={handleAvatarNoticeAction} backgroundNotifications={notifications} {vibration} runtimeNotices={runtimeAvatarNotices}/>
+{/snippet}
+
+{#snippet primaryNavButtons(withCounts:boolean)}
+  <button type="button" class:active={!globalOpen&&(overviewOpen)} onclick={openOverview} aria-label={$t("nav.home")} title={$t("nav.home")}><House size={18}/><span class="nav-label">{$t("nav.home")}</span></button>
+  <button type="button" class:active={!globalOpen&&(!overviewOpen&&!collaborationBoardOpen&&!overlayViewOpen&&engine!=="conversation")} onclick={openSessions} aria-label={$t("nav.sessions")} title={$t("nav.sessions")}><SquareTerminal size={18}/><span class="nav-label">{$t("nav.sessions")}</span>{#if withCounts&&activeTaskCount}<b class="nav-count">{activeTaskCount}</b>{/if}</button>
+  <button type="button" class:active={!globalOpen&&(!overviewOpen&&!collaborationBoardOpen&&!overlayViewOpen&&engine==="conversation")} onclick={openConversations} aria-label={$t("nav.conversation")} title={$t("nav.conversation")}><MessagesSquare size={18}/><span class="nav-label">{$t("nav.conversation")}</span>{#if withCounts&&activeConversationCount}<b class="nav-count">{activeConversationCount}</b>{/if}</button>
+  <button type="button" class:active={!globalOpen&&(collaborationBoardOpen)} onclick={()=>openCollaborationBoard()} aria-label={$t("collaborationBoard.title")} title={$t("collaborationBoard.title")}><KanbanSquare size={18}/><span class="nav-label">{$t("collaborationBoard.title")}</span></button>
+{/snippet}
+
+  <!-- One header at every width keeps brand, views, the agent dock and the
+       utilities in a single row so sessions get the full width. Phones move
+       the views to a bottom tab bar and the utilities into "더보기". -->
+  <header class="mobile-topbar app-topbar">
+    {@render brandBlock()}
+    {#if !compactShell}<nav class="primary-nav topbar-nav" aria-label={$t("nav.primary")}>{@render primaryNavButtons(true)}</nav>{/if}
+    <div class="top-actions">
+      {#if showAvatars}{@render agentDock()}{:else if !compactShell}
+        <div class="sidebar-agent-list topbar-agent-list" aria-label={$t("nav.agents")}>
+          {#each conversationProviders.filter(provider=>connectedAvatarProviders[provider]) as provider (provider)}
+            {@const recent=recentFor(provider)}
+            <button type="button" class="sidebar-agent" title={recent?.title??providerDisplayName(provider)} onclick={()=>{if(recent&&active.has(recent.status)){const task=tasks.find(item=>item.id===recent.taskId);if(task){void openTask(task);return;}}selectEngine(provider);}}>
+              <i class="sidebar-agent-dot tone-{agentStateTone(recent)}" aria-hidden="true"></i>
+              <span class="sidebar-agent-name">{providerDisplayName(provider)}</span>
+              <small class="sidebar-agent-state">{$t(agentStateKey(recent))}</small>
+            </button>
+          {/each}
+        </div>
+      {/if}
+      {#if compactShell}
+      <button type="button" bind:this={overflowTrigger} data-popup-trigger="overflow" class="icon-button" class:active={overflowOpen} aria-label={$t("nav.moreActions")} title={$t("nav.moreActions")} aria-haspopup="menu" aria-expanded={overflowOpen} onclick={toggleOverflow}><EllipsisVertical size={19}/></button>
+      {:else}
+        {@render shellUtilities(false)}
+      <button class="new-button" aria-label={$t("task.create")} onclick={openCreate}>{#if createOpening}<LoaderCircle class="spin" size={19}/>{:else}<Plus size={19}/>{/if}<span>{$t("task.create")}</span></button>
+      {/if}
+    </div>
+  </header>
+  {#if compactShell}
+  <nav class="primary-nav mobile-tabbar" aria-label={$t("nav.primary")}>
+    <button type="button" class:active={!globalOpen&&(overviewOpen)} onclick={openOverview} aria-label={$t("nav.home")} title={$t("nav.home")}><House size={19}/><span class="nav-label">{$t("nav.home")}</span></button>
+    <button type="button" class:active={!globalOpen&&(!overviewOpen&&!collaborationBoardOpen&&!overlayViewOpen&&engine!=="conversation")} onclick={openSessions} aria-label={$t("nav.sessions")} title={$t("nav.sessions")}><SquareTerminal size={19}/><span class="nav-label">{$t("nav.sessions")}</span></button>
+    <button type="button" class="new-button tab-create" aria-label={$t("task.create")} title={$t("task.create")} onclick={openCreate}>{#if createOpening}<LoaderCircle class="spin" size={20}/>{:else}<Plus size={22}/>{/if}</button>
+    <button type="button" class:active={!globalOpen&&(!overviewOpen&&!collaborationBoardOpen&&!overlayViewOpen&&engine==="conversation")} onclick={openConversations} aria-label={$t("nav.conversation")} title={$t("nav.conversation")}><MessagesSquare size={19}/><span class="nav-label">{$t("nav.conversation")}</span></button>
+    <button type="button" class:active={overflowOpen||collaborationBoardOpen||overlayViewOpen} aria-label={$t("nav.more")} title={$t("nav.more")} aria-haspopup="menu" aria-expanded={overflowOpen} onclick={toggleOverflow}><EllipsisVertical size={19}/><span class="nav-label">{$t("nav.more")}</span></button>
+  </nav>
+  <div bind:this={overflowMenu} class="topbar-overflow more-sheet" popover="manual" role="menu" aria-label={$t("nav.moreActions")} style={overflowStyle} use:dismissOnOutside={{onDismiss:closeOverflow,triggerSelector:'[data-popup-trigger="overflow"]'}}>
+    <button type="button" class="icon-button labelled" class:active={collaborationBoardOpen} onclick={()=>{closeOverflow();openCollaborationBoard();}}><KanbanSquare size={19}/><span>{$t("collaborationBoard.title")}</span></button>
+    {@render shellUtilities(true)}
+  </div>
+  {/if}
+  <CommandPalette bind:open={paletteOpen} commands={paletteCommands()}/>
+  {#if providerAccountsLoaded&&providerAccounts.filter(item=>item.provider==="codex"||item.provider==="claude").length===2&&providerAccounts.filter(item=>item.provider==="codex"||item.provider==="claude").every(item=>item.state==="disconnected")&&!selected&&!codexDetailOpen}
+    <div class="provider-setup-notice"><span><strong>{$t("provider.connectionRequired")}</strong><small>{$t("provider.connectionRequiredBody")}</small></span><button type="button" onclick={openGlobalSettings}>{$t("provider.connectionSettings")}</button></div>
+  {/if}
+  {#if (claudeCatalogLoading||claudeCatalogRefreshing||isClaudeCatalogFallback(claudeCatalogMeta)||claudeModelTransitions.length)&&!selected&&!selectedCollaboration&&!codexDetailOpen}
+    <div class="model-filter-notice" role="status" aria-live="polite">
+      {#if claudeCatalogLoading||claudeCatalogRefreshing}<LoaderCircle class="spin" size={18}/>{:else}<CircleAlert size={18}/>{/if}<span><strong>{$t(claudeCatalogLoading||claudeCatalogRefreshing?"model.catalogCheckingTitle":claudeModelTransitions.length?"model.catalogTransitionTitle":"model.catalogDelayTitle")}</strong><small>{$t(claudeCatalogLoading||claudeCatalogRefreshing?"model.catalogCheckingBody":claudeModelTransitions.length?(isClaudeCatalogFallback(claudeCatalogMeta)?"model.catalogTransitionFallbackBody":"model.catalogTransitionBody"):"model.catalogFallbackBody",{models:claudeModelTransitionText()})}</small></span>
+      <button type="button" disabled={claudeCatalogLoading||claudeCatalogRefreshing} onclick={refreshClaudeModelCatalog}><RefreshCw size={14} class={claudeCatalogRefreshing?"spin":""}/>{$t(claudeCatalogLoading||claudeCatalogRefreshing?"model.loading":"model.catalogRetry")}</button>
+    </div>
+  {/if}
+  {#if quotaOpen}
+    <div class="quota-pop" role="status" use:dismissOnOutside={{onDismiss:()=>quotaOpen=false,triggerSelector:'[data-popup-trigger="quota"]'}}>
+      <header><strong>{$t("quota.title")}</strong><span class="quota-actions"><button class="icon-button" aria-label={$t("common.refresh")} title={$t("common.refresh")} disabled={quotaLoading} onclick={()=>void loadQuota(true)}><RefreshCw size={15} class={quotaLoading?"spin":""}/></button></span></header>
+      {#if quotaLoading&&!quota}<p class="quota-note">{$t("common.loading")}</p>{/if}
+      {#each [["codex","Codex",quota?.codex],["claude","Claude",quota?.claude],["grok","Grok",quota?.grok],["antigravity","Gemini",quota?.antigravity],["deepseek","DeepSeek",quota?.deepseek],["ollama","Ollama Cloud",quota?.ollama]] as [cls,name,q]}
+        <section>
+          <span class="engine {cls}">{name}</span>{#if q?.plan}<em class="plan">{q.plan}</em>{/if}
+          {#if q?.fiveHour}
+            <div class="quota-line"><span>{$t("quota.fiveHours")}</span><div class="qbar"><i class={barClass(q.fiveHour.pct)} style={`width:${Math.min(100,q.fiveHour.pct??0)}%`}></i></div><span class="pct">{quotaPct(q.fiveHour.pct)}%</span></div>
+            {@const fiveHourReset=fmtReset(q.fiveHour.resetsAt,q.fiveHour.resetLabel)}
+            {#if fiveHourReset}<p class="reset">{fiveHourReset}</p>{/if}
+          {/if}
+          {#if q?.sevenDay}
+            <div class="quota-line"><span>{$t("quota.weekly")}</span><div class="qbar"><i class={barClass(q.sevenDay.pct)} style={`width:${Math.min(100,q.sevenDay.pct??0)}%`}></i></div><span class="pct">{quotaPct(q.sevenDay.pct)}%</span></div>
+            {@const sevenDayReset=fmtReset(q.sevenDay.resetsAt,q.sevenDay.resetLabel)}
+            {#if sevenDayReset}<p class="reset">{sevenDayReset}</p>{/if}
+          {/if}
+          {#each q?.modelPools??[] as pool (pool.limitId)}
+            <div class="quota-model-pool">
+              <strong>{pool.label}</strong>
+              {#if pool.fiveHour}
+                <div class="quota-line"><span>{$t("quota.fiveHours")}</span><div class="qbar"><i class={barClass(pool.fiveHour.pct)} style={`width:${Math.min(100,pool.fiveHour.pct??0)}%`}></i></div><span class="pct">{quotaPct(pool.fiveHour.pct)}%</span></div>
+                {@const poolFiveReset=fmtReset(pool.fiveHour.resetsAt,pool.fiveHour.resetLabel)}
+                {#if poolFiveReset}<p class="reset">{poolFiveReset}</p>{/if}
+              {/if}
+              {#if pool.sevenDay}
+                <div class="quota-line"><span>{$t("quota.weekly")}</span><div class="qbar"><i class={barClass(pool.sevenDay.pct)} style={`width:${Math.min(100,pool.sevenDay.pct??0)}%`}></i></div><span class="pct">{quotaPct(pool.sevenDay.pct)}%</span></div>
+                {@const poolWeeklyReset=fmtReset(pool.sevenDay.resetsAt,pool.sevenDay.resetLabel)}
+                {#if poolWeeklyReset}<p class="reset">{poolWeeklyReset}</p>{/if}
+              {/if}
+            </div>
+          {/each}
+          {#if q?.balance}
+            <div class="quota-balance" class:depleted={!q.balance.available}>
+              <strong>{$t("quota.balance")}</strong>
+              <span>{formatCurrency(q.balance.total,q.balance.currency,$locale)}</span>
+              <small>{$t("quota.balanceSplit",{toppedUp:formatCurrency(q.balance.toppedUp,q.balance.currency,$locale),granted:formatCurrency(q.balance.granted,q.balance.currency,$locale)})}</small>
+            </div>
+            {#if !q.balance.available}<p class="quota-note warn-text">{$t("quota.balanceDepleted")}</p>{/if}
+          {/if}
+          {#if q?.quotaMode==="vertex-credit"}<p class="quota-note vertex-quota-note"><strong>{$t("antigravityExecution.vertexCreditTitle")}</strong><span>{$t("antigravityExecution.vertexQuotaScope",{project:q.projectId,location:q.location})}</span><small>{$t("antigravityExecution.vertexCreditBody")}</small><a href={q.creditsUrl||`https://console.cloud.google.com/billing?project=${encodeURIComponent(String(q.projectId??""))}`} target="_blank" rel="noopener noreferrer">{$t("antigravityExecution.vertexCreditOpen")}</a></p>
+          {:else if q?.limitsAvailable===false}<p class="quota-note">{$t(q?.balance?"quota.prepaidLimits":"quota.accountLimitsUnavailable")}</p>{:else if !quotaLoading && !q?.fiveHour && !q?.sevenDay && !q?.modelPools?.length}<p class="quota-note">{$t("quota.noData")}</p>{/if}
+          {#if q?.error === "rate_limited"}<p class="quota-note warn-text">{$t("quota.rateLimited")}</p>
+          {:else if q?.error}<p class="quota-note warn-text">{$t("quota.unavailable")} · {$t("quota.retrying")}</p>
+          {:else if q?.status === "partial"&&q?.limitsAvailable!==false}<p class="quota-note">{$t("quota.partial")}</p>{/if}
+        </section>
+      {/each}
+      {#if quota?.fetchedAt}<p class="fetched">{formatDateTime(quota.fetchedAt,$locale)}</p>{/if}
+    </div>
+  {/if}
+
+  {#if searchOpen && !globalOpen && !selected && !selectedCollaboration && !codexDetailOpen}
+    <div class="searchbar"><Search size={18}/><input value={query} oninput={(event)=>updateSearchQuery(event.currentTarget.value)} placeholder={$t("historySearch.placeholder")} use:focusNode/>{#if query}<button class="icon-button" aria-label={$t("common.clear")} onclick={()=>updateSearchQuery("")}><X size={18}/></button>{/if}</div>
+  {/if}
+
+  {#if error}<button class="error-band" onclick={()=>error=""}><CloudOff size={18}/><span>{error}</span><X size={17}/></button>{/if}
+  {#if taskSettingsNotice}<button class="settings-save-band" aria-live="polite" onclick={()=>taskSettingsNotice=""}><Check size={18}/><span>{taskSettingsNotice}</span><X size={17}/></button>{/if}
+
+  {#if globalOpen}
+    <SettingsView bind:page={globalTab} providerStates={settingsProviderStates()} dirtyPages={settingsDirtyPages()} changeCount={settingsChangeCount()} saving={globalSaving} saveDisabled={delegationLoading||((globalCodexAutomation==="full"||globalClaudeAutomation==="full")&&!dangerConfirmed)} notice={globalSaveNotice} noticeError={Boolean(globalSaveNotice)&&globalSaveNotice!==$t("settings.globalSaved")&&globalSaveNotice!==$t("settings.globalSavedPushSkipped")} showSaveBar={settingsPageUsesSaveBar(globalTab)} onselect={selectGlobalTab} onsave={()=>void saveGlobalSettings()} onrevert={revertGlobalSettings} onclose={()=>closeGlobalSettings()}>
+      {#if globalTab==="general"}
+        <GeneralDisplayPage {theme} {palette} {skin} {sessionTextSize} {conversationTextSize} {applyTheme} {applyPalette} {applySkin} {applySessionTextSize} {applyConversationTextSize} {paletteSwatches} {localeSaving} {localeNotice} {chooseLocale} avatarDisplay={characterSettings.avatarDisplay} {updateAvatarDisplay} bind:showAvatars bind:showSpeech bind:avatarAutoCollapse bind:avatarCollapseDelayMs {avatarTrayShape} {changeAvatarTrayShape} bind:scrollAutoSwitch bind:immersiveScroll bind:enterToSend bind:rememberLast bind:hideLocalPaths/>
+      {:else if globalTab==="notifications"}
+        <NotificationsPage {notifications} bind:pushPreferences {pushState} bind:vibration {handleCompletionNotificationsChange} {disableAllPush}/>
+      {:else if globalTab==="policy"}
+        <ExecutionPolicyPage providers={conversationProviders} bind:globalDefaultProvider bind:allowPaidCredits {creditUsageLoading} bind:globalCodexEffort bind:globalClaudeEffort bind:globalCompatibleEfforts {globalCodexAutomation} {globalClaudeAutomation} {globalCompatibleAutomation} codexEfforts={globalCodexModelInfo()?.supportedReasoningEfforts??[]} {claudeEfforts} {compatibleEffortOptions} {chooseGlobalAutomation} {dangerAcknowledged} bind:dangerConfirmed {recordDangerAcknowledgement} bind:delegationSettings {delegationLoading} {delegationLoaded} claudeModels={delegationClaudeModels()} codexModels={availableCodexModels()} delegationCodexEfforts={delegationCodexEfforts()} delegationCodexHasPriority={Boolean(delegationCodexModelInfo()?.serviceTiers?.some((item:any)=>item.id==="priority"))} {setDelegationCodexModel}/>
+      {:else if isProviderPage(globalTab)}
+        {@const settingsProvider=providerOfPage(globalTab) as ProviderId}
+        <ProviderPage provider={settingsProvider} bind:tab={providerSettingsTab} account={accountFor(settingsProvider as ConnectionAuthProvider)} {providerAccountsLoading} runtime={runtimeCards.find(item=>item.provider===settingsProvider)} {planLabel} {accountStatusLabel} runningAttempt={isConnectionAuthProvider(settingsProvider)?activeAuthAttempt(settingsProvider):null} onreconnect={reconnectProvider}
+          {globalModelSettings} {globalModelCandidates} {toggleGlobalModel} {dangerAcknowledged} bind:dangerConfirmed {recordDangerAcknowledgement} {chooseGlobalWorkMode} {chooseGlobalAutomation}
+          bind:globalCodexWorkMode bind:globalCodexModel bind:globalCodexEffort bind:globalCodexTier {globalCodexAutomation} codexModels={availableCodexModels()} codexModelInfo={globalCodexModelInfo()} {globalCodexModelChanged} {refreshCodexModelCatalog} {codexCatalogRefreshing}
+          bind:globalClaudeWorkMode bind:globalClaudeModel bind:globalClaudeEffort {globalClaudeAutomation} claudeModels={availableClaudeModels()} {claudeEfforts} bind:claudeSwitchModelsOnFlag {claudeExecutionLoading} {refreshClaudeModelCatalog} {claudeCatalogRefreshing} {claudeCatalogMeta}
+          bind:globalCompatibleModels bind:globalCompatibleEfforts {globalCompatibleWorkModes} {globalCompatibleAutomation} compatibleModels={compatibleCreateProvider(settingsProvider)?availableCompatibleModels(settingsProvider):[]} compatibleEfforts={compatibleCreateProvider(settingsProvider)?compatibleEffortOptions(settingsProvider):[]} {refreshCompatibleModelCatalog} {providerCatalogRefreshing}
+          bind:customModelDraft {modelValidation} {addCustomModel} {validateCustomModel}
+          bind:antigravityExecution {antigravityUsesVertex} {antigravityExecutionLoading} {antigravityExecutionTesting} {antigravityCredentialUploading} {antigravityExecutionNotice} {antigravityCredentialNotice} {geminiCliReadiness} {testAntigravityExecution} {uploadAntigravityCredentials}
+          {authAttempts} {authCodes} {authFeedback} {providerName} {authErrorLabel} {startProviderLogin} {submitAuthCode} {cancelProviderLogin} {logoutProvider} {copy} onauthcode={(authProvider,value)=>authCodes={...authCodes,[authProvider]:value}} {compatibleProviderSettings} {compatibleProviderSecrets} {compatibleProviderSaving} {updateCompatibleBaseUrl} {updateCompatibleSecret} {saveCompatibleProvider} loadProviderAccounts={()=>loadProviderAccounts()} {providerAuthNotice}
+          {characterSettings} {updateCharacter} {providerOutfits} {charactersLoading} {charactersLoaded}
+          {runtimeAutoUpdate} {runtimeBusy} {runtimeSettingsBusy} {runtimeNotice} {checkUpdates} {updateRuntime} {toggleRuntimeAutoUpdate}
+          bind:delegationSettings {delegationLoading} delegationCodexEfforts={delegationCodexEfforts()} delegationCodexHasPriority={Boolean(delegationCodexModelInfo()?.serviceTiers?.some((item:any)=>item.id==="priority"))} {setDelegationCodexModel}/>
+      {:else if globalTab==="workspace"}
+        <ProjectWorkspaceSettings {api} {projects} onviewworkspace={(workspace)=>openWorkspaceFiles(workspace)}/>
+        <ClaudeCloudSessions {api}/>
+      {:else if globalTab==="hosts"}
+        <InfrastructureSettings {api} showAccessActivity={false} showParticipants={false} showExternalAccess={false} onopenworkspace={()=>selectGlobalTab("workspace")} onopensettings={(section)=>{if(section==="provider-connections")openProviderSettings(createProvider,"account");else selectGlobalTab(normalizeSettingsPage(section,"hosts"));}}/>
+      {:else if globalTab==="git"}
+        <GitSettings {api}/>
+      {:else if globalTab==="mcp"}
+        <McpServerSettings {api}/>
+      {:else if globalTab==="participants"}
+        <ExternalParticipantSettings {api}/>
+      {:else if globalTab==="storage"}
+        <StoragePage {api} bind:tab={storageTab}/>
+      {:else if globalTab==="access"}
+        <AccessSecurityPage {api}/>
+      {:else if globalTab==="system"}
+        <SystemUpdatePage {setupShowOnStartup} {setupPreferenceBusy} {setupPreferenceNotice} {setSetupStartupVisibility} {reopenSetup} {systemDiagnostic} {diagnosticBusy} {loadSystemDiagnostic} {copySystemDiagnostic} {applicationUpdate} {applicationUpdateBusy} {applicationUpdateNotice} {checkApplicationUpdate} {applyApplicationUpdate} {runtimeCards} {runtimeBusy} {runtimeNotice} {checkUpdates} {updateRuntime} onopenprovider={(provider)=>openProviderSettings(provider,"runtime")}/>
+      {:else if globalTab==="about"}
+        <AboutLicenses {api}/>
+      {/if}
+    </SettingsView>
+  {:else if !selected&&!selectedCollaboration}
+    {@render browserShell()}
+  {:else if selectedCollaboration}
+    <main class="detail collaboration-detail"><CollaborationTimeline collaborationId={selectedCollaboration} {api} {codexAvatar} quotaByProvider={quota} {enterToSend} onproviderstatus={(statuses)=>collaborationRecent=statuses} onopen={(task)=>openTask(task)} onopenfile={openConversationFile}/></main>
+  {:else if selected}
+    {@render sessionDetail()}
   {/if}
 </div>
 
@@ -2462,330 +2717,6 @@
       <p id="credit-consent-body">{$t(creditConsentPrompt.providers.some(provider=>creditConsentPrompt?.reasons[provider]==="unknown")?"billing.promptUnknownBody":"billing.promptBody")}</p>
       <small>{$t("billing.promptNote")}</small>
       <div class="credit-consent-actions"><button type="button" onclick={()=>settleCreditConsent("cancel")}>{$t("common.cancel")}</button><button type="button" class="primary" onclick={()=>settleCreditConsent("once")}>{$t("billing.useOnce")}</button><button type="button" class="primary paid-always" onclick={()=>settleCreditConsent("always")}>{$t("billing.alwaysUse")}</button></div>
-    </div>
-  </div>
-{/if}
-
-{#if globalOpen}
-  <div class="modal-backdrop" role="presentation" onclick={(e)=>e.target===e.currentTarget&&closeGlobalSettings()}>
-    <div class="modal global-settings" role="dialog" aria-modal="true" aria-labelledby="global-title">
-      <header><h2 id="global-title">{$t("settings.title")}</h2><button class="icon-button" aria-label={$t("a11y.closeDialog")} onclick={closeGlobalSettings}><X size={20}/></button></header>
-      <nav class="settings-tabs" aria-label={$t("settings.title")} use:dragScrollX>{#each GLOBAL_TABS as tab,index}{#if index>0&&GLOBAL_TABS[index-1].group!==tab.group}<span class="settings-tab-divider" role="separator" aria-orientation="vertical"></span>{/if}<button type="button" class:active={globalTab===tab.id} onclick={()=>selectGlobalTab(tab.id)}>{$t(tab.labelKey)}{#if globalTabDirty(tab.id)}<i aria-label={$t("common.changed")}></i>{/if}</button>{/each}</nav>
-      <div class="settings-tab-panel settings-tab-{globalTab}">
-      {#if globalTab==="infrastructure"}
-      <InfrastructureSettings {api} onopenworkspace={()=>selectGlobalTab("workspace")} onopensettings={(section)=>selectGlobalTab(section==="provider-connections"?"account":section==="external-access"?"system":"infrastructure")}/>
-      {:else if globalTab==="mcp"}
-      <McpServerSettings {api}/>
-      {:else if globalTab==="storage"}
-      <h3>{$t("settings.storage.title")}</h3>
-      <nav class="settings-subtabs" aria-label={$t("settings.storage.sections")}>
-        {#each STORAGE_TABS as tab}<button type="button" class:active={storageTab===tab.id} aria-current={storageTab===tab.id?"page":undefined} onclick={()=>selectStorageTab(tab.id)}>{$t(tab.labelKey)}</button>{/each}
-      </nav>
-      {#if storageTab==="artifacts"}<ArtifactSettings {api}/>{:else}<SnapshotSettings {api}/>{/if}
-      {:else if globalTab==="account"}
-      <nav class="settings-subtabs" aria-label={$t("settings.account.sections")}>
-        {#each ACCOUNT_TABS as tab}<button type="button" class:active={accountTab===tab.id} aria-current={accountTab===tab.id?"page":undefined} onclick={()=>selectAccountTab(tab.id)}>{$t(tab.labelKey)}</button>{/each}
-      </nav>
-      {#if accountTab==="git"}<GitSettings {api}/>{:else if accountTab==="proton"}<ProtonDriveSettings {api}/>{:else}
-      <div class="provider-connection-heading"><h3>{$t("provider.connections")}</h3><button type="button" disabled={providerAccountsLoading} onclick={()=>loadProviderAccounts()}><RefreshCw size={14} class={providerAccountsLoading?"spin":""}/>{$t(providerAccountsLoading?"status.checking":"common.refreshStatus")}</button></div>
-      <div class="provider-connections">
-        {#each ["codex","claude","grok","antigravity"] as provider}
-          {@const typedProvider=provider as ConnectionAuthProvider}
-          {@const account=providerAccounts.find(item=>item.provider===typedProvider)}
-          {@const attempt=authAttempts[typedProvider]}
-          {@const runningAttempt=isActiveAuthAttempt(attempt)?attempt!:null}
-          <section class="provider-connection-card" class:connected={account?.state==="connected"}>
-            <header><span class="provider-mark {typedProvider}">{typedProvider==="codex"?"C":typedProvider==="claude"?"Cl":typedProvider==="grok"?"G":"Ag"}</span><span><strong>{providerName(typedProvider)}</strong><small>{planLabel(account)||(typedProvider==="antigravity"?$t("auth.antigravityCli"):typedProvider==="grok"?$t("auth.grokCli"):"")}{account?.emailMasked?` · ${account.emailMasked}`:""}</small></span><em class:connected={account?.state==="connected"} class:busy={Boolean(runningAttempt)}>{accountStatusLabel(typedProvider,runningAttempt,account)}</em></header>
-            {#if typedProvider==="antigravity"}<p class="provider-scope-notice">{$t(antigravityUsesVertex?"antigravityExecution.accountManaged":"auth.antigravityConnectionBody")}</p>{/if}
-            {#if runningAttempt}
-              <div class="auth-progress" aria-live="polite">
-                {#if runningAttempt.url}<a class="auth-open" href={runningAttempt.url} target="_blank" rel="noopener noreferrer">{$t(typedProvider==="codex"?"auth.openOpenAI":typedProvider==="antigravity"?"auth.openGoogle":typedProvider==="grok"?"auth.openXai":"auth.openAnthropic")}</a>{/if}
-                {#if runningAttempt.userCode}<div class="device-code"><span><small>{$t("auth.oneTimeCode")}</small><code>{runningAttempt.userCode}</code></span><button type="button" onclick={()=>copy(runningAttempt.userCode)}>{$t("auth.copyCode")}</button></div>{/if}
-                {#if (typedProvider==="claude"||typedProvider==="antigravity")&&runningAttempt.state==="code_required"}
-                  <form class="auth-code-form" onsubmit={(event)=>{event.preventDefault();void submitAuthCode(typedProvider);}}><label for={`${typedProvider}-auth-code`}>{$t(typedProvider==="antigravity"?"auth.antigravityCode":"auth.claudeCode")}</label><div><input id={`${typedProvider}-auth-code`} type="text" autocomplete="one-time-code" maxlength="512" value={authCodes[typedProvider]??""} oninput={(event)=>authCodes={...authCodes,[typedProvider]:(event.currentTarget as HTMLInputElement).value}} placeholder={$t("auth.officialPageCode")}/><button type="submit" disabled={!authCodes[typedProvider]?.trim()}>{$t("auth.submitCode")}</button></div></form>
-                {/if}
-                <button type="button" class="auth-cancel" onclick={()=>cancelProviderLogin(typedProvider)}>{$t("auth.cancelLogin")}</button>
-              </div>
-            {:else}
-              <div class="provider-auth-actions">
-                {#if typedProvider==="codex"}
-                  <button type="button" onclick={()=>startProviderLogin("codex","device")}>{$t(account?.state==="connected"?"auth.reconnect":"auth.connectCodex")}</button>
-                  <button type="button" onclick={()=>startProviderLogin("codex","browser")}>{$t("auth.browserLogin")}</button>
-                {:else if typedProvider==="claude"}
-                  <button type="button" onclick={()=>startProviderLogin("claude","subscription")}>{$t("auth.connectClaudeSubscription")}</button>
-                  <button type="button" onclick={()=>startProviderLogin("claude","console")}>{$t("auth.connectConsole")}</button>
-                  <button type="button" onclick={()=>startProviderLogin("claude","sso")}>{$t("auth.connectSso")}</button>
-                {:else if typedProvider==="grok"}
-                  <button type="button" onclick={()=>startProviderLogin("grok","device")}>{$t(account?.state==="connected"?"auth.reconnect":"auth.connectGrok")}</button>
-                {:else if !antigravityUsesVertex}
-                  <button type="button" onclick={()=>startProviderLogin("antigravity","google-oauth")}>{$t(account?.state==="connected"?"auth.reconnect":"auth.connectAntigravity")}</button>
-                {/if}
-                {#if account?.state==="connected"}<button type="button" class="auth-logout" onclick={()=>logoutProvider(typedProvider)}>{$t("auth.logout")}</button>{/if}
-              </div>
-            {/if}
-            {#if authFeedback[typedProvider]}<p class="auth-feedback {authFeedback[typedProvider]?.tone}" role="status" aria-live="polite">{authFeedback[typedProvider]?.message}</p>{/if}
-            {#if attempt&&["failed","timeout"].includes(attempt.state)}<p class="auth-error">{authErrorLabel(attempt.errorCategory)}</p>{/if}
-          </section>
-        {/each}
-        {#each ["deepseek","ollama"] as provider}
-          {@const typedProvider=provider as "deepseek"|"ollama"}
-          {@const account=providerAccounts.find(item=>item.provider===typedProvider)}
-          {@const settings=compatibleProviderSettings[typedProvider]}
-          <section class="provider-connection-card" class:connected={account?.state==="connected"}>
-            <header><span class="provider-mark {typedProvider}">{$t(typedProvider==="deepseek"?"auth.deepseekMark":"auth.ollamaMark")}</span><span><strong>{$t(typedProvider==="deepseek"?"provider.deepseek":"provider.ollama")}</strong><small>{$t(typedProvider==="deepseek"?"auth.deepseekApi":"auth.ollamaRuntime")}</small></span><em class:connected={account?.state==="connected"} class:busy={providerAccountsLoading}>{$t(account?.state==="connected"?"status.connected":account?.state==="unavailable"?"auth.runtimeUnavailable":"auth.connectionRequired")}</em></header>
-            <p class="provider-scope-notice">{$t(typedProvider==="deepseek"?"auth.deepseekConnectionBody":"auth.ollamaConnectionBody")}</p>
-            <form class="compatible-provider-form" onsubmit={(event)=>{event.preventDefault();void saveCompatibleProvider(typedProvider);}}>
-              <label>{$t(typedProvider==="deepseek"?"auth.deepseekBaseUrl":"auth.ollamaBaseUrl")}<input type="url" required maxlength="2048" value={settings.baseUrl} oninput={(event)=>updateCompatibleBaseUrl(typedProvider,(event.currentTarget as HTMLInputElement).value)}/></label>
-              <label>{$t(typedProvider==="deepseek"?"auth.deepseekApiKey":"auth.ollamaToken")}<input type="password" autocomplete="new-password" maxlength="4096" value={compatibleProviderSecrets[typedProvider]} oninput={(event)=>updateCompatibleSecret(typedProvider,(event.currentTarget as HTMLInputElement).value)} placeholder={$t(settings.secretConfigured?"auth.secretStored":"auth.secretEnter")}/></label>
-              <small>{$t(typedProvider==="deepseek"?"auth.deepseekSecretHelp":"auth.ollamaSecretHelp")}</small>
-              <div class="provider-auth-actions"><button type="submit" disabled={compatibleProviderSaving!==null||(!settings.secretConfigured&&!compatibleProviderSecrets[typedProvider].trim())}>{$t(compatibleProviderSaving===typedProvider?"common.saving":"auth.saveConnection")}</button><button type="button" disabled={providerAccountsLoading||compatibleProviderSaving!==null} onclick={()=>loadProviderAccounts()}>{$t(providerAccountsLoading?"status.checking":"auth.connectionRefresh")}</button></div>
-            </form>
-          </section>
-        {/each}
-      </div>
-      <p class="provider-scope-notice">{$t("provider.connectionScope")}</p>
-      {#if providerAuthNotice}<p class="runtime-notice" aria-live="polite">{providerAuthNotice}</p>{/if}
-      {/if}
-      {:else if globalTab==="workspace"}
-      <ProjectWorkspaceSettings {api} {projects} onviewworkspace={(workspace)=>openWorkspaceFiles(workspace)}/>
-      {:else if globalTab==="about"}
-      <AboutLicenses {api}/>
-      {:else if globalTab==="system"}
-      <h3>{$t("setup.settingsTitle")}</h3>
-      <section class="credit-usage-setting">
-        <label><span><strong>{$t("setup.showOnStartup")}</strong><small>{$t("setup.showOnStartupBody")}</small></span><input type="checkbox" checked={setupShowOnStartup} disabled={setupPreferenceBusy} onchange={(event)=>setSetupStartupVisibility((event.currentTarget as HTMLInputElement).checked)}/></label>
-        <button type="button" onclick={reopenSetup}>{$t("setup.openNow")}</button>
-      </section>
-      {#if setupPreferenceNotice}<p class="runtime-notice" aria-live="polite">{setupPreferenceNotice}</p>{/if}
-      <h3>{$t("diagnostic.system")}</h3>
-      <div class="runtime-heading"><small>{$t("diagnostic.safeReport")}</small><button type="button" disabled={diagnosticBusy} onclick={loadSystemDiagnostic}><RefreshCw size={14}/>{$t(diagnosticBusy?"diagnostic.running":"diagnostic.run")}</button></div>
-      {#if systemDiagnostic}<pre class="system-diagnostic">{JSON.stringify(systemDiagnostic,null,2)}</pre><button type="button" onclick={copySystemDiagnostic}>{$t("diagnostic.copyReport")}</button>{/if}
-      <h3>{$t("applicationUpdate.title")}</h3>
-      <div class="runtime-heading"><small>{$t("applicationUpdate.separate")}</small><button type="button" disabled={Boolean(applicationUpdateBusy)} onclick={checkApplicationUpdate}><RefreshCw size={14} class={applicationUpdateBusy==="check"?"spin":""}/>{$t(applicationUpdateBusy==="check"?"status.checking":"applicationUpdate.check")}</button></div>
-      {#if applicationUpdate}
-        <div class="runtime-card application-update-card" class:verified={applicationUpdate.state==="up-to-date"}>
-          <span class="application-update-current"><strong>{$t("applicationUpdate.installed",{version:applicationUpdate.current.version})}</strong><small>{$t("applicationUpdate.method",{method:applicationUpdate.current.installMethod})}</small></span>
-          {#if applicationUpdate.target}<span class="application-update-target"><code title={applicationUpdate.target.manifestSha256}>{$t("applicationUpdate.signature",{key:applicationUpdate.target.keyId,hash:applicationUpdate.target.manifestSha256.slice(0,12)})}</code><small>{$t("applicationUpdate.target",{version:applicationUpdate.target.version})}</small></span>{/if}
-          {#if applicationUpdate.updateAvailable}<button type="button" class="runtime-update" disabled={Boolean(applicationUpdateBusy)||applicationUpdate.blockers.length>0} onclick={applyApplicationUpdate}>{$t(applicationUpdateBusy==="apply"?"applicationUpdate.applying":"common.update")}</button>{/if}
-          <span class="application-update-detail">{#if applicationUpdate.updateAvailable&&applicationUpdate.blockers.length}<small class="runtime-notice">{$t("applicationUpdate.blocked",{count:applicationUpdate.blockers.length})}</small>{/if}{#if applicationUpdate.updateAvailable}<small>{$t("applicationUpdate.snapshotRestart")}</small>{:else if applicationUpdate.reason==="source-checkout-not-updatable"}<small>{$t("applicationUpdate.sourceCheckout")}</small>{/if}{#if applicationUpdate.recentAttempts[0]}<small>{$t("applicationUpdate.recent",{source:applicationUpdate.recentAttempts[0].sourceVersion,target:applicationUpdate.recentAttempts[0].targetVersion,state:applicationUpdate.recentAttempts[0].state})}</small>{/if}</span>
-        </div>
-      {/if}
-      {#if applicationUpdateNotice}<p class="runtime-notice" aria-live="polite">{applicationUpdateNotice}</p>{/if}
-      <h3>{$t("runtime.title")}</h3>
-      <div class="runtime-heading"><small>{$t("runtime.independentInstall")}</small><button type="button" disabled={Boolean(runtimeBusy)} onclick={checkUpdates}><RefreshCw size={14} class={runtimeBusy==="check"?"spin":""}/>{$t(runtimeBusy==="check"?"status.checking":"runtime.checkUpdates")}</button></div>
-      {#each runtimeCards as item (item.provider)}
-        <div class="runtime-card" class:verified={item.managed}>
-          <span>
-            <strong>{item.name} {item.current??$t("common.unavailable")}</strong>
-            {#if item.management==="managed"}
-              <small>{item.updateAvailable===true?$t("runtime.latest",{version:item.latest??$t("common.unavailable")}):$t(item.updateAvailable===false?"runtime.latestVersion":item.source?.includes("check-failed")?"runtime.checkFailed":item.managed?"runtime.managedOfficial":"runtime.managementUnknown")}</small>
-            {:else if item.management==="external"}
-              <small>{$t(item.current?"runtime.externalInstalled":item.configured?"runtime.externalVersionUnavailable":"runtime.externalMissing")}</small>
-            {:else}
-              <small>{$t(item.configured?"runtime.apiConfigured":"runtime.apiMissing")}</small>
-            {/if}
-          </span>
-          <span class="runtime-badge" data-management={item.management}>{$t(item.management==="managed"?"runtime.badge.managed":item.management==="external"?"runtime.badge.external":"runtime.badge.api")}</span>
-          <!-- A digest rebuilt offline is of the binary, not of the upstream
-               package, so it is labelled as such instead of being shown under
-               the same "SHA" as a downloaded package digest. -->
-          {#if item.checksum}<code title={item.checksum}>{item.checksumSource==="binary"?"BIN SHA":"SHA"} {item.checksum.slice(0,12)}</code>{/if}
-          {#if item.fault}<small class="runtime-fault">{item.fault}</small>{/if}
-          {#if item.management==="managed"}
-            <label class="runtime-auto-toggle"><span><strong>{$t("runtime.autoUpdate")}</strong><small>{$t(item.canUpdate?"runtime.autoUpdateBody":"runtime.autoUpdateUnavailable")}</small></span><input type="checkbox" checked={runtimeAutoUpdate.providers[item.provider as "codex"|"claude"]} disabled={!item.canUpdate||Boolean(runtimeSettingsBusy)} onchange={(event)=>toggleRuntimeAutoUpdate(item.provider as "codex"|"claude",(event.currentTarget as HTMLInputElement).checked)}/></label>
-            {#if item.updateAvailable}<button type="button" class="runtime-update" disabled={Boolean(runtimeBusy)} onclick={()=>updateRuntime(item.provider as "codex"|"claude")}>{$t(runtimeBusy===item.provider?"runtime.updatingShort":"common.update")}</button>{/if}
-          {:else}
-            <small class="runtime-unmanaged">{$t(item.management==="external"?"runtime.externalBody":"runtime.apiBody")}</small>
-          {/if}
-        </div>
-      {/each}
-      {#if runtimeNotice}<p class="runtime-notice" aria-live="polite">{runtimeNotice}</p>{/if}
-      {:else if globalTab==="defaults"}
-      <h3>{$t("execution.defaults")}</h3>
-      <nav class="settings-subtabs" aria-label={$t("settings.defaults.sections")}>
-        {#each DEFAULTS_TABS as tab}<button type="button" class:active={defaultsTab===tab.id} aria-current={defaultsTab===tab.id?"page":undefined} onclick={()=>selectDefaultsTab(tab.id)}>{tab.id==="general"?$t(tab.label):providerDisplayName(tab.id)}</button>{/each}
-      </nav>
-      {#if defaultsTab==="general"}
-      <section class="credit-usage-setting">
-        <label><span><strong>{$t("billing.allowPaidCredits")}</strong><small>{$t("billing.allowPaidCreditsBody")}</small></span><input type="checkbox" bind:checked={allowPaidCredits} disabled={creditUsageLoading}/></label>
-        <p><CircleAlert size={15}/>{$t("billing.providerAccountNote")}</p>
-      </section>
-      <label>{$t("execution.defaultAgent")}<div class="segments">{#each ["codex","claude","grok","antigravity","deepseek","ollama"] as provider}{@const typedProvider=provider as ProviderId}<button type="button" class:active={globalDefaultProvider===typedProvider} onclick={()=>globalDefaultProvider=typedProvider}>{providerDisplayName(typedProvider)}</button>{/each}</div></label>
-      <h4>{$t("delegation.toOtherProvider")}</h4>
-      <p class="provider-scope-notice">{$t("delegation.body")}</p>
-      {#if delegationLoading&&!delegationLoaded}<p class="provider-waiting">{$t("delegation.loading")}</p>{/if}
-      <section class="delegation-card">
-        <h4>Codex → Claude</h4>
-        <label>{$t("delegation.launchMode")}<div class="segments"><button type="button" disabled={delegationLoading} class:active={delegationSettings.claude.launchMode==="managed"} onclick={()=>delegationSettings={...delegationSettings,claude:{...delegationSettings.claude,launchMode:"managed"}}}>{$t("delegation.managed")}</button><button type="button" disabled={delegationLoading} class:active={delegationSettings.claude.launchMode==="direct"} onclick={()=>delegationSettings={...delegationSettings,claude:{...delegationSettings.claude,launchMode:"direct"}}}>{$t("delegation.directCli")}</button></div></label>
-        <label>{$t("model.defaultLabel")}<select value={delegationSettings.claude.model} onchange={(event)=>delegationSettings={...delegationSettings,claude:{...delegationSettings.claude,model:(event.currentTarget as HTMLSelectElement).value}}}>{#each delegationClaudeModels() as model}<option value={model.id}>{modelLabel(model)}</option>{/each}</select></label>
-        <label>{$t("model.reasoningEffort")}<select value={delegationSettings.claude.reasoningEffort} onchange={(event)=>delegationSettings={...delegationSettings,claude:{...delegationSettings.claude,reasoningEffort:(event.currentTarget as HTMLSelectElement).value}}}>{#each claudeEfforts as effort}<option value={effort.id}>{$t(`session.effort.${effort.id}`)}</option>{/each}</select></label>
-        <small class="field-help">{$t("delegation.managedBody")}</small>
-      </section>
-      <section class="delegation-card">
-        <h4>Claude → Codex</h4>
-        <label>{$t("delegation.launchMode")}<div class="segments"><button type="button" disabled={delegationLoading} class:active={delegationSettings.codex.launchMode==="managed"} onclick={()=>delegationSettings={...delegationSettings,codex:{...delegationSettings.codex,launchMode:"managed"}}}>{$t("delegation.managed")}</button><button type="button" disabled={delegationLoading} class:active={delegationSettings.codex.launchMode==="direct"} onclick={()=>delegationSettings={...delegationSettings,codex:{...delegationSettings.codex,launchMode:"direct"}}}>{$t("delegation.directCli")}</button></div></label>
-        <label>{$t("model.label")}<select value={delegationSettings.codex.model??""} onchange={(event)=>setDelegationCodexModel((event.currentTarget as HTMLSelectElement).value||null)}>{#each availableCodexModels() as model}<option value={model.id}>{modelLabel(model)}</option>{/each}</select></label>
-        <label>{$t("model.reasoningEffort")}<select value={delegationSettings.codex.reasoningEffort??""} onchange={(event)=>delegationSettings={...delegationSettings,codex:{...delegationSettings.codex,reasoningEffort:(event.currentTarget as HTMLSelectElement).value||null}}}><option value="">{$t("model.selectedDefault")}</option>{#each delegationCodexEfforts() as effort}<option value={effort.reasoningEffort}>{effortLabel(effort.reasoningEffort)}</option>{/each}</select></label>
-        <label>{$t("model.speed")}<div class="segments"><button type="button" class:active={delegationSettings.codex.serviceTier===null} onclick={()=>delegationSettings={...delegationSettings,codex:{...delegationSettings.codex,serviceTier:null}}}>{$t("model.standard")}</button><button type="button" class:active={delegationSettings.codex.serviceTier==="priority"} disabled={!delegationCodexModelInfo()?.serviceTiers?.some((item:any)=>item.id==="priority")} onclick={()=>delegationSettings={...delegationSettings,codex:{...delegationSettings.codex,serviceTier:"priority"}}}>{$t("model.fast")}</button></div></label>
-        <small class="field-help">{$t("delegation.codexBody")}</small>
-      </section>
-      {/if}
-      {#if defaultsTab!=="general"}
-      <h4>{$t("model.globalList")}</h4>
-      <p class="provider-scope-notice">{$t("model.globalListBody")}</p>
-      {/if}
-      {#if defaultsTab==="codex"}
-      <section class="model-catalog-card">
-        <div class="delegation-heading"><h4>{$t("model.codexModels")}</h4><button type="button" disabled={codexCatalogRefreshing} onclick={refreshCodexModelCatalog}><RefreshCw size={14} class={codexCatalogRefreshing?"spin":""}/>{$t(codexCatalogRefreshing?"model.loading":"model.load")}</button></div>
-        <div class="delegation-model-options">{#each globalModelCandidates.codex as model}<label title={model.id}><input type="checkbox" checked={globalModelSettings.codex.models.some(item=>item.id===model.id)} disabled={globalModelSettings.codex.models.length===1&&globalModelSettings.codex.models.some(item=>item.id===model.id)} onchange={()=>toggleGlobalModel("codex",model)}/><span><strong>{modelLabel(model)}</strong><small>{model.source==="custom"?$t(model.validatedAt?"model.customValidated":"model.custom"): $t("model.codexRuntime")}</small></span></label>{/each}</div>
-        <div class="custom-model-row"><input aria-label={$t("model.codexCustomId")} placeholder={$t("model.customId")} bind:value={customModelDraft.codex.id}/><input aria-label={$t("model.codexDisplayName")} placeholder={$t("model.displayNameOptional")} bind:value={customModelDraft.codex.displayName}/><button type="button" onclick={()=>addCustomModel("codex")}>{$t("common.add")}</button><button type="button" disabled={modelValidation.codex?.busy||!customModelDraft.codex.id.trim()} onclick={()=>validateCustomModel("codex")}>{$t(modelValidation.codex?.busy?"model.validating":"model.validate")}</button></div>
-        {#if modelValidation.codex?.detail}<small class:validation-ok={modelValidation.codex.valid} class:validation-error={modelValidation.codex.valid===false}>{modelValidation.codex.detail}</small>{/if}
-      </section>
-      {/if}
-      {#if defaultsTab==="claude"}
-      <section class="credit-usage-setting">
-        <label><span><strong>{$t("claudeExecution.switchModelsOnFlag")}</strong><small>{$t("claudeExecution.switchModelsOnFlagBody")}</small></span><input type="checkbox" bind:checked={claudeSwitchModelsOnFlag} disabled={claudeExecutionLoading}/></label>
-        <p><CircleAlert size={15}/>{$t("claudeExecution.nextTurnNote")}</p>
-      </section>
-      <section class="model-catalog-card">
-        <div class="delegation-heading"><h4>{$t("model.claudeModels")}</h4><button type="button" disabled={claudeCatalogRefreshing} onclick={refreshClaudeModelCatalog}><RefreshCw size={14} class={claudeCatalogRefreshing?"spin":""}/>{$t(claudeCatalogRefreshing?"model.loading":"model.load")}</button></div>
-        <div class="delegation-model-options">{#each globalModelCandidates.claude as model}<label title={model.id}><input type="checkbox" checked={globalModelSettings.claude.models.some(item=>item.id===model.id)} disabled={globalModelSettings.claude.models.length===1&&globalModelSettings.claude.models.some(item=>item.id===model.id)} onchange={()=>toggleGlobalModel("claude",model)}/><span><strong>{modelLabel(model)}</strong><small>{model.source==="custom"?$t(model.validatedAt?"model.customValidated":"model.custom"):$t("model.claudeRuntime")}</small></span></label>{/each}</div>
-        <div class="custom-model-row"><input aria-label={$t("model.claudeCustomId")} placeholder="claude-opus-4-6[1m]" bind:value={customModelDraft.claude.id}/><input aria-label={$t("model.claudeDisplayName")} placeholder="Opus 4.6 (1M)" bind:value={customModelDraft.claude.displayName}/><button type="button" onclick={()=>addCustomModel("claude")}>{$t("common.add")}</button><button type="button" disabled={modelValidation.claude?.busy||!customModelDraft.claude.id.trim()} onclick={()=>validateCustomModel("claude")}>{$t(modelValidation.claude?.busy?"model.validating":"model.validate")}</button></div>
-        {#if modelValidation.claude?.detail}<small class:validation-ok={modelValidation.claude.valid} class:validation-error={modelValidation.claude.valid===false}>{modelValidation.claude.detail}</small>{/if}
-        {#if claudeCatalogMeta}<small class="catalog-state" class:stale={claudeCatalogMeta.stale===true}>{isClaudeCatalogFallback(claudeCatalogMeta)?$t("model.catalogFallbackFilteredState"):claudeCatalogMeta.stale?"Cached":"Claude Code"}{claudeCatalogMeta.fetchedAt?` · ${formatDateTime(claudeCatalogMeta.fetchedAt,$locale)}`:""}</small>{/if}
-      </section>
-      {/if}
-      {#if defaultsTab==="antigravity"}
-      <section class="credit-usage-setting antigravity-execution-setting">
-        <label><span><strong>{$t("antigravityExecution.backend")}</strong><small>{$t("antigravityExecution.body")}</small></span><div class="segments"><button type="button" class:active={antigravityExecution.backend==="consumer"} onclick={()=>antigravityExecution={...antigravityExecution,backend:"consumer"}}>{$t("antigravityExecution.consumer")}</button><button type="button" class:active={antigravityExecution.backend==="vertex"} onclick={()=>antigravityExecution={...antigravityExecution,backend:"vertex"}}>{$t("antigravityExecution.vertex")}</button><button type="button" class:active={antigravityExecution.backend==="vertex-agent"} onclick={()=>antigravityExecution={...antigravityExecution,backend:"vertex-agent"}}>{$t("antigravityExecution.vertexAgent")}</button></div></label>
-        <p class="field-help">{$t(antigravityExecution.backend==="vertex-agent"?"antigravityExecution.vertexAgentBody":antigravityExecution.backend==="vertex"?"antigravityExecution.vertexBody":"antigravityExecution.consumerBody")}</p>
-        {#if antigravityUsesVertex}
-          <label>{$t("antigravityExecution.project")}<input bind:value={antigravityExecution.vertex.projectId} autocomplete="off" placeholder={$t("antigravityExecution.projectPlaceholder")}/></label>
-          <label>{$t("antigravityExecution.location")}<input bind:value={antigravityExecution.vertex.location} autocomplete="off" placeholder={$t("antigravityExecution.locationPlaceholder")}/></label>
-          <label>{$t("antigravityExecution.creditsUrl")}<input type="url" bind:value={antigravityExecution.vertex.creditsUrl} autocomplete="off" placeholder={$t("antigravityExecution.creditsUrlPlaceholder")}/><small>{$t("antigravityExecution.creditsUrlHelp")}</small></label>
-          <div class="vertex-credential-upload"><span><strong>{$t("antigravityExecution.credentialsUpload")}</strong><small>{antigravityExecution.vertex.credentialsPath?$t("antigravityExecution.credentialsConfigured"):$t("antigravityExecution.credentialsHelp")}</small></span><label class="credential-upload-button">{antigravityCredentialUploading?$t("antigravityExecution.credentialsUploading"):$t(antigravityExecution.vertex.credentialsPath?"antigravityExecution.credentialsReplace":"antigravityExecution.credentialsChoose")}<input type="file" disabled={antigravityCredentialUploading} onchange={uploadAntigravityCredentials}/></label></div>
-          {#if antigravityCredentialNotice}<p class="credential-upload-notice">{antigravityCredentialNotice}</p>{/if}
-        {/if}
-        {#if antigravityExecution.backend==="vertex-agent"&&geminiCliReadiness}
-          <p class="field-help">{$t("antigravityExecution.geminiCliStatus",{state:$t(geminiCliReadiness.installed?"antigravityExecution.geminiCliReady":"antigravityExecution.geminiCliMissing"),version:geminiCliReadiness.version??"?"})}<br/>{$t("antigravityExecution.geminiCliScope",{project:geminiCliReadiness.projectId||"?",location:geminiCliReadiness.location||"?"})}{#if !geminiCliReadiness.ripgrep}<br/>{$t("antigravityExecution.geminiCliRipgrep")}{/if}{#if !geminiCliReadiness.installed}<br/>{$t("antigravityExecution.geminiCliInstall")}{/if}</p>
-        {/if}
-        <div class="provider-auth-actions"><button type="button" disabled={antigravityExecutionLoading||antigravityExecutionTesting} onclick={testAntigravityExecution}>{$t(antigravityExecutionTesting?"antigravityExecution.testing":"antigravityExecution.applyTest")}</button></div>
-        {#if antigravityExecutionNotice}<p>{antigravityExecutionNotice}</p>{/if}
-      </section>
-      {/if}
-      {#each compatibleProviders as provider}
-        {#if defaultsTab===provider}
-        <section class="model-catalog-card">
-          <div class="delegation-heading"><h4>{$t("model.providerModels",{provider:providerDisplayName(provider)})}</h4><button type="button" disabled={providerCatalogRefreshing[provider]} onclick={()=>refreshCompatibleModelCatalog(provider)}><RefreshCw size={14} class={providerCatalogRefreshing[provider]?"spin":""}/>{$t(providerCatalogRefreshing[provider]?"model.loading":"model.load")}</button></div>
-          <div class="delegation-model-options">{#each globalModelCandidates[provider] as model}<label title={model.id}><input type="checkbox" checked={globalModelSettings[provider].models.some(item=>item.id===model.id)} disabled={globalModelSettings[provider].models.length===1&&globalModelSettings[provider].models.some(item=>item.id===model.id)} onchange={()=>toggleGlobalModel(provider,model)}/><span><strong>{modelLabel(model)}</strong><small>{$t("model.providerRuntime",{provider:providerDisplayName(provider)})}</small></span></label>{/each}</div>
-        </section>
-        {/if}
-      {/each}
-      {#if defaultsTab==="codex"}
-      <h4>{$t("model.codexDefaults")}</h4>
-      <label>{$t("workMode.label")}<WorkModeChips provider="codex" value={globalCodexWorkMode} onchange={(mode)=>chooseGlobalWorkMode("codex",mode)}/></label>
-      <label>{$t("model.label")}{#if availableCodexModels().length}<div class="chips">{#each availableCodexModels() as model}<button type="button" class:active={globalCodexModel===model.id} onclick={()=>{globalCodexModel=model.id;globalCodexModelChanged();}}>{modelLabel(model)}</button>{/each}</div>{:else}<small class="field-warning">{$t("model.saveGlobalCodex")}</small>{/if}</label>
-      <label>{$t("model.reasoningEffort")}<div class="chips">{#each globalCodexModelInfo()?.supportedReasoningEfforts??[] as effort}<button type="button" class:active={globalCodexEffort===effort.reasoningEffort} onclick={()=>globalCodexEffort=effort.reasoningEffort}>{effortLabel(effort.reasoningEffort)}</button>{/each}</div></label>
-      <label>{$t("model.speed")}<div class="segments"><button type="button" class:active={globalCodexTier===null} onclick={()=>globalCodexTier=null}>{$t("model.standard")}</button><button type="button" class:active={globalCodexTier==="priority"} disabled={!globalCodexModelInfo()?.serviceTiers?.some((x:any)=>x.id==="priority")} onclick={()=>globalCodexTier="priority"}>{$t("model.fast")}</button></div></label>
-      <label>{$t("automation.level")}<AutomationLevelChips provider="codex" value={globalCodexAutomation} onchange={(level)=>chooseGlobalAutomation("codex",level)}/></label>
-      {/if}
-      {#if defaultsTab==="claude"}
-      <h4>{$t("model.claudeDefaults")}</h4>
-      <label>{$t("workMode.label")}<WorkModeChips provider="claude" value={globalClaudeWorkMode} onchange={(mode)=>chooseGlobalWorkMode("claude",mode)}/></label>
-      <label>{$t("model.label")}<select bind:value={globalClaudeModel}>{#each availableClaudeModels() as m}<option value={m.id}>{m.displayName}</option>{/each}</select></label>
-      <label>{$t("model.reasoningEffort")}<select bind:value={globalClaudeEffort}>{#each claudeEfforts as e}<option value={e.id}>{$t(`session.effort.${e.id}`)}</option>{/each}</select></label>
-      <label>{$t("automation.level")}<AutomationLevelChips provider="claude" value={globalClaudeAutomation} onchange={(level)=>chooseGlobalAutomation("claude",level)}/></label>
-      {/if}
-      {#each compatibleProviders as provider}
-        {#if defaultsTab===provider}
-        <h4>{$t("model.providerDefaults",{provider:providerDisplayName(provider)})}</h4>
-        <label>{$t("workMode.label")}<WorkModeChips {provider} value={globalCompatibleWorkModes[provider]} onchange={(mode)=>chooseGlobalWorkMode(provider,mode)}/></label>
-        <label>{$t("model.label")}<select value={globalCompatibleModels[provider]} onchange={(event)=>globalCompatibleModels={...globalCompatibleModels,[provider]:(event.currentTarget as HTMLSelectElement).value}}>{#each availableCompatibleModels(provider) as model}<option value={model.id}>{model.displayName}</option>{/each}</select></label>
-        <label>{$t("model.reasoningEffort")}<select value={globalCompatibleEfforts[provider]} onchange={(event)=>globalCompatibleEfforts={...globalCompatibleEfforts,[provider]:(event.currentTarget as HTMLSelectElement).value}}>{#each compatibleEffortOptions(provider) as effort}<option value={effort.id}>{$t(`session.effort.${effort.id}`)}</option>{/each}</select></label>
-        <label>{$t("automation.level")}<AutomationLevelChips {provider} value={globalCompatibleAutomation[provider]} onchange={(level)=>chooseGlobalAutomation(provider,level)}/></label>
-        {/if}
-      {/each}
-      {#if (defaultsTab==="codex"&&globalCodexAutomation==="full")||(defaultsTab==="claude"&&globalClaudeAutomation==="full")||(compatibleProviders.includes(defaultsTab as CompatibleExecutionProvider)&&globalCompatibleAutomation[defaultsTab as CompatibleExecutionProvider]==="full")}
-        {#if !dangerAcknowledged}<label class="danger-confirm"><input type="checkbox" bind:checked={dangerConfirmed} onchange={()=>dangerConfirmed&&recordDangerAcknowledgement()}/>{$t("permission.fullAutoRiskAcknowledge")}</label>{/if}
-      {/if}
-      {:else if globalTab==="characters"}
-      <h3>{$t("character.byProvider")}</h3>
-      <p class="provider-scope-notice">{$t("character.scopeBody")}</p>
-      {#if charactersLoading&&!charactersLoaded}<p class="provider-waiting">{$t("character.loading")}</p>{/if}
-      <fieldset class="appearance-field avatar-display-setting"><legend>{$t("character.avatarDisplay")}</legend><p>{$t("character.avatarDisplayBody")}</p><div class="segments"><button type="button" class:active={characterSettings.avatarDisplay==="character"} onclick={()=>updateAvatarDisplay("character")}>{$t("character.avatarDisplay.character")}</button><button type="button" class:active={characterSettings.avatarDisplay==="name-mark"} onclick={()=>updateAvatarDisplay("name-mark")}>{$t("character.avatarDisplay.nameMark")}</button></div></fieldset>
-      <div class="character-settings-grid">
-        {#each ["codex","claude","grok","antigravity","deepseek","ollama"] as provider}
-          {@const typedProvider=provider as ProviderId}{@const character=characterSettings.providers[typedProvider]}
-          <section class="character-card"><header><strong>{character.nickname} · {providerDisplayName(typedProvider)}</strong><small>{$t("character.defaultFemale")}</small></header>
-            <label>{$t("character.nickname")}<input value={character.nickname} maxlength="30" oninput={(event)=>updateCharacter(typedProvider,{nickname:(event.currentTarget as HTMLInputElement).value})}/></label>
-            <label>{$t("character.toneLabel")}<select value={character.tonePreset} onchange={(event)=>updateCharacter(typedProvider,{tonePreset:(event.currentTarget as HTMLSelectElement).value as any})}>{#each TONE_PRESETS as tone}<option value={tone.id}>{$t(`character.tone.${tone.id}`)}</option>{/each}</select></label>
-            <label class="character-check"><input type="checkbox" checked={character.conversationOnly} onchange={(event)=>updateCharacter(typedProvider,{conversationOnly:(event.currentTarget as HTMLInputElement).checked})}/><span><strong>{$t("character.conversationOnly")}</strong><small>{$t("character.conversationOnlyBody")}</small></span></label>
-            {#if character.tonePreset==="custom"}<label>{$t("character.customTone")}<textarea rows="4" maxlength="2000" value={character.customTone} oninput={(event)=>updateCharacter(typedProvider,{customTone:(event.currentTarget as HTMLTextAreaElement).value})}></textarea></label>{/if}
-            {#if characterSettings.avatarDisplay==="character"}<label>{$t("character.avatarOutfit")}<select value={character.avatarOutfit} onchange={(event)=>updateCharacter(typedProvider,{avatarOutfit:(event.currentTarget as HTMLSelectElement).value})}>{#each providerOutfits[typedProvider] as outfit}<option value={outfit}>{typedProvider==="antigravity"?"Gemini":outfit}</option>{/each}</select>{#if typedProvider!=="codex"}<small class="field-help">{$t("character.installedAssetsOnly")}</small>{/if}</label>{/if}
-            <label>{$t("character.emotionIntensity")}<select value={character.emotionIntensity} onchange={(event)=>updateCharacter(typedProvider,{emotionIntensity:(event.currentTarget as HTMLSelectElement).value as any})}><option value="subtle">{$t("character.emotion.subtle")}</option><option value="natural">{$t("character.emotion.natural")}</option><option value="expressive">{$t("character.emotion.expressive")}</option></select></label>
-          </section>
-        {/each}
-      </div>
-      {:else if globalTab==="display"}
-      <h3>{$t("settings.display")}</h3>
-      <nav class="settings-subtabs" aria-label={$t("settings.display.sections")}>
-        {#each DISPLAY_TABS as tab}<button type="button" class:active={displayTab===tab.id} aria-current={displayTab===tab.id?"page":undefined} onclick={()=>selectDisplayTab(tab.id)}>{$t(tab.labelKey)}</button>{/each}
-      </nav>
-      {#if displayTab==="screen"}
-      <label class="language-setting"><span><strong>{$t("language.label")}</strong></span><select value={$locale} disabled={localeSaving} onchange={chooseLocale} aria-label={$t("language.label")}><option value="ko">{$t("language.option.ko")}</option><option value="en">{$t("language.option.en")}</option><option value="ja">{$t("language.option.ja")}</option></select></label>
-      {#if localeNotice}<p class="locale-notice" class:error={localeNotice===$t("language.saveFailed")} aria-live="polite">{localeNotice}</p>{/if}
-      <label>{$t("settings.theme")}<div class="segments three"><button type="button" class:active={theme==="auto"} onclick={()=>applyTheme("auto")}>{$t("settings.theme.auto")}</button><button type="button" class:active={theme==="light"} onclick={()=>applyTheme("light")}>{$t("settings.theme.light")}</button><button type="button" class:active={theme==="dark"} onclick={()=>applyTheme("dark")}>{$t("settings.theme.dark")}</button></div></label>
-      <fieldset class="appearance-field"><legend>{$t("settings.palette")}</legend><div class="palette-grid">
-        {#each PALETTES as option}
-          <button type="button" class:active={palette===option} aria-pressed={palette===option} onclick={()=>applyPalette(option)}>
-            <span class="palette-swatches" aria-hidden="true">{#each paletteSwatches[option] as color}<i style={`--swatch:${color}`}></i>{/each}</span>
-            <strong>{$t(`settings.palette.${option}`)}</strong>{#if palette===option}<Check size={15}/>{/if}
-          </button>
-        {/each}
-      </div></fieldset>
-      <fieldset class="appearance-field"><legend>{$t("settings.skin")}</legend><div class="skin-grid">
-        {#each SKINS as option}
-          <button type="button" class:active={skin===option} aria-pressed={skin===option} onclick={()=>applySkin(option)}>
-            <span class="skin-preview skin-preview-{option}" aria-hidden="true"><i></i><i></i></span>
-            <strong>{$t(`settings.skin.${option}`)}</strong>{#if skin===option}<Check size={15}/>{/if}
-          </button>
-        {/each}
-      </div></fieldset>
-      <fieldset class="appearance-field"><legend>{$t("settings.sessionTextSize")}</legend><div class="segments four text-size-segments">
-        {#each TEXT_SIZES as option}<button type="button" class:active={sessionTextSize===option} aria-pressed={sessionTextSize===option} onclick={()=>applySessionTextSize(option)}>{$t(`settings.textSize.${option}`)}</button>{/each}
-      </div></fieldset>
-      <fieldset class="appearance-field"><legend>{$t("settings.conversationTextSize")}</legend><div class="segments four text-size-segments">
-        {#each TEXT_SIZES as option}<button type="button" class:active={conversationTextSize===option} aria-pressed={conversationTextSize===option} onclick={()=>applyConversationTextSize(option)}>{$t(`settings.textSize.${option}`)}</button>{/each}
-      </div></fieldset>
-      <div class="setting-switches">
-        <label><span><strong>{$t("display.avatars")}</strong><small>{$t("display.avatarsBody")}</small></span><input type="checkbox" bind:checked={showAvatars}/></label>
-        <label><span><strong>{$t("display.statusBubbles")}</strong><small>{$t("display.statusBubblesBody")}</small></span><input type="checkbox" bind:checked={showSpeech}/></label>
-        <label><span><strong>{$t("display.autoCollapse")}</strong><small>{$t("display.autoCollapseBody")}</small></span><input type="checkbox" bind:checked={avatarAutoCollapse}/></label>
-        <label class="setting-choice"><span><strong>{$t("display.collapseDelay")}</strong><small>{$t("display.collapseDelayBody")}</small></span><select bind:value={avatarCollapseDelayMs} disabled={!avatarAutoCollapse}>{#each AVATAR_COLLAPSE_DELAYS as delay}<option value={delay}>{$t("format.seconds",{count:delay/1000})}</option>{/each}</select></label>
-        <label class="setting-choice"><span><strong>{$t("display.noticeShape")}</strong><small>{$t("display.noticeShapeBody")}</small></span><select value={avatarTrayShape} onchange={(event)=>changeAvatarTrayShape((event.currentTarget as HTMLSelectElement).value as AvatarTrayShape)} disabled={!showAvatars||!showSpeech}>{#each AVATAR_TRAY_SHAPES as shape}<option value={shape}>{$t(`display.noticeShape.${shape}`)}</option>{/each}</select></label>
-        <label><span><strong>{$t("display.scrollButton")}</strong><small>{$t("display.scrollButtonBody")}</small></span><input type="checkbox" bind:checked={scrollAutoSwitch}/></label>
-        <label><span><strong>{$t("display.immersiveScroll")}</strong><small>{$t("display.immersiveScrollBody")}</small></span><input type="checkbox" bind:checked={immersiveScroll}/></label>
-        <label><span><strong>{$t("display.enterToSend")}</strong><small>{$t("display.enterToSendBody")}</small></span><input type="checkbox" bind:checked={enterToSend}/></label>
-        <label><span><strong>{$t("display.rememberLast")}</strong><small>{$t("display.rememberLastBody")}</small></span><input type="checkbox" bind:checked={rememberLast}/></label>
-        <label><span><strong>{$t("display.hidePaths")}</strong><small>{$t("display.hidePathsBody")}</small></span><input type="checkbox" bind:checked={hideLocalPaths}/></label>
-      </div>
-      {/if}
-      {#if displayTab==="notifications"}
-      <div class="setting-switches">
-        <label><span><strong>{$t("display.completionNotifications")}</strong><small>{$t("display.completionNotificationsBody")}</small></span><input type="checkbox" checked={notifications} onchange={handleCompletionNotificationsChange}/></label>
-        <label><span><strong>{$t("display.approvalNotifications")}</strong><small>{$t("display.approvalNotificationsBody",{state:pushState})}</small></span><input type="checkbox" bind:checked={pushPreferences.approvals}/></label>
-        <label><span><strong>{$t("display.userInputNotifications")}</strong><small>{$t("display.userInputNotificationsBody")}</small></span><input type="checkbox" bind:checked={pushPreferences.userInput}/></label>
-        <label><span><strong>{$t("display.failureNotifications")}</strong><small>{$t("display.failureNotificationsBody")}</small></span><input type="checkbox" bind:checked={pushPreferences.failed}/></label>
-        <label><span><strong>{$t("display.hostOfflineNotifications")}</strong><small>{$t("display.defaultOff")}</small></span><input type="checkbox" bind:checked={pushPreferences.hostOffline}/></label>
-        <label><span><strong>{$t("display.handoffNotifications")}</strong><small>{$t("display.handoffNotificationsBody")}</small></span><input type="checkbox" bind:checked={pushPreferences.handoff}/></label>
-        <label><span><strong>{$t("display.vibration")}</strong><small>{$t("display.vibrationBody")}</small></span><input type="checkbox" bind:checked={vibration}/></label>
-        <label class="setting-choice"><span><strong>{$t("display.quietHours")}</strong><small>{$t("display.quietHoursBody")}</small></span><span class="quiet-hours"><input aria-label={$t("display.quietStart")} type="time" value={pushPreferences.quietStart??""} oninput={(event)=>pushPreferences.quietStart=(event.currentTarget as HTMLInputElement).value||null}/><span>–</span><input aria-label={$t("display.quietEnd")} type="time" value={pushPreferences.quietEnd??""} oninput={(event)=>pushPreferences.quietEnd=(event.currentTarget as HTMLInputElement).value||null}/></span></label>
-      </div>
-      <button class="danger-lite" onclick={disableAllPush}>{$t("display.disableAllNotifications")}</button>
-      {/if}
-      {/if}
-      </div>
-      {#if globalTab==="defaults"||globalTab==="characters"||globalTab==="display"}<div class="settings-save-row sticky"><span class:error={Boolean(globalSaveNotice)&&globalSaveNotice!==$t("settings.globalSaved")&&globalSaveNotice!==$t("settings.globalSavedPushSkipped")}>{globalSaveNotice||$t(globalDirty()?"settings.unsavedChanges":"settings.allSaved")}</span><button class="primary" onclick={saveGlobalSettings} disabled={globalSaving||delegationLoading||((globalCodexAutomation==="full"||globalClaudeAutomation==="full")&&!dangerConfirmed)}>{globalSaving?$t("common.saving"):$t("common.save")}</button></div>{/if}
     </div>
   </div>
 {/if}
@@ -2812,83 +2743,65 @@
     onpointermove={(event)=>{if(createBackdropPointer)createBackdropPointer=moveBackdropPointer(createBackdropPointer,event.clientX,event.clientY);}}
     onpointercancel={()=>createBackdropPointer=null}
     onclick={(event)=>{const dismiss=shouldDismissBackdrop(createBackdropPointer,event.target===event.currentTarget);createBackdropPointer=null;if(dismiss){createOpen=false;vscodeContext=null;}}}>
-    <div class="modal create-panel" class:quick-create={quickCreate} role="dialog" aria-modal="true" aria-labelledby="new-title">
+    <div class="modal create-panel create-composer" role="dialog" aria-modal="true" aria-labelledby="new-title">
       <header><h2 id="new-title">{createKind==="parallel"||createKind==="review"?$t("create.newReview"):createKind==="conversation"?$t("create.newConversation"):$t("create.newTask")}</h2><button class="icon-button" aria-label={$t("a11y.closeDialog")} onclick={()=>{createOpen=false;vscodeContext=null;}}><X size={20}/></button></header>
-      {#if quickCreate}
-        <p class="quick-create-summary"><Zap size={16}/><span><strong>{$t("quick.title")}</strong><small>{providerDisplayName(createProvider)} · {workspaces.find(item=>item.id===createWorkspace)?.displayName??$t("workspace.noRegistered")}</small></span><button type="button" onclick={()=>quickCreate=false}>{$t("quick.advanced")}</button></p>
-        {#if promptPresetConflict}<PromptPresetSyncNotice serverCount={promptPresetConflict.server.length} localCount={promptPresetConflict.local.length} mergedCount={promptPresetConflict.merged.length} droppedCount={promptPresetConflict.dropped.length} deletedCount={new Set([...promptPresetConflict.deletedOnServer,...promptPresetConflict.deletedOnLocal]).size} recovered={promptPresetConflict.degraded} busy={promptPresetSyncBusy} onuseserver={useServerPromptPresets} onmerge={mergePromptPresetConflict}/>{:else if promptPresetSyncNotice}<p class:preset-sync-info={promptPresetSyncNotice===$t("preset.serverRecovered")} class:preset-sync-error={promptPresetSyncNotice!==$t("preset.serverRecovered")}>{promptPresetSyncNotice}</p>{/if}
-        <section class="prompt-presets"><header><strong>{$t("preset.title")}</strong><button type="button" disabled={!createPrompt.trim()||promptPresetSyncBusy||Boolean(promptPresetConflict)} onclick={savePromptPreset}>{$t("preset.saveCurrent")}</button></header><div>{#each allPromptPresets(customPromptPresets,$t) as preset}<span><button type="button" onclick={()=>createPrompt=preset.prompt}>{preset.label}</button>{#if customPromptPresets.some(item=>item.id===preset.id)}<button type="button" class="preset-delete" disabled={promptPresetSyncBusy||Boolean(promptPresetConflict)} aria-label={$t("preset.delete",{name:preset.label})} onclick={()=>deletePromptPreset(preset.id)}>×</button>{/if}</span>{/each}</div></section>
-        <label>{$t("conversation.request")}<textarea bind:value={createPrompt} rows="7" maxlength="20000" placeholder={$t("create.requestPlaceholder")} onkeydown={submitCreateKey} onpaste={(event)=>void createAttachRef?.handlePaste(event)}></textarea></label>
-        {#if createPrompt.trim()}<div class="intake-recommendation"><span><strong>{$t("recommend.title")}</strong><small>{$t(`recommend.${intakeRecommendation.reason}`)} · {intakeRecommendation.kind==="review"?$t("create.review"):(intakeRecommendation.provider==="codex"?"Codex":"Claude")}</small></span><button type="button" onclick={applyIntakeRecommendation}>{$t("recommend.apply")}</button></div>{/if}
-        <div class="attach-row"><AttachBar bind:this={createAttachRef} bind:attachments={createAttachments} disabled={sending}/><span class="attach-hint">{$t("attachment.hint")}</span></div>
-        {#if providerConnectionPhase==="none"}{@render providerConnectionsEmpty()}{/if}
-        {#if createError}<p class="create-error" role="alert">{createError}</p>{/if}
-        {@const quickQuota=quota?.[createProvider]}<div class="quota-reservation-preview"><strong>{providerDisplayName(createProvider)} · {$t("quotaReservation.currentUsage")}</strong>{#if quickQuota?.quotaMode==="vertex-credit"}<span>{$t("antigravityExecution.vertexCreditTitle")} · {$t("antigravityExecution.vertexQuotaScope",{project:quickQuota.projectId,location:quickQuota.location})}</span>{:else if quickQuota?.fiveHour||quickQuota?.sevenDay}{#if quickQuota?.fiveHour}<span>{$t("quota.fiveHours")} {quotaPct(quickQuota.fiveHour.pct)}%{#if quickQuota.fiveHour.resetsAt} · {fmtReset(quickQuota.fiveHour.resetsAt,quickQuota.fiveHour.resetLabel)}{/if}</span>{/if}{#if quickQuota?.sevenDay}<span>{$t("quota.weekly")} {quotaPct(quickQuota.sevenDay.pct)}%{#if quickQuota.sevenDay.resetsAt} · {fmtReset(quickQuota.sevenDay.resetsAt,quickQuota.sevenDay.resetLabel)}{/if}</span>{/if}{:else if quickQuota?.balance}<span>{$t("quota.balance")} {formatCurrency(quickQuota.balance.total,quickQuota.balance.currency,$locale)}</span>{:else}<span>{$t("quota.noData")}</span>{/if}</div>
-        <div class="create-submit-actions"><button class="primary" onclick={()=>createTask()} disabled={!createPrompt.trim()||!createWorkspace||createOpening||sending||createConnectionBlocked||(isConnectionAuthProvider(createProvider)&&Boolean(activeAuthAttempt(createProvider)))}><Zap size={18}/>{sending?$t("task.creating"):$t("quotaReservation.startNow")}</button>{#if createProvider==="codex"||createProvider==="claude"}<button onclick={reserveTask} disabled={!createPrompt.trim()||!createWorkspace||createOpening||sending||createConnectionBlocked||(isConnectionAuthProvider(createProvider)&&Boolean(activeAuthAttempt(createProvider)))}><Clock3 size={18}/>{$t("quotaReservation.afterReset")}</button>{/if}</div>
-      {:else}
       <div class="create-kinds" role="group" aria-label={$t("create.sessionType")}>
         <button type="button" aria-label={$t("create.single")} class:active={createKind==="single"} onclick={()=>chooseCreateKind("single")}>{$t("create.single")}</button>
         <button type="button" aria-label={$t("create.review")} class:active={createKind==="parallel"||createKind==="review"} onclick={chooseReviewKind}>{$t("create.review")}</button>
         <button type="button" aria-label={$t("create.conversation")} class:active={createKind==="conversation"} onclick={()=>chooseCreateKind("conversation")}>{$t("create.conversation")}</button>
       </div>
 
-      <p class="create-say">{#each createSayParts as part}{#if part.kind==="text"}<span>{part.value}</span>{:else}<button type="button" class="say-tok" class:mono={part.name==="workspace"||part.name==="turns"} class:danger={part.name==="automation"&&createKind==="single"&&createAutomationFor(createProvider)==="full"||part.name==="finish"&&reviewFixesEnabled()} onclick={()=>revealCreateField(createSayTarget(part.name))}>{part.value}</button>{/if}{/each}</p>
+      {#if promptPresetConflict}<PromptPresetSyncNotice serverCount={promptPresetConflict.server.length} localCount={promptPresetConflict.local.length} mergedCount={promptPresetConflict.merged.length} droppedCount={promptPresetConflict.dropped.length} deletedCount={new Set([...promptPresetConflict.deletedOnServer,...promptPresetConflict.deletedOnLocal]).size} recovered={promptPresetConflict.degraded} busy={promptPresetSyncBusy} onuseserver={useServerPromptPresets} onmerge={mergePromptPresetConflict}/>{:else if promptPresetSyncNotice}<p class:preset-sync-info={promptPresetSyncNotice===$t("preset.serverRecovered")} class:preset-sync-error={promptPresetSyncNotice!==$t("preset.serverRecovered")}>{promptPresetSyncNotice}</p>{/if}
+      <label class="composer-prompt">{createKind==="parallel"||createKind==="review"?$t("create.reviewTarget"):$t("conversation.request")}<textarea class="composer-textarea" bind:value={createPrompt} rows="7" maxlength="20000" placeholder={createKind==="parallel"||createKind==="review"?$t("create.reviewPlaceholder"):$t("create.requestPlaceholder")} onkeydown={submitCreateKey} onpaste={(event)=>void createAttachRef?.handlePaste(event)}></textarea></label>
+      {#if createPrompt.trim()}<div class="intake-recommendation"><span><strong>{$t("recommend.title")}</strong><small>{$t(`recommend.${intakeRecommendation.reason}`)} · {intakeRecommendation.kind==="review"?$t("create.review"):(intakeRecommendation.provider==="codex"?"Codex":"Claude")}</small></span><button type="button" onclick={applyIntakeRecommendation}>{$t("recommend.apply")}</button></div>{/if}
+      <section class="prompt-presets"><header><strong>{$t("preset.title")}</strong><button type="button" disabled={!createPrompt.trim()||promptPresetSyncBusy||Boolean(promptPresetConflict)} onclick={savePromptPreset}>{$t("preset.saveCurrent")}</button></header><div>{#each allPromptPresets(customPromptPresets,$t) as preset}<span><button type="button" onclick={()=>createPrompt=preset.prompt}>{preset.label}</button>{#if customPromptPresets.some(item=>item.id===preset.id)}<button type="button" class="preset-delete" disabled={promptPresetSyncBusy||Boolean(promptPresetConflict)} aria-label={$t("preset.delete",{name:preset.label})} onclick={()=>deletePromptPreset(preset.id)}>×</button>{/if}</span>{/each}</div></section>
 
       {#if createKind==="single"}
-        <section class="cblk" id="create-provider">
-          <h4 class="cover">{$t("create.sectionEngine")}</h4>
+        <section class="cblk composer-block" id="create-provider">
           {#if providerConnectionPhase==="loading"}
             {@render providerConnectionsPending()}
           {:else if providerConnectionPhase==="none"}
             {@render providerConnectionsEmpty()}
           {:else}
-            <div class="cf" role="group" aria-label={$t("create.engine")}><span class="cf-n">{$t("create.engine")}</span><div class="sel">{#each creatableProviders as typedProvider}<button type="button" aria-label={providerDisplayName(typedProvider)} class:active={createProvider===typedProvider} onclick={()=>createProvider=typedProvider}>{providerDisplayName(typedProvider)}</button>{/each}</div></div>
+            <p class="composer-sentence">{#each createComposerParts as part}{#if part.kind==="text"}<span>{part.value}</span>{:else if part.name==="agent"}<ModelPicker fields={["provider","model"]} layout="tokens" size="sm" providers={creatableProviders} provider={createProvider} models={createOpening?[]:createModelsFor(createProvider)} model={createModelFor(createProvider)} disabled={createOpening} idPrefix="create" onprovider={(value)=>createProvider=value} onmodel={setCreateModel}/>{:else if part.name==="workspace"}<span class="ui-select ui-select-sm composer-token" class:busy={createLocationLoading}><select id="create-workspace" aria-label={$t("create.workLocation")} value={createWorkspace} disabled={createLocationLoading} onchange={(event)=>{const next=createLocations().find(item=>item.id===(event.currentTarget as HTMLSelectElement).value);if(next){createProject=next.projectId;createWorkspace=next.id;}}}>{#if !createLocations().length}<option value="">{$t(createLocationLoading?"create.loadingLocations":"workspace.noRegistered")}</option>{/if}{#each createLocations() as workspace (workspace.id)}<option value={workspace.id}>{projectName(workspace.projectId)}</option>{/each}</select><ChevronDown class="ui-select-chevron" size={14}/></span>{:else if part.name==="automation"}<span class="ui-select ui-select-sm composer-token" class:danger={createAutomationNow==="full"}><select aria-label={$t("automation.level")} value={createAutomationNow} onchange={(event)=>chooseCreateAutomation(createProvider,(event.currentTarget as HTMLSelectElement).value as AutomationLevel)}>{#each AUTOMATION_ORDER as level}<option value={level} disabled={createProvider==="claude"&&level==="confirm"}>{automationLabel(level)}</option>{/each}</select><ChevronDown class="ui-select-chevron" size={14}/></span>{/if}{/each}</p>
+            <small class="composer-path">{workspaces.find(item=>item.id===createWorkspace)?.canonicalPath??""}</small>
+            <small class="field-help composer-help">{automationDescription(createAutomationNow)}</small>
           {/if}
-          <!-- Engine-specific model and permission options only make sense once an engine can actually be chosen. -->
+          {#if createLocationLoading}<div class="create-location-loading" role="status"><LoaderCircle class="spin" size={18}/><span><strong>{$t("create.loadingLocations")}</strong><small>{$t("create.loadingLocationsBody")}</small></span></div>{:else if createLocationError}<div class="create-location-error"><small class="field-warning" title={createLocationError}>{$t("create.locationLoadFailed")}</small><button type="button" onclick={loadCreateLocations}>{$t("common.retry")}</button></div>{/if}
           {#if providerConnectionPhase==="ready"}
           {#if isConnectionAuthProvider(createProvider)&&(providerAccounts.find(item=>item.provider===createProvider)?.state==="disconnected"||isActiveAuthAttempt(authAttempts[createProvider])||authFeedback[createProvider]?.tone==="success")}{@render inlineProviderAuth(createProvider,"create")}{/if}
           {#if createOpening}
             <div class="create-options-loading" role="status"><LoaderCircle class="spin" size={17}/><span>{$t("model.loading")}</span></div>
-          {:else if createProvider==="codex"}
-            <div class="cf" role="group" aria-label={$t("model.label")}><span class="cf-n">{$t("model.label")}</span><div class="chips">{#each availableCodexModels() as m}<button type="button" aria-label={m.displayName} class:active={createModel===m.id} onclick={()=>{createModel=m.id;createModelChanged();}}>{m.displayName}</button>{/each}</div></div>
-            <div class="cf" role="group" aria-label={$t("model.reasoningEffort")}><span class="cf-n">{$t("model.reasoningEffort")}</span><div class="sel">{#each createModelInfo()?.supportedReasoningEfforts??[] as e}<button type="button" class:active={createEffort===e.reasoningEffort} onclick={()=>createEffort=e.reasoningEffort}>{effortLabel(e.reasoningEffort)}</button>{/each}</div></div>
-            {#if createModelInfo()?.serviceTiers?.some((x:any)=>x.id==="priority")}<div class="cf" role="group" aria-label={$t("model.speed")}><span class="cf-n">{$t("model.speed")}</span><div class="sel"><button type="button" class:active={createTier===null} onclick={()=>createTier=null}>{$t("model.standard")}</button><button type="button" class:active={createTier==="priority"} onclick={()=>createTier="priority"}>{$t("model.fastUsage")}</button></div></div>{/if}
-          {:else if createProvider==="claude"}
-            <div class="cf" role="group" aria-label={$t("model.label")}><span class="cf-n">{$t("model.label")}</span><div class="chips">{#each availableClaudeModels() as m}<button type="button" aria-label={m.displayName} class:active={createClaudeModel===m.id} onclick={()=>createClaudeModel=m.id}>{m.displayName}</button>{/each}</div></div>
-            <div class="cf" role="group" aria-label={$t("model.reasoningEffort")}><span class="cf-n">{$t("model.reasoningEffort")}</span><div class="sel">{#each claudeEfforts as e}<button type="button" class:active={createClaudeEffort===e.id} onclick={()=>createClaudeEffort=e.id}>{$t(`session.effort.${e.id}`)}</button>{/each}</div></div>
-          {:else if createProvider==="grok"}
-            <div class="cf" role="group" aria-label={$t("model.label")}><span class="cf-n">{$t("model.label")}</span><div class="chips">{#each availableCompatibleModels("grok") as m}<button type="button" aria-label={m.displayName} class:active={createGrokModel===m.id} onclick={()=>createGrokModel=m.id}>{m.displayName}</button>{/each}</div></div>
-            <label class="cf">{$t("model.reasoningEffort")}<select value={createCompatibleEfforts.grok} onchange={(event)=>createCompatibleEfforts={...createCompatibleEfforts,grok:(event.currentTarget as HTMLSelectElement).value}}>{#each compatibleEffortOptions("grok") as effort}<option value={effort.id}>{$t(`session.effort.${effort.id}`)}</option>{/each}</select></label>
-            {#if !availableCompatibleModels("grok").length}<p class="field-warning">{$t("provider.grokUnavailable")}</p>{/if}
+          {:else if createProvider==="grok"&&!availableCompatibleModels("grok").length}
+            <p class="field-warning">{$t("provider.grokUnavailable")}</p>
           {:else if createProvider==="deepseek"}
-            <div class="cf" role="group" aria-label={$t("model.label")}><span class="cf-n">{$t("model.label")}</span><div class="chips">{#each availableCompatibleModels("deepseek") as m}<button type="button" aria-label={m.displayName} class:active={createDeepseekModel===m.id} onclick={()=>createDeepseekModel=m.id}>{m.displayName}</button>{/each}</div></div>
-            <label class="cf">{$t("model.reasoningEffort")}<select value={createCompatibleEfforts.deepseek} onchange={(event)=>createCompatibleEfforts={...createCompatibleEfforts,deepseek:(event.currentTarget as HTMLSelectElement).value}}>{#each compatibleEffortOptions("deepseek") as effort}<option value={effort.id}>{$t(`session.effort.${effort.id}`)}</option>{/each}</select></label>
             <p class="field-help">{$t("provider.deepseekApiHelp")}</p>
-          {:else if createProvider==="ollama"}
-            <div class="cf" role="group" aria-label={$t("model.label")}><span class="cf-n">{$t("model.label")}</span><div class="chips">{#each availableCompatibleModels("ollama") as m}<button type="button" aria-label={m.displayName} class:active={createOllamaModel===m.id} onclick={()=>createOllamaModel=m.id}>{m.displayName}</button>{/each}</div></div>
-            <label class="cf">{$t("model.reasoningEffort")}<select value={createCompatibleEfforts.ollama} onchange={(event)=>createCompatibleEfforts={...createCompatibleEfforts,ollama:(event.currentTarget as HTMLSelectElement).value}}>{#each compatibleEffortOptions("ollama") as effort}<option value={effort.id}>{$t(`session.effort.${effort.id}`)}</option>{/each}</select></label>
-            {#if !availableCompatibleModels("ollama").length}<p class="field-warning">{$t("provider.ollamaUnavailable")}</p>{/if}
+          {:else if createProvider==="ollama"&&!availableCompatibleModels("ollama").length}
+            <p class="field-warning">{$t("provider.ollamaUnavailable")}</p>
           {:else if createProvider==="antigravity"}
             <p class="field-help"><strong>{$t(antigravityExecution.backend==="vertex-agent"?"antigravityExecution.createVertexAgent":antigravityExecution.backend==="vertex"?"antigravityExecution.createVertex":"antigravityExecution.createConsumer",{project:antigravityExecution.vertex.projectId,location:antigravityExecution.vertex.location})}</strong>{#if antigravityUsesVertex}<br/>{$t("antigravityExecution.vertexCreditBody")}{/if}</p>
-            <div class="cf" role="group" aria-label={$t("model.label")}><span class="cf-n">{$t("model.label")}</span><div class="chips">{#each availableCompatibleModels("antigravity") as m}<button type="button" aria-label={m.displayName} class:active={createAntigravityModel===m.id} onclick={()=>createAntigravityModel=m.id}>{m.displayName}</button>{/each}</div></div>
-            <label class="cf">{$t("model.reasoningEffort")}<select value={createCompatibleEfforts.antigravity} onchange={(event)=>createCompatibleEfforts={...createCompatibleEfforts,antigravity:(event.currentTarget as HTMLSelectElement).value}}>{#each compatibleEffortOptions("antigravity") as effort}<option value={effort.id}>{$t(`session.effort.${effort.id}`)}</option>{/each}</select></label>
             {#if antigravityExecution.backend==="vertex"}<div class="cf" role="group" aria-label={$t("vertexSearch.label")}><span class="cf-n">{$t("vertexSearch.label")}</span><div class="chips" role="group" aria-label={$t("vertexSearch.label")}><button type="button" class:active={createGoogleSearchMode==="off"} onclick={()=>createGoogleSearchMode="off"}>{$t("vertexSearch.off")}</button><button type="button" class:active={createGoogleSearchMode==="auto"} onclick={()=>createGoogleSearchMode="auto"}>{$t("vertexSearch.auto")}</button><button type="button" class:active={createGoogleSearchMode==="always"} onclick={()=>createGoogleSearchMode="always"}>{$t("vertexSearch.always")}</button></div></div><p class="field-help">{$t("vertexSearch.retentionNotice")}</p>{/if}
             {#if !availableCompatibleModels("antigravity").length}<p class="field-warning">{$t("provider.antigravityUnavailable")}</p>{/if}
+          {/if}
+          {#if createAutomationNow==="full"&&!dangerAcknowledged}
+            <div class="chaz"><div class="chaz-stripe"></div><div class="chaz-body"><span>{$t("create.dangerBand")}</span><label class="danger-confirm"><input type="checkbox" bind:checked={dangerConfirmed} onchange={()=>dangerConfirmed&&recordDangerAcknowledgement()}/>{$t("permission.fullAutoRiskAcknowledge")}</label></div></div>
           {/if}
           {/if}
         </section>
 
         {#if providerConnectionPhase==="ready"}
-        <section class="cblk" id="create-automation">
-          <h4 class="cover">{$t("create.permissionSection")}{#if createAutomationNow==="full"}<span class="r danger">{$t("create.hardToUndo")}</span>{/if}</h4>
-          <div class="cf" role="group" aria-label={$t("workMode.label")} id="create-workmode"><span class="cf-n">{$t("workMode.label")}</span><div class="sel">{#each ["default","plan"] as const as mode}<button type="button" class:active={createWorkModeNow===mode} onclick={()=>chooseCreateWorkMode(createProvider,mode)}>{workModeLabel(mode)}</button>{/each}</div></div>
-          <div class="cf" role="group" aria-label={$t("automation.level")}><span class="cf-n">{$t("automation.level")}</span><div class="sel">{#each AUTOMATION_ORDER as level}<button type="button" class:active={createAutomationNow===level} class:danger={level==="full"} disabled={createProvider==="claude"&&level==="confirm"} title={createProvider==="claude"&&level==="confirm"?$t("permission.claudeConfirmUnavailable"):undefined} onclick={()=>chooseCreateAutomation(createProvider,level)}>{automationLabel(level)}</button>{/each}</div><small class="field-help">{automationDescription(createAutomationNow)}</small></div>
-          {#if createAutomationNow==="full"&&!dangerAcknowledged}
-            <div class="chaz"><div class="chaz-stripe"></div><div class="chaz-body"><span>{$t("create.dangerBand")}</span><label class="danger-confirm"><input type="checkbox" bind:checked={dangerConfirmed} onchange={()=>dangerConfirmed&&recordDangerAcknowledgement()}/>{$t("permission.fullAutoRiskAcknowledge")}</label></div></div>
-          {/if}
-        </section>
+        <details class="composer-advanced" id="create-automation" bind:open={createAdvancedOpen}>
+          <summary><span>{$t("create.advanced")}</span><small>{createAdvancedSummary}</small></summary>
+          <div class="composer-advanced-body">
+            <ModelPicker fields={["effort","tier"]} layout="row" provider={createProvider} efforts={createEffortsFor(createProvider)} effort={createEffortFor(createProvider)} hasPriority={createHasPriority()} tier={createTier} disabled={createOpening} idPrefix="create-advanced" oneffort={setCreateEffort} ontier={(value)=>createTier=value}/>
+            <div class="cf" role="group" aria-label={$t("create.executionLocation")} id="create-host"><span class="cf-n">{$t("create.executionLocation")}</span><div class="host-choice-grid">{#each hosts as item}<button type="button" class:active={createHost===item.id} disabled={createLocationLoading||item.status!=="online"} onclick={()=>{createHost=item.id;syncCreateWorkspace();}}><strong>{executionHostName(item)}</strong><small>{item.platform} · {$t(`status.${item.status}`)}{item.lastSeenAt?` · ${ago(item.lastSeenAt)}`:""}</small></button>{/each}</div></div>
+            <div class="cf" id="create-branch"><span class="cf-n">{$t("create.branch")}</span><span class="composer-branch">{createBranch()??$t("common.unknown")}</span><small>{$t("create.branchHelp")}</small></div>
+            <div class="cf composer-switch-row" id="create-workmode"><span class="cf-n">{$t("workMode.plan")}</span><Switch checked={createWorkModeNow==="plan"} label={$t("workMode.plan")} onchange={(checked)=>chooseCreateWorkMode(createProvider,checked?"plan":"default")}/><small>{$t("create.planFirstHelp")}</small></div>
+          </div>
+        </details>
         {/if}
       {:else}
+      <p class="create-say">{#each createSayParts as part}{#if part.kind==="text"}<span>{part.value}</span>{:else}<button type="button" class="say-tok" class:mono={part.name==="workspace"||part.name==="turns"} class:danger={part.name==="finish"&&reviewFixesEnabled()} onclick={()=>revealCreateField(createSayTarget(part.name))}>{part.value}</button>{/if}{/each}</p>
         <div class="collaboration-create-options">
           <p>{$t(createKind==="conversation"?"create.conversationParticipantsBody":"create.reviewParticipantsBody")}</p>
 
@@ -2910,14 +2823,11 @@
                 <div class="cwho" data-provider={provider}>
                   <h5>{providerDisplayName(provider)}{#if conversationFirstProvider===provider}<em>{$t("create.firstResponderBadge")}</em>{/if}</h5>
                   {#if provider==="codex"}
-                    <label class="cf">{$t("model.label")}<select bind:value={conversationCodexModel} onchange={conversationCodexModelChanged}>{#each availableCodexModels() as model}<option value={model.id}>{modelLabel(model)}</option>{/each}</select></label>
-                    <label class="cf">{$t("model.reasoningEffort")}<select bind:value={conversationCodexEffort}>{#each conversationCodexModelInfo()?.supportedReasoningEfforts??[] as effort}<option value={effort.reasoningEffort}>{effortLabel(effort.reasoningEffort)}</option>{/each}</select></label>
+                    <ModelPicker fields={["model","effort"]} layout="row" size="sm" provider="codex" models={availableCodexModels()} efforts={conversationCodexModelInfo()?.supportedReasoningEfforts??[]} model={conversationCodexModel} effort={conversationCodexEffort} idPrefix="conversation-codex" onmodel={(value)=>{conversationCodexModel=value;conversationCodexModelChanged();}} oneffort={(value)=>conversationCodexEffort=value}/>
                   {:else if provider==="claude"}
-                    <label class="cf">{$t("model.label")}<select bind:value={conversationClaudeModel}>{#each availableClaudeModels() as model}<option value={model.id}>{modelLabel(model)}</option>{/each}</select></label>
-                    <label class="cf">{$t("model.reasoningEffort")}<select bind:value={conversationClaudeEffort}>{#each claudeEfforts as effort}<option value={effort.id}>{$t(`session.effort.${effort.id}`)}</option>{/each}</select></label>
+                    <ModelPicker fields={["model","effort"]} layout="row" size="sm" provider="claude" models={availableClaudeModels()} efforts={claudeEfforts} model={conversationClaudeModel} effort={conversationClaudeEffort} idPrefix="conversation-claude" onmodel={(value)=>conversationClaudeModel=value} oneffort={(value)=>conversationClaudeEffort=value}/>
                   {:else}
-                    <label class="cf">{$t("model.label")}<select bind:value={conversationCompatibleModels[provider]}>{#each availableCompatibleModels(provider) as model}<option value={model.id}>{model.displayName}</option>{/each}</select></label>
-                    <label class="cf">{$t("model.reasoningEffort")}<select bind:value={conversationCompatibleEfforts[provider]}>{#each compatibleEffortOptions(provider) as effort}<option value={effort.id}>{$t(`session.effort.${effort.id}`)}</option>{/each}</select></label>
+                    <ModelPicker fields={["model","effort"]} layout="row" size="sm" {provider} models={availableCompatibleModels(provider)} efforts={compatibleEffortOptions(provider)} model={conversationCompatibleModels[provider]} effort={conversationCompatibleEfforts[provider]} idPrefix={`conversation-${provider}`} onmodel={(value)=>conversationCompatibleModels={...conversationCompatibleModels,[provider]:value}} oneffort={(value)=>conversationCompatibleEfforts={...conversationCompatibleEfforts,[provider]:value}}/>
                   {/if}
                   <div class="cf">
                     <span class="cf-n">{$t("character.toneLabel")}</span>
@@ -2979,16 +2889,12 @@
                 <div class="cwho" data-provider={provider}>
                   <h5>{providerDisplayName(provider)}{#if createProvider===provider}<em>{$t("create.finalPrimaryBadge")}</em>{/if}</h5>
                   {#if provider==="codex"}
-                    <label class="cf">{$t("model.label")}<select bind:value={createModel} onchange={createModelChanged}>{#each availableCodexModels() as model}<option value={model.id}>{modelLabel(model)}</option>{/each}</select></label>
-                    <label class="cf">{$t("model.reasoningEffort")}<select bind:value={createEffort}>{#each createModelInfo()?.supportedReasoningEfforts??[] as effort}<option value={effort.reasoningEffort}>{effortLabel(effort.reasoningEffort)}</option>{/each}</select></label>
-                    {#if createModelInfo()?.serviceTiers?.some((item:any)=>item.id==="priority")}<div class="cf" role="group" aria-label={$t("model.speed")}><span class="cf-n">{$t("model.speed")}</span><div class="sel"><button type="button" class:active={createTier===null} onclick={()=>createTier=null}>{$t("model.standard")}</button><button type="button" class:active={createTier==="priority"} onclick={()=>createTier="priority"}>{$t("session.fastUsage")}</button></div></div>{/if}
+                    <ModelPicker fields={["model","effort","tier"]} layout="row" size="sm" provider="codex" models={availableCodexModels()} efforts={createModelInfo()?.supportedReasoningEfforts??[]} model={createModel} effort={createEffort} hasPriority={Boolean(createModelInfo()?.serviceTiers?.some((item:any)=>item.id==="priority"))} tier={createTier} idPrefix="review-codex" onmodel={(value)=>{createModel=value;createModelChanged();}} oneffort={(value)=>createEffort=value} ontier={(value)=>createTier=value}/>
                   {:else if provider==="claude"}
-                    <label class="cf">{$t("model.label")}<select bind:value={createClaudeModel}>{#each availableClaudeModels() as model}<option value={model.id}>{modelLabel(model)}</option>{/each}</select></label>
-                    <label class="cf">{$t("model.reasoningEffort")}<select bind:value={createClaudeEffort}>{#each claudeEfforts as effort}<option value={effort.id}>{$t(`session.effort.${effort.id}`)}</option>{/each}</select></label>
+                    <ModelPicker fields={["model","effort"]} layout="row" size="sm" provider="claude" models={availableClaudeModels()} efforts={claudeEfforts} model={createClaudeModel} effort={createClaudeEffort} idPrefix="review-claude" onmodel={(value)=>createClaudeModel=value} oneffort={(value)=>createClaudeEffort=value}/>
                   {:else}
                     {@const compatible=provider as CompatibleExecutionProvider}
-                    <label class="cf">{$t("model.label")}<select value={createCompatibleModel(compatible)} onchange={(event)=>setCreateCompatibleModel(compatible,(event.currentTarget as HTMLSelectElement).value)}>{#each availableCompatibleModels(compatible) as model}<option value={model.id}>{model.displayName}</option>{/each}</select></label>
-                    <label class="cf">{$t("model.reasoningEffort")}<select value={createCompatibleEfforts[compatible]} onchange={(event)=>createCompatibleEfforts={...createCompatibleEfforts,[compatible]:(event.currentTarget as HTMLSelectElement).value}}>{#each compatibleEffortOptions(compatible) as effort}<option value={effort.id}>{$t(`session.effort.${effort.id}`)}</option>{/each}</select></label>
+                    <ModelPicker fields={["model","effort"]} layout="row" size="sm" provider={compatible} models={availableCompatibleModels(compatible)} efforts={compatibleEffortOptions(compatible)} model={createCompatibleModel(compatible)} effort={createCompatibleEfforts[compatible]} idPrefix={`review-${compatible}`} onmodel={(value)=>setCreateCompatibleModel(compatible,value)} oneffort={(value)=>createCompatibleEfforts={...createCompatibleEfforts,[compatible]:value}}/>
                   {/if}
                   <div class="cf">
                     <span class="cf-n">{$t("character.toneLabel")}</span>
@@ -3020,8 +2926,6 @@
             </section>
           {/if}
         </div>
-      {/if}
-
       <section class="cblk" id="create-workspace" aria-busy={createLocationLoading}>
         <h4 class="cover">{$t("create.workLocation")}</h4>
         <button type="button" class="cpick" aria-expanded={createLocationOpen} onclick={()=>createLocationOpen=!createLocationOpen}>
@@ -3038,6 +2942,7 @@
           {/if}
         {/if}
       </section>
+      {/if}
 
       {#if vscodeContext}
         <section class="vscode-context-preview">
@@ -3046,15 +2951,10 @@
           <small>{$t("vscode.contextSummary",{selection:vscodeContext.selectedText.length,diagnostics:vscodeContext.diagnostics.length})}</small>
         </section>
       {/if}
-      {#if promptPresetConflict}<PromptPresetSyncNotice serverCount={promptPresetConflict.server.length} localCount={promptPresetConflict.local.length} mergedCount={promptPresetConflict.merged.length} droppedCount={promptPresetConflict.dropped.length} deletedCount={new Set([...promptPresetConflict.deletedOnServer,...promptPresetConflict.deletedOnLocal]).size} recovered={promptPresetConflict.degraded} busy={promptPresetSyncBusy} onuseserver={useServerPromptPresets} onmerge={mergePromptPresetConflict}/>{:else if promptPresetSyncNotice}<p class:preset-sync-info={promptPresetSyncNotice===$t("preset.serverRecovered")} class:preset-sync-error={promptPresetSyncNotice!==$t("preset.serverRecovered")}>{promptPresetSyncNotice}</p>{/if}
-      <section class="prompt-presets"><header><strong>{$t("preset.title")}</strong><button type="button" disabled={!createPrompt.trim()||promptPresetSyncBusy||Boolean(promptPresetConflict)} onclick={savePromptPreset}>{$t("preset.saveCurrent")}</button></header><div>{#each allPromptPresets(customPromptPresets,$t) as preset}<span><button type="button" onclick={()=>createPrompt=preset.prompt}>{preset.label}</button>{#if customPromptPresets.some(item=>item.id===preset.id)}<button type="button" class="preset-delete" disabled={promptPresetSyncBusy||Boolean(promptPresetConflict)} aria-label={$t("preset.delete",{name:preset.label})} onclick={()=>deletePromptPreset(preset.id)}>×</button>{/if}</span>{/each}</div></section>
-      <label>{createKind==="parallel"||createKind==="review"?$t("create.reviewTarget"):$t("conversation.request")}<textarea bind:value={createPrompt} rows="7" maxlength="20000" placeholder={createKind==="parallel"||createKind==="review"?$t("create.reviewPlaceholder"):$t("create.requestPlaceholder")} onkeydown={submitCreateKey} onpaste={(event)=>void createAttachRef?.handlePaste(event)}></textarea></label>
-      {#if createPrompt.trim()}<div class="intake-recommendation"><span><strong>{$t("recommend.title")}</strong><small>{$t(`recommend.${intakeRecommendation.reason}`)} · {intakeRecommendation.kind==="review"?$t("create.review"):(intakeRecommendation.provider==="codex"?"Codex":"Claude")}</small></span><button type="button" onclick={applyIntakeRecommendation}>{$t("recommend.apply")}</button></div>{/if}
       <div class="attach-row"><AttachBar bind:this={createAttachRef} bind:attachments={createAttachments} disabled={sending}/><span class="attach-hint">{$t("attachment.hint")}</span></div>
       {#if createError}<p class="create-error" role="alert">{createError}</p>{/if}
-      {#if createKind==="single"}{@const selectedQuota=quota?.[createProvider]}<div class="quota-reservation-preview"><strong>{providerDisplayName(createProvider)} · {$t("quotaReservation.currentUsage")}</strong>{#if selectedQuota?.quotaMode==="vertex-credit"}<span>{$t("antigravityExecution.vertexCreditTitle")} · {$t("antigravityExecution.vertexQuotaScope",{project:selectedQuota.projectId,location:selectedQuota.location})}</span>{:else if selectedQuota?.fiveHour||selectedQuota?.sevenDay}{#if selectedQuota?.fiveHour}<span>{$t("quota.fiveHours")} {quotaPct(selectedQuota.fiveHour.pct)}%{#if selectedQuota.fiveHour.resetsAt} · {fmtReset(selectedQuota.fiveHour.resetsAt,selectedQuota.fiveHour.resetLabel)}{/if}</span>{/if}{#if selectedQuota?.sevenDay}<span>{$t("quota.weekly")} {quotaPct(selectedQuota.sevenDay.pct)}%{#if selectedQuota.sevenDay.resetsAt} · {fmtReset(selectedQuota.sevenDay.resetsAt,selectedQuota.sevenDay.resetLabel)}{/if}</span>{/if}{:else if selectedQuota?.balance}<span>{$t("quota.balance")} {formatCurrency(selectedQuota.balance.total,selectedQuota.balance.currency,$locale)}</span>{:else}<span>{$t("quota.noData")}</span>{/if}</div>{/if}
-      <div class="create-submit-actions"><button class="primary" onclick={()=>createTask()} disabled={!createPrompt.trim()||!createWorkspace||createOpening||sending||createConnectionBlocked||(createKind==="single"&&isConnectionAuthProvider(createProvider)&&Boolean(activeAuthAttempt(createProvider)))||(createKind==="single"&&createPermissionFor(createProvider)===":danger-full-access"&&!dangerConfirmed)||((createKind==="parallel"||createKind==="review")&&reviewFullAutoSelected()&&!dangerConfirmed)||(createKind==="conversation"&&(!conversationUserNickname.trim()||debateUnlimited&&!debateUnlimitedConfirmed||compatibleProviders.some(provider=>conversationEnabled[provider]&&!conversationCompatibleModels[provider])))||(createProvider==="grok"&&!createGrokModel)||(createProvider==="ollama"&&!createOllamaModel)||(createProvider==="antigravity"&&!createAntigravityModel)}><Plus size={19}/>{sending?$t("task.creating"):createKind==="single"?$t("quotaReservation.startNow"):createKind==="conversation"?$t("conversation.start"):$t("collaboration.startReview")}</button>{#if createKind==="single"&&(createProvider==="codex"||createProvider==="claude")}<button onclick={reserveTask} disabled={!createPrompt.trim()||!createWorkspace||createOpening||sending||createConnectionBlocked||(isConnectionAuthProvider(createProvider)&&Boolean(activeAuthAttempt(createProvider)))||createPermissionFor(createProvider)===":danger-full-access"&&!dangerConfirmed}><Clock3 size={18}/>{$t("quotaReservation.afterReset")}</button>{/if}</div>
-      {/if}
+      {#if createKind==="single"}{@const selectedQuota=quotaForProviderModel(quota?.[createProvider],createProvider,createProvider==="codex"?createModel:null).quota}<div class="quota-reservation-preview"><strong>{providerDisplayName(createProvider)} · {$t("quotaReservation.currentUsage")}</strong>{#if selectedQuota?.quotaMode==="vertex-credit"}<span>{$t("antigravityExecution.vertexCreditTitle")} · {$t("antigravityExecution.vertexQuotaScope",{project:selectedQuota.projectId??"",location:selectedQuota.location??""})}</span>{:else if selectedQuota?.fiveHour||selectedQuota?.sevenDay}{#if selectedQuota?.fiveHour}<span>{$t("quota.fiveHours")} {quotaPct(selectedQuota.fiveHour.pct)}%{#if selectedQuota.fiveHour.resetsAt} · {fmtReset(selectedQuota.fiveHour.resetsAt,selectedQuota.fiveHour.resetLabel)}{/if}</span>{/if}{#if selectedQuota?.sevenDay}<span>{$t("quota.weekly")} {quotaPct(selectedQuota.sevenDay.pct)}%{#if selectedQuota.sevenDay.resetsAt} · {fmtReset(selectedQuota.sevenDay.resetsAt,selectedQuota.sevenDay.resetLabel)}{/if}</span>{/if}{:else if selectedQuota?.balance}<span>{$t("quota.balance")} {formatCurrency(selectedQuota.balance.total,selectedQuota.balance.currency,$locale)}</span>{:else}<span>{$t("quota.noData")}</span>{/if}</div>{/if}
+      <div class="create-submit-actions"><button class="primary" onclick={()=>createTask()} disabled={!createPrompt.trim()||!createWorkspace||createOpening||sending||createConnectionBlocked||(createKind==="single"&&isConnectionAuthProvider(createProvider)&&Boolean(activeAuthAttempt(createProvider)))||(createKind==="single"&&createPermissionFor(createProvider)===":danger-full-access"&&!dangerConfirmed)||((createKind==="parallel"||createKind==="review")&&reviewFullAutoSelected()&&!dangerConfirmed)||(createKind==="conversation"&&(!conversationUserNickname.trim()||debateUnlimited&&!debateUnlimitedConfirmed||compatibleProviders.some(provider=>conversationEnabled[provider]&&!conversationCompatibleModels[provider])))||(createProvider==="grok"&&!createGrokModel)||(createProvider==="ollama"&&!createOllamaModel)||(createProvider==="antigravity"&&!createAntigravityModel)}><Plus size={19}/>{sending?$t("task.creating"):createKind==="single"?$t("create.start"):createKind==="conversation"?$t("conversation.start"):$t("collaboration.startReview")}</button><kbd class="composer-shortcut" aria-hidden="true">{$t("create.submitShortcut")}</kbd>{#if createKind==="single"&&(createProvider==="claude"||createProvider==="codex"&&Boolean(quotaForProviderModel(quota?.codex,"codex",createModel).quota?.fiveHour))}<button onclick={reserveTask} disabled={!createPrompt.trim()||!createWorkspace||createOpening||sending||createConnectionBlocked||(isConnectionAuthProvider(createProvider)&&Boolean(activeAuthAttempt(createProvider)))||createPermissionFor(createProvider)===":danger-full-access"&&!dangerConfirmed}><Clock3 size={18}/>{$t("quotaReservation.afterReset")}</button>{/if}</div>
     </div>
   </div>
 {/if}
@@ -3116,5 +3016,5 @@
     </div>
   </div>
 {/if}
-{#if setupRequired}<SetupWizard {api} onsettings={(tab)=>{setupRequired=false;resumeSetupAfterSettings=true;globalTab=tab;openGlobalSettings();}} oncomplete={()=>setupRequired=false} onskip={dismissSetup}/>{/if}
+{#if setupRequired}<SetupWizard {api} onsettings={(tab)=>{setupRequired=false;resumeSetupAfterSettings=true;if(tab==="account")providerSettingsTab="account";globalTab=normalizeSettingsPage(tab,"general");openGlobalSettings();}} oncomplete={()=>setupRequired=false} onskip={dismissSetup}/>{/if}
 {/if}

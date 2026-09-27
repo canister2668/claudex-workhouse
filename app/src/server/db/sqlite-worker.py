@@ -1125,12 +1125,15 @@ def handle(op, p):
         rows.sort(key=lambda row: row["updated_at"] or "",reverse=True)
         return [{"id":r["id"],"provider":r["provider"],"status":r["status"],"executionHostId":r["execution_host_id"],"updatedAt":r["updated_at"]} for r in rows]
     if op == "get_task": return task_row(db.execute("SELECT * FROM tasks WHERE id=?", (p["id"],)).fetchone())
+    if op == "get_managed_task_by_reference": return task_row(db.execute("SELECT * FROM tasks WHERE execution_host_id=? AND workspace_id=? AND owned=1 AND ownership='claudex-workhouse' AND source='claudex-workhouse' AND (id=? OR native_id=? OR thread_id=? OR provider_session_id=?) ORDER BY updated_at DESC LIMIT 1",(p["executionHostId"],p["workspaceId"],p["reference"],p["reference"],p["reference"],p["reference"])).fetchone())
     if op == "get_native_task": return task_row(db.execute("SELECT * FROM tasks WHERE provider=? AND native_id=? ORDER BY updated_at DESC LIMIT 1", (p["provider"],p["nativeId"])).fetchone())
     if op == "list_provider_tasks":
         # `since` fetches only rows touched after a caller-held watermark. The
         # full row carries prompt/result/log, so a complete listing of a mature
         # table costs seconds on this host while a delta costs milliseconds.
         since=p.get("since")
+        if p.get("threadId"):
+            return [task_row(r) for r in db.execute("SELECT * FROM tasks WHERE provider=? AND thread_id=? ORDER BY updated_at DESC LIMIT ?",(p["provider"],p["threadId"],p.get("limit",5000)))]
         if since:
             return [task_row(r) for r in db.execute("SELECT * FROM tasks WHERE provider=? AND updated_at>? ORDER BY updated_at DESC LIMIT ?",(p["provider"],since,p.get("limit",5000)))]
         return [task_row(r) for r in db.execute("SELECT * FROM tasks WHERE provider=? ORDER BY updated_at DESC LIMIT ?",(p["provider"],p.get("limit",5000)))]
@@ -1148,8 +1151,12 @@ def handle(op, p):
                  "status":r["status"],"createdAt":r["created_at"]} for r in rows]
     if op == "list_provider_task_ids": return [r["id"] for r in db.execute("SELECT id FROM tasks WHERE provider=?",(p["provider"],))]
     if op == "list_provider_task_refresh_rows":
+        # Callers compare identity/status/timestamps and only read metadata of
+        # external mirrors. Owned rows carry tens of MB of metadata on a mature
+        # table, and shipping it every refresh stalled the serialized worker.
         rows=db.execute("""SELECT id,provider,thread_id,project_id,title,status,created_at,updated_at,owned,ownership,source,cwd,last_seen_at,
-                                 command_marker,job_id,execution_host_id,workspace_id,provider_session_id,metadata_json
+                                 command_marker,job_id,execution_host_id,workspace_id,provider_session_id,
+                                 CASE WHEN owned=0 THEN metadata_json END AS metadata_json
                             FROM tasks WHERE provider=?""",(p["provider"],))
         return [{"id":r["id"],"provider":r["provider"],"nativeId":r["id"],"threadId":r["thread_id"],"projectId":r["project_id"],"title":r["title"],"prompt":"","status":r["status"],"createdAt":r["created_at"],"updatedAt":r["updated_at"],"result":None,"error":None,"log":"","owned":bool(r["owned"]),"ownership":r["ownership"],"source":r["source"],"cwd":r["cwd"],"lastSeenAt":r["last_seen_at"],"commandMarker":r["command_marker"],"jobId":r["job_id"],"executionHostId":r["execution_host_id"],"workspaceId":r["workspace_id"],"providerSessionId":r["provider_session_id"],"metadata":json.loads(r["metadata_json"] or "{}")} for r in rows]
     # Callers polling for approvals/user-input/conflicts only care about tasks

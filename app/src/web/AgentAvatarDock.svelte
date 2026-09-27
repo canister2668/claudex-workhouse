@@ -2,7 +2,7 @@
   import { onDestroy, onMount, tick } from "svelte";
   import { flip } from "svelte/animate";
   import EmotionAvatar from "./EmotionAvatar.svelte";
-  import { avatarTaskStreamKey, type AgentRecentSession, type AgentRecentStatus } from "./agent-status";
+  import { avatarTaskStreamKey, terminalEventSuperseded, type AgentRecentSession, type AgentRecentStatus } from "./agent-status";
   import { DEFAULT_AVATAR_COLLAPSE_DELAY_MS, type AvatarTrayShape } from "./avatar-notice";
   import { relativeTime, statusLabel } from "./session-ui";
   import { t } from "./i18n";
@@ -121,7 +121,7 @@
   const sourceKeys=emptyKeys();
   const sourceCursors=emptyCursors();
   let liveActivity:Record<LiveProvider,{phase:string;raw:string;labelKey:string}|null>={codex:null,claude:null,grok:null,antigravity:null,deepseek:null,ollama:null};
-  let terminalStatus:Partial<Record<LiveProvider,{taskId:string;status:"completed"|"failed"|"stopped"}>>={};
+  let terminalStatus:Partial<Record<LiveProvider,{taskId:string;status:"completed"|"failed"|"stopped";at:string}>>={};
   // Floating cards stack newest-first. Only the empty -> active transition counts
   // as "appeared"; running -> completed must not shuffle a card back to the top.
   let activitySeq=0;
@@ -139,6 +139,7 @@
     if(previousTaskId&&previousTaskId!==recent.taskId)liveActivity={...liveActivity,[provider]:null};
     const terminalRecord=terminalStatus[provider];
     if(terminalRecord&&terminalRecord.taskId!==recent.taskId)terminalStatus={...terminalStatus,[provider]:undefined};
+    else if(terminalRecord&&terminalEventSuperseded(recent,terminalRecord.at))terminalStatus={...terminalStatus,[provider]:undefined};
     else if(terminalRecord&&activeStatusValues.has(recent.status)){
       // A provider refresh may have started before the terminal SSE arrived.
       // Keep the task-scoped terminal event authoritative over that stale row.
@@ -152,7 +153,7 @@
     if(sourceCursors[provider].taskId!==recent.taskId)sourceCursors[provider]={taskId:recent.taskId,sequence:0};
     const applyStatus=(status:string)=>setLiveStatus(provider,status);
     let terminal=false;
-    const unsubscribe=subscribeTaskLiveness({provider,taskId:recent.taskId,after:sourceCursors[provider].sequence,onChange:value=>{if(!value.eventCount)return;setLiveStatus(provider,value.phase);liveActivity={...liveActivity,[provider]:{phase:value.phase,raw:value.recentActivity?.raw??"",labelKey:value.recentActivity?.labelKey??""}};},onEvent:(event)=>{const sequence=Number(event.sequence)||0;if(sequence)sourceCursors[provider].sequence=Math.max(sourceCursors[provider].sequence,sequence);if(!event.terminal)return;terminal=true;const status=event.type==="task_completed"?"completed":event.type==="task_stopped"?"stopped":"failed";terminalStatus={...terminalStatus,[provider]:{taskId:recent.taskId!,status}};setLiveStatus(provider,status);onStatusChange?.(provider,recent.taskId!,status);if(document.visibilityState!=="visible"){if(vibration&&navigator.vibrate)navigator.vibrate(status==="completed"?[80]:[100,80,100]);if(backgroundNotifications&&"Notification" in window&&Notification.permission==="granted")new Notification(recent.title,{body:$t(status==="completed"?"notification.taskCompleted":"notification.checkTask")});}sources[provider]?.();sources[provider]=null;},onResync:(value)=>{sourceCursors[provider].sequence=Math.max(sourceCursors[provider].sequence,Number(value?.latestSequence)||0);fetch(`/api/tasks/${provider}/${encodeURIComponent(recent.taskId!)}`,{headers:{Accept:"application/json"}}).then(response=>response.ok?response.json():null).then(data=>{const status=data?.task?.status;if(typeof status==="string"&&!terminalStatus[provider])applyStatus(status);}).catch(()=>{});}});
+    const unsubscribe=subscribeTaskLiveness({provider,taskId:recent.taskId,after:sourceCursors[provider].sequence,onChange:value=>{if(!value.eventCount)return;setLiveStatus(provider,value.phase);liveActivity={...liveActivity,[provider]:{phase:value.phase,raw:value.recentActivity?.raw??"",labelKey:value.recentActivity?.labelKey??""}};},onEvent:(event)=>{const sequence=Number(event.sequence)||0;if(sequence)sourceCursors[provider].sequence=Math.max(sourceCursors[provider].sequence,sequence);if(!event.terminal)return;terminal=true;const status=event.type==="task_completed"?"completed":event.type==="task_stopped"?"stopped":"failed";terminalStatus={...terminalStatus,[provider]:{taskId:recent.taskId!,status,at:event.timestamp??new Date().toISOString()}};setLiveStatus(provider,status);onStatusChange?.(provider,recent.taskId!,status);if(document.visibilityState!=="visible"){if(vibration&&navigator.vibrate)navigator.vibrate(status==="completed"?[80]:[100,80,100]);if(backgroundNotifications&&"Notification" in window&&Notification.permission==="granted")new Notification(recent.title,{body:$t(status==="completed"?"notification.taskCompleted":"notification.checkTask")});}sources[provider]?.();sources[provider]=null;},onResync:(value)=>{sourceCursors[provider].sequence=Math.max(sourceCursors[provider].sequence,Number(value?.latestSequence)||0);fetch(`/api/tasks/${provider}/${encodeURIComponent(recent.taskId!)}`,{headers:{Accept:"application/json"}}).then(response=>response.ok?response.json():null).then(data=>{const status=data?.task?.status;if(typeof status==="string"&&!terminalStatus[provider])applyStatus(status);}).catch(()=>{});}});
     if(terminal)unsubscribe();else sources[provider]=unsubscribe;
   }
   $: sync("codex",codex);
@@ -244,7 +245,10 @@
     {@const text=speech(status)}
     {@const activeSessions=upsertStableRows(activeByProvider[provider],session=>sessionKey(provider,session))}
     {@const completedSessions=upsertStableRows(completedByProvider[provider],session=>sessionKey(provider,session))}
-    <div class="agent-avatar-slot {provider}" title={label(provider,recent,status)}>
+    <!-- Six identical heads cannot say which one needs a person. Failure keeps
+         full strength plus a ring and badge; a finished head steps back. -->
+    <div class="agent-avatar-slot {provider} status-{status||'idle'}" title={label(provider,recent,status)}>
+      {#if status==="failed"}<span class="avatar-alert-badge" role="img" aria-label={speech(status)}>!</span>{/if}
       {#key `${provider}:${status}`}
         <EmotionAvatar engine={provider} {codexAvatar} onMiniClick={()=>toggle(provider)} miniExpanded={openProvider===provider} miniLabel={$t("avatar.statusAndRecent",{provider:name})} context={{provider,status,sessionId:recent?.threadId,taskId:recent?.taskId}}/>
       {/key}

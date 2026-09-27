@@ -30,7 +30,8 @@ test("new session review exposes provider settings, per-review tones, and explic
   }
 
   const codex = dialog.locator('.cwho[data-provider="codex"]');
-  await expect(codex.getByRole("button", { name: "Fast · 1.5× 사용량", exact: true })).toBeVisible();
+  await expect(codex.getByLabel("속도")).toBeVisible();
+  await expect(codex.getByLabel("속도").locator("option", { hasText: "빠르게" })).toHaveCount(1);
   await codex.getByLabel("캐릭터 톤").click();
   const toneSheet = page.getByRole("dialog", { name: /Codex.*말투/ });
   await expect(toneSheet.getByRole("button", { name: /글로벌 설정 그대로/ })).toBeVisible();

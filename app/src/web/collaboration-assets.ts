@@ -1,7 +1,7 @@
 import type { EmotionAsset } from "./emotion-stream";
 import { assertUniqueKeys } from "./identity-selectors";
 import { translate } from "./i18n";
-import { INLINE_EMOTION_NAMES, isPartialInlineEmotionMarker, isReservedCanonicalEmotionMarker, normalizeInlineEmotion, parseInlineEmotionMarker, stripInlineEmotionMarkers, stripInlineReservedSyntax } from "../server/collaboration/inline-emotion-contract";
+import { INLINE_EMOTION_NAMES, isPartialInlineEmotionMarker, isReservedCanonicalEmotionMarker, kissEmotionCues, normalizeInlineEmotion, parseInlineEmotionMarker, stripInlineEmotionMarkers, stripInlineReservedSyntax } from "../server/collaboration/inline-emotion-contract";
 
 export type ConversationTurnLength="compact"|"rich";
 export type InlineEmotionScene={id:string;emotion:string;text:string;sourceOffset:number};
@@ -12,7 +12,7 @@ export const TONE_BURNOUT_EMOTION_PALETTES={"baby-talk-cutesy":["dead","tired","
 
 function fenceDelimiter(value:string){return value.match(/^\s*(`{3,}|~{3,})/)?.[1]??null;}
 function leadingEmotionMarker(line:string){
-  const match=line.match(/^(\s*)(\[\[(?:e:)?[a-z0-9_~-]+\]\])(?:[ \t]+(.*))?$/i),marker=match?parseInlineEmotionMarker(match[2]):null;
+  const match=line.match(/^(\s*)(\[\[(?:e[:=])?[a-z0-9_~-]+\]\])(?:[ \t]+(.*))?$/i),marker=match?parseInlineEmotionMarker(match[2]):null;
   return marker&&match?{marker,sourceOffset:match[1].length,text:match[3]??""}:null;
 }
 
@@ -75,9 +75,6 @@ const STRONG_EMOTION_GROUPS=new Set(["angry","dead","crying","scared","disgusted
 const CONFIDENT_CUE_SCORE=2;
 const STRONG_CUE_SCORE=2.5;
 type EmotionCue={group:string;score:number;index:number;action?:boolean};
-const KISS_META=/(?:이모티콘|이모지|이모션|에셋|트리거|키워드|단어|표현|등록|테스트|안\s*(?:뜨|나오)|emoji|emoticon|sticker)/i;
-const KISS_NEGATION=/(?:안\s*(?:돼|되|해|했|할|받)|못\s*(?:해|했|할)|하지\s*마|싫어|거절|않(?:아|았|을))/i;
-const KISS_HYPOTHETICAL=/(?:했(?:다|다고)\s*치자|한\s*셈|(?:이)?라면|가정|척(?:하|했)|인\s*척)/i;
 const unique=(values:string[])=>[...new Set(values)];
 function activityGroups(output:string){
   const groups:string[]=[];
@@ -111,19 +108,7 @@ function contextualCues(output:string){
   add(/졸려|졸리|잠이\s*(?:와|온)/i,[["sleepy",3]]);
   add(/말문(?:이)?\s*막|할 말을 잃|어이없/i,[["speechless",3]]);
   add(/선물.{0,6}(?:받아|줄게|할게|가져왔)/i,[["gift",3]]);
-  const kissMatches:Array<{index:number;length:number;hard:boolean;actionForm?:boolean}>=[];
-  // Treat the complete performed expression as one token. Matching only the
-  // leading "뽀뽀" left "쪽!" in the suffix, so the existing action boundary
-  // check could not recognize compact real-world forms such as 뽀뽀쪽!.
-  for(const match of output.matchAll(/뽀뽀\s*쪽+/gi))kissMatches.push({index:match.index,length:match[0].length,hard:true});
-  for(const match of output.matchAll(/뽀뽀|입맞춤|키스|\bkiss\b|💋/gi))kissMatches.push({index:match.index,length:match[0].length,hard:true});
-  for(const match of output.matchAll(/(?:^|[\s"'“‘([{])((?:쪽+|츄)\s*(?:했(?:어|잖아|다)?|할게|해(?:줘|줄게|볼게)?|하자))/gi)){const token=match[1],index=match.index+match[0].length-token.length;kissMatches.push({index,length:token.length,hard:false,actionForm:true});}
-  for(const match of output.matchAll(/(?:^|[\s"'“‘([{])((?:쪽+|츄)|\bchu\b)(?=$|[\s!?！.,~…♡♥❤💋–—\-"'”’)\]}])/gi)){const token=match[1],index=match.index+match[0].length-token.length;kissMatches.push({index,length:token.length,hard:false});}
-  for(const match of kissMatches){
-    const start=Math.max(0,match.index-18),end=Math.min(output.length,match.index+match.length+18),context=output.slice(start,end),after=output.slice(match.index+match.length,match.index+match.length+12),meta=KISS_META.test(context),negated=KISS_NEGATION.test(context),hypothetical=KISS_HYPOTHETICAL.test(context),marked=/^\s*(?:[!！♡♥❤💋~…–—-]|$)/.test(after),actionSyntax=/^\s*(?:을|를)?\s*(?:해|했|할|하자|받아|줄게)/.test(after),performed=!meta&&!negated&&!hypothetical&&(match.actionForm||marked||actionSyntax||context.includes("💋"));
-    let score=match.hard?3:2;if(!performed)score-=3;if(meta)score-=3;if(negated)score-=3;if(hypothetical)score-=1.5;if(performed&&context.includes("💋"))score+=1.5;else if(performed&&match.actionForm)score+=1;else if(performed&&marked)score+=.5;
-    cues.push({group:"chu",score:Math.max(0,score),index:match.index,action:performed});
-  }
+  for(const cue of kissEmotionCues(output))cues.push({group:"chu",score:cue.score,index:cue.index,action:cue.performed});
   return cues;
 }
 

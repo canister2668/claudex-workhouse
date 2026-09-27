@@ -17,7 +17,7 @@ describe("Claude session deletion",()=>{
     const root=fs.mkdtempSync(path.join(os.tmpdir(),"claudex-workhouse-claude-delete-"));created.push(root);process.env.HOME=path.join(root,"home");
     const threadId=crypto.randomUUID(),member=task(threadId),file=transcriptFile(member.cwd!,threadId);fs.mkdirSync(path.dirname(file),{recursive:true});fs.writeFileSync(file,"{}\n");
     let deleted:{provider:string;threadId:string}|null=null;
-    const db={listProviderTasks:async()=>[member,{...member,id:`claude:turn:${crypto.randomUUID()}`}],deleteTaskSession:async(provider:string,id:string)=>{deleted={provider,threadId:id};return 2;}};
+    const db={listThreadTasks:async()=>[member,{...member,id:`claude:turn:${crypto.randomUUID()}`}],deleteTaskSession:async(provider:string,id:string)=>{deleted={provider,threadId:id};return 2;}};
     const provider=new ClaudeProvider({root,dataDir:path.join(root,"data")} as any,db as any);
     await expect(provider.deleteSession(member)).resolves.toMatchObject({deleted:true,deletedTasks:2,threadId});
     expect(fs.existsSync(file)).toBe(false);expect(deleted).toEqual({provider:"claude",threadId});
@@ -25,7 +25,7 @@ describe("Claude session deletion",()=>{
 
   it("rejects active and remote sessions",async()=>{
     const root=fs.mkdtempSync(path.join(os.tmpdir(),"claudex-workhouse-claude-delete-"));created.push(root);const threadId=crypto.randomUUID(),active=task(threadId,"running");
-    const db={listProviderTasks:async()=>[active],deleteTaskSession:async()=>0};const provider=new ClaudeProvider({root,dataDir:path.join(root,"data")} as any,db as any);
+    const db={listThreadTasks:async()=>[active],deleteTaskSession:async()=>0};const provider=new ClaudeProvider({root,dataDir:path.join(root,"data")} as any,db as any);
     await expect(provider.deleteSession(active)).rejects.toThrow(/Stop the Claude session/);
     await expect(provider.deleteSession({...task(crypto.randomUUID()),executionHostId:"worker"})).rejects.toThrow(/Remote Claude sessions/);
   });

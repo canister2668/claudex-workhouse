@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import crypto from "node:crypto";
 import type {AppConfig} from "./config.js";
 import{usesVertexCredentials,type AntigravityBackend,type AntigravityExecutionSettings}from"./antigravity-execution-settings.js";
 import {EXTERNAL_MCP_BUNDLE_ENV,externalMcpForAntigravity,readExternalMcpBundle}from"./external-mcp-bundle.js";
@@ -39,6 +40,35 @@ export function antigravityHome(config:Pick<AppConfig,"dataDir">,backend:Antigra
  */
 export function geminiCliHome(config:Pick<AppConfig,"dataDir">){return antigravityHome(config,"vertex-agent");}
 
+/**
+ * Gemini CLI's legacy model resolver treats every unknown id ending in
+ * `flash` as an alias for its current default Flash model. Vertex's live
+ * catalog moves faster than the CLI release, so that silently changes an
+ * explicitly selected model (for example gemini-3.8-flash) into another
+ * billable model. Dynamic model configuration treats unknown ids as raw model
+ * names and therefore preserves the catalog selection.
+ *
+ * This home belongs exclusively to Workhouse's Vertex Agent backend. Merge the
+ * required switch into its settings instead of sharing or replacing a user's
+ * ordinary Gemini CLI configuration.
+ */
+export function ensureGeminiCliModelConfiguration(home:string){
+  const directory=path.join(home,".gemini"),file=path.join(directory,"settings.json");
+  fs.mkdirSync(directory,{recursive:true,mode:0o700});
+  let current:any={};
+  try{current=JSON.parse(fs.readFileSync(file,"utf8"));}
+  catch(error){
+    if((error as NodeJS.ErrnoException).code!=="ENOENT")throw new Error(`Workhouse Gemini CLI settings are invalid JSON: ${file}`);
+  }
+  if(!current||typeof current!=="object"||Array.isArray(current))throw new Error(`Workhouse Gemini CLI settings must contain a JSON object: ${file}`);
+  const experimental=current.experimental&&typeof current.experimental==="object"&&!Array.isArray(current.experimental)?current.experimental:{};
+  if(experimental.dynamicModelConfiguration===true)return file;
+  const updated={...current,experimental:{...experimental,dynamicModelConfiguration:true}},temporary=path.join(directory,`.settings.${crypto.randomUUID()}.tmp`);
+  try{fs.writeFileSync(temporary,`${JSON.stringify(updated,null,2)}\n`,{encoding:"utf8",mode:0o600,flag:"wx"});fs.renameSync(temporary,file);fs.chmodSync(file,0o600);}
+  finally{try{if(fs.existsSync(temporary))fs.unlinkSync(temporary);}catch{}}
+  return file;
+}
+
 function executionEnvironment(settings?:AntigravityExecutionSettings){
   if(!settings||!usesVertexCredentials(settings.backend))return{};
   return{GOOGLE_CLOUD_PROJECT:settings.vertex.projectId,GOOGLE_CLOUD_LOCATION:settings.vertex.location,GOOGLE_GENAI_USE_VERTEXAI:"true",...(settings.vertex.credentialsPath?{GOOGLE_APPLICATION_CREDENTIALS:settings.vertex.credentialsPath}:{})};
@@ -60,14 +90,22 @@ export function antigravityEnvironment(config:Pick<AppConfig,"dataDir">,settings
  * would make every resume start an empty conversation. Trust is granted here
  * rather than per run: Workhouse already decided the workspace is in scope.
  */
-export function geminiCliEnvironment(config:Pick<AppConfig,"dataDir">,settings:AntigravityExecutionSettings):NodeJS.ProcessEnv{
+export function geminiCliEnvironment(config:Pick<AppConfig,"dataDir">,settings:AntigravityExecutionSettings,questionChannel?:{directory:string;port:number;taskId:string;token:string}):NodeJS.ProcessEnv{
   const home=geminiCliHome(config);
+  ensureGeminiCliModelConfiguration(home);
+  let questionSettings:string|undefined;
+  if(questionChannel){
+    fs.mkdirSync(questionChannel.directory,{recursive:true,mode:0o700});
+    questionSettings=path.join(questionChannel.directory,"gemini-question-settings.json");
+    fs.writeFileSync(questionSettings,JSON.stringify({mcpServers:{"claudex-workhouse":{httpUrl:`http://127.0.0.1:${questionChannel.port}/mcp/claudex-workhouse`,headers:{Authorization:`Bearer ${questionChannel.token}`,[EMOTION_MCP_TASK_HEADER]:questionChannel.taskId},includeTools:["request_user_input_async"],trust:true}}}),{encoding:"utf8",mode:0o600});
+  }
   return{
     ...providerBaseEnvironment(),
     ...executionEnvironment(settings),
     HOME:home,
     ...(process.platform==="win32"?{USERPROFILE:home}:{}),
     GEMINI_CLI_TRUST_WORKSPACE:"true",
+    ...(questionSettings?{GEMINI_CLI_SYSTEM_SETTINGS_PATH:questionSettings}:{}),
     NO_COLOR:"1",
     TERM:"dumb"
   };

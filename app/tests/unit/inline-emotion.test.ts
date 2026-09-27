@@ -15,6 +15,7 @@ describe("conversation inline emotion prompt and relay",()=>{
     expect(inlineEmotionPrompt("compact")).toContain("active conversation language");
     expect(inlineEmotionPrompt("compact")).toContain("exactly one [[e:<emotion>]] marker");
     expect(inlineEmotionPrompt("compact")).toContain("complete [[e:<emotion>]] syntax including the e: prefix");
+    expect(inlineEmotionPrompt("compact")).toContain("colon (:), never an equals sign (=)");
     expect(inlineEmotionPrompt("compact")).toContain("Never use shorthand such as [[pout]]");
     expect(inlineEmotionPrompt("rich")).toContain("2–4 sentences");
     expect(inlineEmotionPrompt("rich")).toContain("active conversation language");
@@ -22,6 +23,7 @@ describe("conversation inline emotion prompt and relay",()=>{
     expect(inlineEmotionPrompt("rich")).toContain("exactly two or three markers in total");
     expect(inlineEmotionPrompt("rich")).toContain("Never use only one marker in rich mode");
     expect(inlineEmotionPrompt("rich")).toContain("including the second and third marker");
+    expect(inlineEmotionPrompt("rich")).toContain("colon (:), never an equals sign (=)");
     expect(inlineEmotionPrompt("rich")).toContain("Never use shorthand such as [[pout]] or [[smug]]");
     const output="[[e:smug]]\n첫 대사.\n\n[[e:laughing]]\n둘째 대사.\n[CLAUDEX_WORKHOUSE_CONVERSATION:continue]";
     expect(conversationRelayContent(output)).toBe("첫 대사.\n\n둘째 대사.");
@@ -99,6 +101,34 @@ describe("conversation inline emotion parser",()=>{
     const card=buildInlineEmotionCards({runs:[run],output:()=>output,participant:()=>person,outfit:()=>"Ollama",available:()=>[{emotion:"confused",file:"confused.webp"},{emotion:"laughing",file:"laughing.webp"},{emotion:"wink",file:"wink.webp"}],mode:"rich"}).get(run.id);
     expect(card?.scenes.map(scene=>scene.asset?.file)).toEqual(["confused.webp","laughing.webp","wink.webp"]);
     expect(card?.plainText).not.toContain("[[e:");
+  });
+
+  it("repairs equals-sign marker drift without leaking or duplicating the Ollama output",()=>{
+    const run={id:"audited-ollama-equals",participantId:"ollama",status:"completed"},person={id:"ollama",provider:"ollama"},output=[
+      "[[e=happy]]",
+      "밥알 하나에도 정성이 고여 있어.",
+      "[[e=smug]]",
+      "규칙의 단도는 필요할 때 꺼낼게.",
+      "[[e=neutral]]",
+      "천천히 이어가자.",
+    ].join("\n");
+    const parsed=parseInlineEmotionScenes(run.id,run.id,output,"rich");
+    expect(parsed.scenes.map(scene=>scene.emotion)).toEqual(["happy","smug","neutral"]);
+    expect(parsed.plainText).toBe("밥알 하나에도 정성이 고여 있어.\n규칙의 단도는 필요할 때 꺼낼게.\n천천히 이어가자.");
+    expect(parsed.leadingText).toBe("");
+    expect(conversationRelayContent(output)).toBe(parsed.plainText);
+    const card=buildInlineEmotionCards({runs:[run],output:()=>output,participant:()=>person,outfit:()=>"Ollama",available:()=>[{emotion:"happy",file:"happy.webp"},{emotion:"smug",file:"smug.webp"},{emotion:"neutral",file:"neutral.webp"}],mode:"rich"}).get(run.id);
+    expect(card?.leadingText).toBe("");
+    expect(card?.scenes.map(scene=>scene.text)).toEqual(["밥알 하나에도 정성이 고여 있어.","규칙의 단도는 필요할 때 꺼낼게.","천천히 이어가자."]);
+    expect(JSON.stringify(card)).not.toContain("[[e=");
+  });
+
+  it("renders plain-prose fallback text exactly once inside its inferred scene",()=>{
+    const run={id:"plain-fallback",participantId:"ollama",status:"completed"},person={id:"ollama",provider:"ollama"},output="마커 없이도 답변은 한 번만 보여야 해.";
+    const card=buildInlineEmotionCards({runs:[run],output:()=>output,participant:()=>person,outfit:()=>"Ollama",available:()=>[{emotion:"neutral",file:"neutral.webp"}],mode:"rich"}).get(run.id);
+    expect(card?.leadingText).toBe("");
+    expect(card?.scenes).toHaveLength(1);
+    expect(card?.scenes[0].text).toBe(output);
   });
 
   it("hides partial markers, rejects invalid names, and normalizes the supported chu alias",()=>{

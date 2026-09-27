@@ -23,6 +23,20 @@ type CachedStreamFile = {
 
 const streamFileCache=new Map<string,CachedStreamFile>();
 
+const CLAUDE_WORK_AFTER_RESULT=new Set(["turn_started","message_delta","message_completed","command_started","command_completed","tool_started","tool_completed","file_change_started","file_change_completed","agent_started","agent_progress"]);
+export function staleClaudeTerminalSequences(events:ReadonlyArray<Pick<StreamEvent,"type"|"terminal"|"sequence">>){
+  const pending:number[]=[],stale=new Set<number>();
+  for(const event of events){
+    if(event.terminal&&["task_completed","task_failed","task_stopped"].includes(event.type)){
+      if(Number.isSafeInteger(event.sequence))pending.push(event.sequence);
+    }else if(CLAUDE_WORK_AFTER_RESULT.has(event.type)){
+      for(const sequence of pending)stale.add(sequence);
+      pending.length=0;
+    }
+  }
+  return stale;
+}
+
 export function sseResumeSequence(lastEventId:unknown,after:unknown){
   const header=Number(String(lastEventId??"").split(":").at(-1)??0),query=Number(after??0);
   return Math.max(Number.isSafeInteger(header)&&header>0?header:0,Number.isSafeInteger(query)&&query>0?query:0);
@@ -139,6 +153,25 @@ export function readStreamFileChanges(root:string,taskId:string,limit=1000){
     for(const event of parseLines(content,taskId))if(event.type==="file_change_started"||event.type==="file_change_completed")events.push(event);
   }
   return events.slice(-Math.max(1,Math.min(1000,limit)));
+}
+
+// Keep sparse child lifecycle records available after noisy progress pushes
+// them out of the normal replay window. Both files are size bounded by the
+// spool rotation policy.
+export function readStreamAgentLifecycle(root:string,taskId:string,limit=1000){
+  const file=streamFile(root,taskId),events:StreamEvent[]=[];
+  for(const candidate of [`${file}.1`,file]){
+    let content:Buffer;try{content=fs.readFileSync(candidate);}catch{continue;}
+    for(const event of parseLines(content,taskId))if(event.type==="agent_started"||event.type==="agent_progress"||event.type==="agent_completed"||event.type==="agent_failed")events.push(event);
+  }
+  return events.slice(-Math.max(1,Math.min(1000,limit)));
+}
+
+export function mergeStreamAgentLifecycle(replay:StreamEvent[],lifecycle:StreamEvent[]){
+  if(!lifecycle.length)return replay;
+  const bySequence=new Map<number,StreamEvent>();
+  for(const event of [...lifecycle,...replay])bySequence.set(event.sequence,event);
+  return [...bySequence.values()].sort((left,right)=>left.sequence-right.sequence);
 }
 
 export function cleanupStreamEvents(root: string) {

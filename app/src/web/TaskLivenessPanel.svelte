@@ -43,9 +43,9 @@
   };
   const phaseLabel=()=>state.phase==="idle"?(task.metadata?.activity??$t(`task.status.${task.status}`)):$t(`liveness.phase.${state.phase}`);
   const activityTitle=()=>state.recentActivity?$t(state.recentActivity.labelKey):state.phase==="acting"?$t("liveness.activity.acting"):state.phase==="reasoning"?$t("liveness.activity.reasoning"):phaseLabel();
-  const barHeight=(count:number)=>{
+  const barHeight=(count:number,scale=34)=>{
     const max=Math.max(1,...state.buckets);
-    return Math.max(7,Math.round(count/max*34));
+    return Math.max(scale<20?3:7,Math.round(count/max*scale));
   };
   onMount(()=>{
     timer=setInterval(()=>now=Date.now(),1_000);
@@ -80,11 +80,13 @@
     {#if state.recentActivity?.raw}<small class="liveness-raw">{state.recentActivity.raw}</small>{/if}
     <HeartbeatBar lastEventAt={state.lastMeaningfulEventAt} transport={state.transport} phase={state.phase}/>
     <span class="liveness-spark" aria-hidden="true">{#each state.buckets as count}<i style={`height:${barHeight(count)}px`}></i>{/each}</span>
+    <!-- A zero carries no news, so an empty tile recedes instead of competing
+         with the counts that actually moved. -->
     <span class="liveness-stats">
-      <span><b>{state.commandCount}</b><small>{$t("liveness.metric.commands")}</small></span>
-      <span><b>{state.fileCount}</b><small>{$t("liveness.metric.files")}</small></span>
-      <span><b>{state.toolCount}</b><small>{$t("liveness.metric.tools")}</small></span>
-      <span><b>{contextPercent()===null?state.eventCount:`${contextPercent()}%`}</b><small>{$t(contextPercent()===null?"liveness.metric.events":"liveness.metric.context")}</small></span>
+      <span class:zero={!state.commandCount}><b>{state.commandCount}</b><small>{$t("liveness.metric.commands")}</small></span>
+      <span class:zero={!state.fileCount}><b>{state.fileCount}</b><small>{$t("liveness.metric.files")}</small></span>
+      <span class:zero={!state.toolCount}><b>{state.toolCount}</b><small>{$t("liveness.metric.tools")}</small></span>
+      <span class:zero={contextPercent()===null&&!state.eventCount}><b>{contextPercent()===null?state.eventCount:`${contextPercent()}%`}</b><small>{$t(contextPercent()===null?"liveness.metric.events":"liveness.metric.context")}</small></span>
     </span>
     </span>
     {#if state.agentTally.total&&density!=="full"}{@render agentChips()}{/if}
@@ -118,6 +120,9 @@
       <div class="liveness-decision-record">✓ {$t("liveness.decisionResolved")}{#if state.resolvedDecision.selectedOption} · {state.resolvedDecision.selectedOption}{/if}</div>
     {/if}
   {:else}
+    <!-- A compact row still shows the pulse: the activity sparkline and the
+         time spent, so the home list reads at a glance without expanding. -->
+    <span class="liveness-compact-line"><span class="liveness-spark" aria-hidden="true">{#each state.buckets as count}<i style={`height:${barHeight(count,14)}px`}></i>{/each}</span><b class="liveness-elapsed">{duration()}</b></span>
     {#if state.agentTally.total}{@render agentChips()}{/if}
     <button type="button" class="liveness-expand" onclick={onexpand}>{$t("liveness.expandCard")}</button>
   {/if}
@@ -127,9 +132,7 @@
       <button type="button" onclick={onopen}>{$t("fanout.openWaitingAgent")}</button>
     </div>
   {/if}
-  {#if state.phase==="waiting-user"||state.pendingDecision||task.status==="waiting"}
-    <UserInputPanel {api} {task}/>
-  {/if}
+  <UserInputPanel {api} {task}/>
   {#if state.phase==="waiting-approval"||task.status==="waiting"}
     <ApprovalPanel {api} {task}/>
   {/if}

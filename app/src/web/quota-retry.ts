@@ -1,5 +1,34 @@
 const RETRY_DELAYS_MS=[2_000,5_000,10_000,30_000,60_000] as const;
 
+export type ProviderQuotaWindow={pct:number|null;resetsAt:string|null;resetLabel?:string|null;durationMins?:number|null};
+export type ModelQuotaPool={limitId:string;label:string;modelIds:string[];fiveHour?:ProviderQuotaWindow|null;sevenDay?:ProviderQuotaWindow|null;plan?:string|null;exhausted?:boolean;status?:"ok"|"partial"};
+export type WebProviderQuota={
+  fiveHour?:ProviderQuotaWindow|null;
+  sevenDay?:ProviderQuotaWindow|null;
+  plan?:string|null;
+  exhausted?:boolean;
+  status?:"ok"|"partial";
+  modelPools?:ModelQuotaPool[];
+  quotaMode?:"vertex-credit";
+  projectId?:string;
+  location?:string;
+  balance?:{total:number;currency:string;granted?:number;toppedUp?:number;available?:boolean}|null;
+  [key:string]:unknown;
+};
+
+export function modelQuotaPool(quota:WebProviderQuota|null|undefined,provider:string,model:unknown){
+  if(provider!=="codex"||typeof model!=="string"||!model.trim())return null;
+  const id=model.trim().toLowerCase();
+  return quota?.modelPools?.find(pool=>pool.modelIds.some(modelId=>modelId.toLowerCase()===id))??null;
+}
+
+export function quotaForProviderModel(quota:WebProviderQuota|null|undefined,provider:string,model:unknown):{quota:WebProviderQuota|null;pool:ModelQuotaPool|null}{
+  const pool=modelQuotaPool(quota,provider,model);
+  if(!quota||!pool)return{quota:quota??null,pool:null};
+  const fiveHour=pool.fiveHour??quota.fiveHour??null,sevenDay=pool.sevenDay??quota.sevenDay??null;
+  return{quota:{...quota,fiveHour,sevenDay,plan:pool.plan??quota.plan,exhausted:pool.exhausted??quota.exhausted,status:fiveHour&&sevenDay?"ok":"partial"},pool};
+}
+
 export function quotaNeedsRetry(value:unknown){
   if(!value||typeof value!=="object")return true;
   const quota=value as Record<string,any>;

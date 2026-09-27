@@ -27,6 +27,12 @@ copy(path.join(appRoot,"dist-server"),path.join(appPayload,"dist-server"),{filte
 copy(path.resolve(modulesSource),path.join(appPayload,"node_modules"));
 fs.mkdirSync(path.join(payloadRoot,"bin"),{recursive:true});
 for(const name of["claude-runtime.mjs","codex-runtime.mjs","claude-auth-pty.py"])fs.copyFileSync(path.join(repoRoot,"bin",name),path.join(payloadRoot,"bin",name));
+// Provider workers look for the prompt/activity hook below
+// CLAUDEX_WORKHOUSE_APP_ROOT. A checkout has it at `<root>/hooks`, but the
+// portable payload used to omit that directory entirely, so every Windows
+// task silently fell back to the generic `thinking` state instead of running
+// the same hook contract as the server distribution.
+copy(path.join(repoRoot,"hooks","emotion"),path.join(payloadRoot,"hooks","emotion"));
 fs.copyFileSync(path.resolve(nodeSource),path.join(payloadRoot,"node.exe"));
 fs.copyFileSync(path.join(appRoot,"dist","index.html"),path.join(webPayload,"index.html"));
 const html=fs.readFileSync(path.join(appRoot,"dist","index.html"),"utf8"),assetPaths=[...html.matchAll(/(?:src|href)="\/(assets\/[^"]+)"/g)].map(match=>match[1]);
@@ -57,8 +63,12 @@ fs.copyFileSync(path.resolve(nodeLicense),path.join(legalRoot,"third-party","nod
 fs.writeFileSync(path.join(appPayload,"package.json"),`${JSON.stringify({name:"claudex-workhouse-windows-server-payload",version,private:true,type:"module",license:"AGPL-3.0-only"},null,2)}\n`);
 fs.writeFileSync(path.join(appPayload,"start.mjs"),`import fs from"node:fs";import path from"node:path";import{spawnSync}from"node:child_process";import{fileURLToPath}from"node:url";const appDirectory=path.dirname(fileURLToPath(import.meta.url)),appRoot=path.dirname(appDirectory),dataRoot=process.env.CLAUDEX_WORKHOUSE_DATA_ROOT||path.join(process.env.LOCALAPPDATA||appRoot,"Claudex Workhouse"),configDirectory=path.join(dataRoot,"config");fs.mkdirSync(configDirectory,{recursive:true});const protectedConfigs=["claudex-workhouse.json","projects.json"].map(name=>path.join(configDirectory,name));const repairLegacyAcl=()=>{let denied=false;for(const file of protectedConfigs)try{fs.readFileSync(file);}catch(error){if(error?.code==="EPERM"||error?.code==="EACCES"){denied=true;break;}if(error?.code!=="ENOENT")throw error;}if(!denied)return;const identity=spawnSync("whoami",["/user","/fo","csv","/nh"],{shell:false,encoding:"utf8",windowsHide:true}),sid=String(identity.stdout||"").match(/,"(S-1-[0-9-]+)"\\s*$/i)?.[1];if(!sid)throw new Error("Unable to identify the Windows user for ACL recovery.");const repair=(target,permission,recursive=false)=>{const args=[target,"/grant:r","*"+sid+":"+permission];if(recursive)args.push("/T");args.push("/Q");const result=spawnSync("icacls",args,{shell:false,encoding:"utf8",windowsHide:true});if(result.status!==0)throw new Error("Unable to recover access to the Windows data directory.");};repair(dataRoot,"(OI)(CI)F",true);for(const file of protectedConfigs)if(fs.existsSync(file))repair(file,"F");for(const file of protectedConfigs)if(fs.existsSync(file))fs.readFileSync(file);};repairLegacyAcl();const create=(name,value)=>{const target=path.join(configDirectory,name);try{fs.writeFileSync(target,JSON.stringify(value,null,2)+"\\n",{flag:"wx",mode:384});}catch(error){if(error?.code!=="EEXIST")throw error;}};create("claudex-workhouse.json",{host:"127.0.0.1",port:3410,externalOrigin:"http://127.0.0.1:3410",allowedEmail:"admin@example.com",teamDomain:"",audience:"",authMode:"local",promptMaxLength:50000,commandTimeoutMs:60000,commandOutputLimit:1048576,claudeBinary:"runtime/claude-bin/claude"});create("projects.json",{projects:[{id:"claudex-workhouse",name:"Claudex Workhouse",path:appRoot}]});process.env.CLAUDEX_WORKHOUSE_APP_ROOT=appRoot;process.env.CLAUDEX_WORKHOUSE_DATA_ROOT=dataRoot;process.env.CLAUDEX_WORKHOUSE_DISTRIBUTION_STATUS=process.env.CLAUDEX_WORKHOUSE_DISTRIBUTION_STATUS||"Official";process.env.CLAUDEX_WORKHOUSE_COMMIT_SHA=process.env.CLAUDEX_WORKHOUSE_COMMIT_SHA||${JSON.stringify(commitSha)};await import("./dist-server/index.js");\n`);
 const manifest=buildWindowsPayloadManifest(payloadRoot,version);verifyWindowsPayload(payloadRoot,manifest);
-fs.writeFileSync(path.join(packageRoot,"payload-manifest.json"),`${JSON.stringify(manifest,null,2)}\n`);
-fs.writeFileSync(path.join(packageRoot,"current.json"),`${JSON.stringify({schemaVersion:1,version,payloadDirectory:`payload/${version}`,previousVersion:null},null,2)}\n`);
+const manifestBody=`${JSON.stringify(manifest,null,2)}\n`;
+const versionedManifest=`payload-manifests/${version}.json`;
+fs.mkdirSync(path.join(packageRoot,"payload-manifests"),{recursive:true});
+fs.writeFileSync(path.join(packageRoot,"payload-manifest.json"),manifestBody);
+fs.writeFileSync(path.join(packageRoot,...versionedManifest.split("/")),manifestBody);
+fs.writeFileSync(path.join(packageRoot,"current.json"),`${JSON.stringify({schemaVersion:1,version,payloadDirectory:`payload/${version}`,payloadManifest:versionedManifest,previousVersion:null},null,2)}\n`);
 fs.copyFileSync(path.resolve(launcherSource),path.join(packageRoot,"Claudex Workhouse.exe"));
 const total=manifest.files.reduce((sum,item)=>sum+item.size,0)+fs.statSync(path.join(packageRoot,"Claudex Workhouse.exe")).size;
 if(total>200*1024*1024)throw new Error(`Windows server folder exceeds the 200 MiB policy (${total} bytes).`);

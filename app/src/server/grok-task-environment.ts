@@ -29,7 +29,7 @@ function removeProviderSections(source:string,isolated:boolean){
   for(const line of lines){
     const section=line.match(/^\s*\[\[?\s*([^\]]+?)\s*\]\]?\s*(?:#.*)?$/)?.[1]?.trim()??"";
     if(section){
-      const mcp=section==="mcp_servers"||section.startsWith("mcp_servers."),managed=section===`mcp_servers.${EMOTION_MCP_SERVER_ID}`||section.startsWith(`mcp_servers.${EMOTION_MCP_SERVER_ID}.`),plugin=section==="plugins"||section.startsWith("plugins.")||section==="marketplace"||section.startsWith("marketplace.");
+      const mcp=section==="mcp_servers"||section.startsWith("mcp_servers."),managed=section===`mcp_servers.${EMOTION_MCP_SERVER_ID}`||section.startsWith(`mcp_servers.${EMOTION_MCP_SERVER_ID}.`)||section==="mcp_servers.claudex-workhouse"||section.startsWith("mcp_servers.claudex-workhouse."),plugin=section==="plugins"||section.startsWith("plugins.")||section==="marketplace"||section.startsWith("marketplace.");
       omit=mcp?isolated||managed:isolated&&plugin;
     }
     if(!omit)kept.push(line);
@@ -50,7 +50,7 @@ function copyPrivateFile(sharedHome:string,taskHome:string,name:string){
   const target=path.join(taskHome,name);fs.copyFileSync(source,target);fs.chmodSync(target,0o600);
 }
 
-export function grokTaskEnvironment(binary:string,taskDirectory:string,port:number,taskId:string,runtimeProfile:EmotionRuntimeProfile):NodeJS.ProcessEnv{
+export function grokTaskEnvironment(binary:string,taskDirectory:string,port:number,taskId:string,runtimeProfile:EmotionRuntimeProfile,managedToken?:string):NodeJS.ProcessEnv{
   const validTask=validEmotionTaskId("grok",taskId);if(!validTask)throw new Error("A valid Grok task ID is required for the task environment.");
   const sharedHome=sharedGrokHome(binary),taskHome=path.join(taskDirectory,"grok-home");
   fs.mkdirSync(taskHome,{recursive:true,mode:0o700});fs.chmodSync(taskHome,0o700);
@@ -59,7 +59,8 @@ export function grokTaskEnvironment(binary:string,taskDirectory:string,port:numb
   for(const name of [...PRESERVED_DIRECTORIES,"sessions"])safeLinkDirectory(sharedHome,taskHome,name);
   let source="";try{source=fs.readFileSync(path.join(sharedHome,"config.toml"),"utf8");}catch{}
   const stripped=removeProviderSections(source,runtimeProfile!=="default"),emotion=runtimeProfile==="browser"?"":`[mcp_servers.${EMOTION_MCP_SERVER_ID}]\nurl = ${JSON.stringify(emotionMcpUrl("grok",port))}\nheaders = { ${JSON.stringify(EMOTION_MCP_TASK_HEADER)} = ${JSON.stringify(validTask)}, ${JSON.stringify(EMOTION_MCP_PROFILE_HEADER)} = ${JSON.stringify(runtimeProfile)} }\nenabled = true`;
-  fs.writeFileSync(path.join(taskHome,"config.toml"),`${[stripped,emotion].filter(Boolean).join("\n\n")}\n`,{encoding:"utf8",mode:0o600});
+  const managed=runtimeProfile==="default"&&managedToken?`[mcp_servers.claudex-workhouse]\nurl = ${JSON.stringify(`http://127.0.0.1:${port}/mcp/claudex-workhouse`)}\nheaders = { Authorization = ${JSON.stringify(`Bearer ${managedToken}`)}, ${JSON.stringify(EMOTION_MCP_TASK_HEADER)} = ${JSON.stringify(validTask)} }\nenabled = true`:"";
+  fs.writeFileSync(path.join(taskHome,"config.toml"),`${[stripped,emotion,managed].filter(Boolean).join("\n\n")}\n`,{encoding:"utf8",mode:0o600});
   let isolatedCwd="";if(runtimeProfile!=="default"){const isolationRoot=process.platform==="win32"?taskHome:"/tmp";isolatedCwd=path.join(isolationRoot,`claudex-workhouse-grok-${crypto.createHash("sha256").update(taskHome).digest("hex").slice(0,16)}`);fs.mkdirSync(isolatedCwd,{recursive:true,mode:0o700});try{fs.chmodSync(isolatedCwd,0o700);}catch{}}
   return{GROK_HOME:taskHome,GROK_AUTO_UPDATE:"0",...(isolatedCwd?{CLAUDEX_WORKHOUSE_GROK_ISOLATED_CWD:isolatedCwd,GROK_CLAUDE_MCPS_ENABLED:"0",GROK_CURSOR_MCPS_ENABLED:"0"}:{})};
 }

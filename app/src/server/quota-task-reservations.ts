@@ -1,4 +1,4 @@
-import type { ProviderQuota } from "./quota.js";
+import { codexQuotaForModel, type ProviderQuota } from "./quota.js";
 
 export type QuotaReservationStatus="waiting-quota"|"claiming"|"starting"|"started"|"cancelled"|"failed";
 
@@ -97,7 +97,8 @@ export async function runQuotaReservationPump(input:{
   const now=input.now??Date.now,due=await input.store.listDueQuotaTaskReservations(new Date(now()).toISOString(),100);
   let started=0;
   for(const row of due){
-    const checkedAt=now(),decision=reservationQuotaDecision(input.quota[row.provider],checkedAt,row.quotaCheckCount);
+    const providerQuota=input.quota[row.provider],taskQuota=row.provider==="codex"?codexQuotaForModel(providerQuota,row.request.model):providerQuota;
+    const checkedAt=now(),decision=reservationQuotaDecision(taskQuota,checkedAt,row.quotaCheckCount);
     if(decision.action==="wait"){
       await input.store.rescheduleQuotaTaskReservation(row.id,new Date(checkedAt).toISOString(),{nextCheckAt:decision.nextCheckAt,lastQuotaCheckAt:new Date(checkedAt).toISOString(),lastQuotaStatus:decision.reason});
       continue;

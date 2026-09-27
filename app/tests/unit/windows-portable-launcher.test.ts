@@ -80,7 +80,27 @@ describe("Windows portable launcher contract",()=>{
     expect(start).toContain("win32Directory(extendedPath(payload).wstring())");
     expect(start).toContain("win32RegularFile(extendedPath(node).wstring())");
     // The full manifest hash verification stays where it belongs: startup.
-    expect(start).toContain("if(embeddedManifest.empty())verifyPayload(base,payload,version);");
+    expect(start).toContain("if(embeddedManifest.empty())verifyPayload(base,payload,version,currentBody);");
+  });
+
+  it("binds the active payload to a versioned manifest",()=>{
+    for(const value of["jsonString(current,\"payloadManifest\")","unsafe payload manifest path","payload manifest escape"]){
+      expect(source).toContain(value);
+    }
+  });
+
+  it("opens each manifest file without following a final reparse point and names failures",()=>{
+    const verifier=functionBody("VerifiedPayloadFile verifyPayloadFile(const std::filesystem::path& file,const std::wstring& relative)");
+    expect(verifier).toContain("CreateFileW");
+    expect(verifier).toContain("FILE_FLAG_OPEN_REPARSE_POINT");
+    expect(verifier).toContain("GetFileInformationByHandle");
+    expect(verifier).toContain("FILE_ATTRIBUTE_DIRECTORY|FILE_ATTRIBUTE_REPARSE_POINT");
+    expect(verifier).toContain('"payload open: "+narrow(relative)+"; win32="');
+    expect(verifier).toContain('"payload type: "+narrow(relative)+"; attributes="');
+    const manifest=functionBody("void verifyPayloadManifest(const std::string& manifest,const std::filesystem::path& payload,const std::string& version)");
+    expect(manifest).toContain("verifyPayloadFile(file,relative)");
+    expect(manifest).toContain('"payload hash: "+narrow(relative)');
+    expect(manifest).not.toContain('runtime_error("payload attributes")');
   });
 
   /** A portable start that fails has to be identifiable as one. */

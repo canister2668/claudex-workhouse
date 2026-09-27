@@ -27,6 +27,23 @@ function cookieValue(request:Pick<FastifyRequest,"headers">,name:string){
   return null;
 }
 
+export const PROXY_AUTH_SECRET_HEADER="x-claudex-proxy-auth";
+/**
+ * Identity asserted by a trusted reverse proxy (nginx auth_request + oauth2-proxy).
+ * The proxy must overwrite both headers on every request; the shared secret keeps
+ * other loopback clients from forging X-Auth-Request-Email. Returns null when the
+ * request did not come through that proxy, so other authentication can still apply.
+ */
+export function verifyReverseProxyIdentity(request:Pick<FastifyRequest,"headers">,secret:string|null|undefined,allowedEmail:string){
+  const presented=request.headers[PROXY_AUTH_SECRET_HEADER];
+  if(!secret||typeof presented!=="string")return null;
+  if(!safeEqual(sha256(secret),sha256(presented)))throw Object.assign(new Error("Reverse-proxy authentication is invalid."),{statusCode:403,code:"PROXY_AUTH_INVALID"});
+  const email=request.headers["x-auth-request-email"];
+  if(typeof email!=="string"||!email.trim())throw Object.assign(new Error("Reverse-proxy identity is required."),{statusCode:403,code:"PROXY_IDENTITY_REQUIRED"});
+  if(email.trim().toLowerCase()!==allowedEmail.trim().toLowerCase())throw Object.assign(new Error("Reverse-proxy identity is not allowed."),{statusCode:403,code:"PROXY_IDENTITY_NOT_ALLOWED"});
+  return allowedEmail;
+}
+
 export class LocalEntryAuth {
   static readonly cookieName="claudex_local_entry";
   readonly required:boolean;
@@ -139,6 +156,8 @@ export function createAuthenticator(config: AppConfig,options:{jwks?:JWTVerifyGe
       if(allowCloudflare&&configured&&jwks&&typeof token==="string")return verifyAccessToken(token,jwks,issuer,config.audience,config.allowedEmail);
       throw Object.assign(new Error("Invalid test identity."), { statusCode: 403 });
     }
+    const proxied=verifyReverseProxyIdentity(request,config.proxyAuthSecret,config.allowedEmail);
+    if(proxied)return proxied;
     if (!configured || !jwks) throw Object.assign(new Error("Cloudflare Access is not configured."), { statusCode: 503, code: "ACCESS_SETUP_REQUIRED" });
     const token = request.headers["cf-access-jwt-assertion"];
     if (typeof token !== "string") throw Object.assign(new Error("Missing Cloudflare Access JWT."), { statusCode: 403 });

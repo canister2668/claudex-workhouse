@@ -147,13 +147,13 @@ test(`captures sanitized external access wizard screens`,async({page})=>{
     const more=page.getByRole("button",{name:"추가 작업"});
     if(await more.isVisible().catch(()=>false))await more.click();
     await page.getByRole("button",{name:"설정 열기"}).click();
-    const settings=page.getByRole("dialog",{name:"설정"});
+    const settings=page.getByRole("region",{name:"설정"});
     await expect(settings).toBeVisible();
     // Let the settings panel grow to its content so the wizard section is fully
     // painted; otherwise the element screenshot captures the dialog backdrop
     // where the section extends past the panel's scroll viewport.
     await page.addStyleTag({content:".modal.global-settings{max-height:none!important;height:auto!important}.settings-tab-panel{max-height:none!important;overflow:visible!important}"});
-    await settings.getByRole("button",{name:"서버 및 Worker",exact:true}).click();
+    await settings.getByRole("button",{name:"접근·보안",exact:true}).click();
     const section=settings.locator(".external-access");
     await expect(section.getByRole("heading",{name:"외부 접속"})).toBeVisible();
     await section.getByRole("button",{name:"설정",exact:true}).click();

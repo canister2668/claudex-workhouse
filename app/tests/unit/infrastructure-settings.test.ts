@@ -28,10 +28,13 @@ describe("deployment and infrastructure settings UI", () => {
     const body=render(ArtifactSettings,{props:{api}}).body;
     expect(body).toContain("작업공간 산출물");
     expect(body).toContain("기록된 산출물만 정확한 관리 대상입니다");
-    const app=readFileSync(join(process.cwd(),"src/web/App.svelte"),"utf8");
-    expect(app).toContain('{id:"storage",labelKey:"settings.storage.title",group:"storage"}');
-    expect(app).toContain('{id:"artifacts",labelKey:"settings.artifacts"},{id:"snapshots",labelKey:"settings.storage"}');
-    expect(app).toContain('{#if storageTab==="artifacts"}<ArtifactSettings {api}/>{:else}<SnapshotSettings {api}/>{/if}');
+    // The storage page owns the artifact / snapshot / Proton Drive sub-tabs; App only routes to it.
+    const nav=readFileSync(join(process.cwd(),"src/web/settings/settings-nav.ts"),"utf8");
+    expect(nav).toContain('"participants", "storage"');
+    const storage=readFileSync(join(process.cwd(),"src/web/settings/StoragePage.svelte"),"utf8");
+    expect(storage).toContain('{ id: "artifacts", labelKey: "settings.artifacts" }, { id: "snapshots", labelKey: "settings.storage" }');
+    expect(storage).toContain('{#if tab === "artifacts"}<ArtifactSettings {api}/>{:else if tab === "snapshots"}<SnapshotSettings {api}/>{:else}<ProtonDriveSettings {api}/>{/if}');
+    expect(readFileSync(join(process.cwd(),"src/web/App.svelte"),"utf8")).toContain('<StoragePage {api} bind:tab={storageTab}/>');
     const artifacts=readFileSync(join(process.cwd(),"src/web/ArtifactSettings.svelte"),"utf8");
     expect(artifacts).toContain('<details class="workspace-group">');
     expect(artifacts).toContain('<details class="temp-root">');
@@ -46,14 +49,14 @@ describe("deployment and infrastructure settings UI", () => {
   });
 
   it("keeps the application update version in a bounded grid column",()=>{
-    const app=readFileSync(join(process.cwd(),"src/web/App.svelte"),"utf8");
+    const app=readFileSync(join(process.cwd(),"src/web/settings/SystemUpdatePage.svelte"),"utf8");
     const css=readFileSync(join(process.cwd(),"src/web/styles.css"),"utf8");
     expect(app).toContain('class="runtime-card application-update-card"');
     expect(app).toContain('class="application-update-current"');
     expect(css).toContain(".application-update-card{display:grid;grid-template-columns:minmax(180px,1fr)");
     expect(css).toContain(".application-update-card>.application-update-current{min-width:180px}");
-    expect(app).toContain('applicationUpdate.updateAvailable&&applicationUpdate.blockers.length');
-    expect(app).toContain('applicationUpdate.reason==="source-checkout-not-updatable"');
+    expect(app).toContain('applicationUpdate.updateAvailable && applicationUpdate.blockers.length');
+    expect(app).toContain('applicationUpdate.reason === "source-checkout-not-updatable"');
   });
 
   it("uses the normalized infrastructure contracts and never renders diagnostic JSON", () => {
@@ -106,7 +109,8 @@ describe("deployment and infrastructure settings UI", () => {
     expect(server).toContain('!request.url.startsWith("/api/deployment/")');
     expect(infrastructure).not.toMatch(/<pre[^>]*>.*JSON\.stringify/s);
     expect(app).not.toContain('{id:"overview",labelKey:"settings.overview"}');
-    expect(app).toContain('{id:"infrastructure",labelKey:"settings.infrastructure",group:"connection"}');
+    // Hosts and Workers are one settings page under 작업 환경; the old overview tab is gone.
+    expect(readFileSync(join(root, "settings/settings-nav.ts"), "utf8")).toContain('{ id: "environment", labelKey: "settings.group.environment", pages: ["workspace", "hosts", "git"] }');
     expect(app).not.toContain("overviewOnly");
     expect(app).toContain("<ProjectWorkspaceSettings");
   });

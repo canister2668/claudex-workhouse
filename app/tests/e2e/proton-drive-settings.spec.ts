@@ -18,7 +18,7 @@ test("Proton Drive settings keep uploads explicit and preserve the remote path",
   await page.goto("/");
   const more=page.getByRole("button",{name:"추가 작업"});if(await more.isVisible())await more.click();
   await page.getByRole("button",{name:"설정 열기"}).click();
-  const settings=page.getByRole("dialog",{name:"설정"});await settings.getByRole("button",{name:"계정",exact:true}).click();await settings.getByRole("button",{name:"Proton Drive",exact:true}).click();
+  const settings=page.getByRole("region",{name:"설정"});await settings.getByRole("button",{name:"저장소·Proton Drive",exact:true}).click();await settings.getByRole("button",{name:"Proton Drive",exact:true}).click();
   const section=settings.locator(".proton-settings");await expect(section.getByRole("heading",{name:"Proton Drive"})).toBeVisible();await expect(section.locator(".proton-state strong")).toHaveText(/연결됨|로그인 필요|이 호스트와 CLI가 호환되지 않음|CLI 설치 안 됨|CLI 사용 불가/);
   await expect(section.getByLabel("원격 기본 폴더")).toHaveValue("/my-files/Claudex-Workhouse");await expect(section.getByText("항상 명시적인 확인 필요",{exact:true})).toBeVisible();
   expect(await section.evaluate(element=>element.scrollWidth-element.clientWidth)).toBeLessThanOrEqual(0);

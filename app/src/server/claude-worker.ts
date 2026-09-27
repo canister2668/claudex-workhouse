@@ -88,6 +88,7 @@ const textDeltas=createTextDeltaBatcher<{nativeType:string;index:unknown;outputC
 let compatibleTextBlockId:string|null=null;
 let compatibleProgressReported=false;
 let postResultFinalization:Promise<void>|null=null;
+let pendingResult:string|null=null,pendingResultError=false;
 const outputUsageByCall=new Map<string,ProviderOutputUsage>();
 function recordOutputUsage(callId:string|null,usage:ProviderOutputUsage){
   const key=callId||"legacy-current",previous=outputUsageByCall.get(key);
@@ -110,7 +111,7 @@ function recordOutputUsage(callId:string|null,usage:ProviderOutputUsage){
 atomicWrite(state);
 spool.append({ type:"task_started", content:`Claudex Workhouse ${providerLabel} worker started.`, threadId:state.sessionId });
 
-const emotionTool=`mcp__${EMOTION_MCP_SERVER_ID}__${EMOTION_MCP_TOOL_NAME}`,managedTools=["mcp__claudex-workhouse__managed_provider_task_create","mcp__claudex-workhouse__managed_provider_task_get","mcp__claudex-workhouse__managed_provider_task_wait","mcp__claudex-workhouse__managed_provider_task_resume"];
+const emotionTool=`mcp__${EMOTION_MCP_SERVER_ID}__${EMOTION_MCP_TOOL_NAME}`,managedTools=["mcp__claudex-workhouse__request_user_input_async","mcp__claudex-workhouse__managed_provider_models","mcp__claudex-workhouse__managed_provider_task_create","mcp__claudex-workhouse__managed_provider_task_get","mcp__claudex-workhouse__managed_provider_task_wait","mcp__claudex-workhouse__managed_provider_task_resume"];
 const restrictedTools=profile.tools[0]!=="default",extraTools=[...(emotionMcpUrl?[emotionTool]:[]),...(managedMcpUrl?managedTools:[]),...externalMcp.allowedTools];
 // A conversation keeps every file tool off. The exception is a file the user
 // attached to this very turn: its path is already in the prompt, and without
@@ -245,11 +246,10 @@ lines.on("line", (line) => {
         spool.append({type:"context_compaction",content:"Claude context compacted.",threadId:state.sessionId,metadata:{nativeType:event.type,trigger:"manual",contextUsage:state.contextUsage}});
       }
       const eventResult=typeof event.result==="string"&&event.result.trim()?event.result:null;
-      state.result = compactOperation&&!event.is_error ? "Context compacted." : eventResult;
-      state.status = event.is_error ? "failed" : "completed";
-      state.error = event.is_error ? event.result ?? "Claude task failed" : null;
-      updateWorkerEmotion(root,providerId,event.is_error?"disappointed":"done",state.sessionId);
-      spool.append({ type:event.is_error ? "task_failed" : "task_completed", content:compactOperation&&!event.is_error ? `${providerLabel} context compaction completed.` : event.result ?? (event.is_error ? `${providerLabel} task failed.` : `${providerLabel} task completed.`), threadId:state.sessionId, terminal:true, metadata:{nativeType:event.type,subtype:event.subtype,operation:compactOperation?"context_compaction":undefined} });
+      // Claude can emit result records for child turns before the parent has
+      // finished. The CLI process closing is the authoritative task boundary.
+      pendingResult=compactOperation&&!event.is_error?"Context compacted.":eventResult;
+      pendingResultError=Boolean(event.is_error);
     }
     state.updatedAt = new Date().toISOString();
     if(event.type==="result"){stateWritePending=true;flushStateWrite();}else scheduleStateWrite();
@@ -265,8 +265,9 @@ child.once("close", async(code, signal) => {
   if(postResultFinalization)await postResultFinalization;
   const transitioned=["pending","queued","running","waiting"].includes(state.status);
   if (transitioned) {
-    state.status = signal ? "stopped" : code === 0 ? "completed" : "failed";
-    if (code !== 0 && !signal) state.error = `${providerLabel} exited with code ${code}`;
+    state.status = signal ? "stopped" : code === 0&&!pendingResultError ? "completed" : "failed";
+    state.result=pendingResult;
+    state.error=state.status==="failed"?(code!==0?`${providerLabel} exited with code ${code}`:pendingResult??`${providerLabel} task failed.`):null;
     updateWorkerEmotion(root,providerId,state.status==="completed"?"done":state.status==="failed"?"disappointed":"neutral",state.sessionId);
   }
   state.updatedAt = new Date().toISOString();

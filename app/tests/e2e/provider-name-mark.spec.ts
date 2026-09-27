@@ -42,8 +42,8 @@ test("global avatar display switches every provider between localized marks and 
 
   await page.getByRole("button",{name:"추가 작업"}).click();
   await page.getByRole("button",{name:"설정 열기"}).click();
-  const settingsDialog=page.getByRole("dialog",{name:"설정"});
-  await settingsDialog.getByRole("button",{name:"대화·캐릭터"}).click();
+  const settingsDialog=page.getByRole("region",{name:"설정"});
+  await settingsDialog.getByRole("button",{name:"일반·화면",exact:true}).click();
   await expect(settingsDialog.getByRole("button",{name:"업무용 이름 마크"})).toHaveClass(/active/);
   await settingsDialog.getByRole("button",{name:"캐릭터 이미지"}).click();
   await expect(page.locator(".agent-avatar-dock .agent-avatar-slot .provider-name-mark")).toHaveCount(0);

@@ -70,8 +70,10 @@ test("conversation mode keeps alternating emotion scenes inside the lighter time
   await expect(page.getByRole("navigation",{name:"엔진 필터"})).toHaveCount(0);
   await primaryNav.getByRole("button",{name:"세션",exact:true}).click();
   await expect(primaryNav.getByRole("button",{name:"세션",exact:true})).toHaveClass(/active/);
+  await page.getByRole("button",{name:"필터",exact:true}).click();
   await expect(page.getByRole("navigation",{name:"엔진 필터"})).toBeVisible();
   await expect(page.getByRole("navigation",{name:"엔진 필터"}).getByRole("button",{name:"대화",exact:true})).toHaveCount(0);
+  await page.keyboard.press("Escape");
   await conversationTab.click();
   const documentButton=page.getByRole("button",{name:"결론 문서 1개"});
   await expect(documentButton).toBeVisible();

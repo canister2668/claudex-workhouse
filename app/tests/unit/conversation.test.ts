@@ -542,6 +542,16 @@ describe("conversation presentation", () => {
     expect(cards.find(card=>card.id==="thread-c")?.name).toBe("Cora");
   });
 
+  it("keeps identical parallel-agent activity for different children",()=>{
+    const events=[
+      {type:"message",content:"병렬 확인",threadId:"root",metadata:{role:"user"}},
+      {type:"agent_started",content:"같은 지시",threadId:"root",turnId:"turn",metadata:{receiverThreadIds:["child-a"]}},
+      {type:"agent_started",content:"같은 지시",threadId:"root",turnId:"turn",metadata:{receiverThreadIds:["child-b"]}}
+    ] as any[];
+    const turn=organizeConversation(events,"",true,"root")[0];
+    expect(parallelAgentCards(turn.process,"root").map(card=>card.id)).toEqual(["child-a","child-b"]);
+  });
+
   it("drops placeholder identities and gives each output event one agent owner",()=>{
     const outputA={type:"command_completed",content:"A output",threadId:"thread-a",metadata:{agentThreadId:"undefined"}} as any;
     const outputB={type:"message_completed",content:"B output",threadId:"thread-b",metadata:{role:"agent",phase:"final_answer",agentThreadId:"thread-a"}} as any;

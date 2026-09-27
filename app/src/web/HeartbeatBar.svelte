@@ -20,7 +20,8 @@
 </script>
 
 <span class="heartbeat-bar {freshness}" class:degraded={displayTransport!=="connected"} class:lost={displayTransport==="lost"} class:compact title={`${phaseLabel} · ${freshnessLabel} · ${$t("liveness.secondsAgo",{seconds:age})}`}>
-  <span class="heartbeat-copy"><i></i><strong>{$t(`liveness.transport.${displayTransport}`)}</strong>{#if !compact}<span>· {phaseLabel} · {freshnessLabel}</span>{/if}</span>
+  <!-- A healthy transport says nothing; the phase carries the row. Only a degraded or lost connection earns its own word. -->
+  <span class="heartbeat-copy"><i></i>{#if displayTransport!=="connected"}<strong>{$t(`liveness.transport.${displayTransport}`)}</strong>{#if !compact}<span>· {phaseLabel} · {freshnessLabel}</span>{/if}{:else}<strong>{phaseLabel}</strong>{#if !compact}<span>· {freshnessLabel}</span>{/if}{/if}</span>
   <span class="heartbeat-track" aria-hidden="true">{#key lastEventAt}<i style={`--heartbeat-stale:${LIVENESS_STALE_MS}ms;--heartbeat-dead:${LIVENESS_DEAD_MS}ms`}></i>{/key}</span>
   {#if !compact}<small>{$t("liveness.secondsAgo",{seconds:age})}</small>{/if}
 </span>

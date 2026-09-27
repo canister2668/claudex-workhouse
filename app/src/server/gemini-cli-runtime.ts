@@ -203,3 +203,14 @@ export function classifyGeminiCliError(message:string):GeminiCliFailure{
     return{code:"GEMINI_CLI_WORKSPACE_UNTRUSTED",message:"Gemini CLI refused the workspace as untrusted."};
   return{code:"GEMINI_CLI_FAILED",message:message.replace(/\s+/g," ").slice(0,400)};
 }
+
+/** Gemini CLI occasionally emits an empty `result.error` after logging the
+ * concrete provider failure to stderr. Preserve that actionable cause instead
+ * of replacing it with the generic result-envelope fallback. */
+export function geminiCliResultFailure(message:unknown,diagnostics:string):GeminiCliFailure{
+  const primary=typeof message==="string"?message.trim():"";
+  if(primary)return classifyGeminiCliError(primary);
+  const classified=classifyGeminiCliError(diagnostics);
+  if(classified.code!=="GEMINI_CLI_FAILED")return classified;
+  return{code:"GEMINI_CLI_FAILED",message:"Gemini CLI failed without a message."};
+}

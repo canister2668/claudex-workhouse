@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import {afterEach,describe,expect,it} from "vitest";
-import {antigravityBinary,antigravityEnvironment,antigravityHome,antigravityTaskEnvironment} from "../../src/server/antigravity-environment.js";
+import {antigravityBinary,antigravityEnvironment,antigravityHome,antigravityTaskEnvironment,geminiCliEnvironment} from "../../src/server/antigravity-environment.js";
 
 const roots:string[]=[];
 afterEach(()=>{delete process.env.CLAUDEX_WORKHOUSE_ANTIGRAVITY_BINARY;for(const root of roots.splice(0))fs.rmSync(root,{recursive:true,force:true});});
@@ -33,5 +33,11 @@ describe("Antigravity isolated runtime environment",()=>{
     const env=antigravityTaskEnvironment(config,path.join(root,"task"),3410,"antigravity:vertex-task",settings);
     expect(antigravityHome(config,"vertex")).toBe(path.join(root,"data","provider-auth","antigravity-vertex-home"));
     expect(env.HOME).toBe(path.join(root,"task","antigravity-vertex-home"));expect(env.GOOGLE_CLOUD_PROJECT).toBe("sample-project-123");expect(env.GOOGLE_CLOUD_LOCATION).toBe("us-central1");expect(env.GOOGLE_GENAI_USE_VERTEXAI).toBe("true");expect(env.GOOGLE_APPLICATION_CREDENTIALS).toBe(credentials);
+  });
+  it("preserves exact Vertex model ids through the Workhouse-owned Gemini CLI settings",()=>{
+    const root=fs.mkdtempSync(path.join(process.cwd(),".claudex-gemini-env-"));roots.push(root);const config={dataDir:path.join(root,"data")} as any,settings={version:1,backend:"vertex-agent",vertex:{projectId:"sample-project-123",location:"global",credentialsPath:"/credentials.json",creditsUrl:""}} as const,home=path.join(config.dataDir,"provider-auth","gemini-cli-home"),file=path.join(home,".gemini","settings.json");
+    fs.mkdirSync(path.dirname(file),{recursive:true});fs.writeFileSync(file,JSON.stringify({ui:{theme:"dark"},experimental:{otherFlag:true}}));
+    const env=geminiCliEnvironment(config,settings),stored=JSON.parse(fs.readFileSync(file,"utf8"));
+    expect(env.HOME).toBe(home);expect(stored).toEqual({ui:{theme:"dark"},experimental:{otherFlag:true,dynamicModelConfiguration:true}});expect(fs.statSync(file).mode&0o777).toBe(0o600);
   });
 });

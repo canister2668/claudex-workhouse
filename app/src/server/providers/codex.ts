@@ -7,9 +7,11 @@ import { codexAppServerPoolWarm, codexRuntimeSelection, withCodexAppServer } fro
 import { CodexCatalog } from "../codex/catalog.js";
 import { DeckDatabase } from "../db/client.js";
 import { runCommand, stripAnsi } from "../process.js";
+import { redactSensitiveText } from "../events.js";
 import type { AgentProvider, CreateTaskInput, DeckTask, ProjectConfig, UnifiedStatus } from "../types.js";
 import { listPendingApprovals, submitApprovalDecision, type ApprovalDecision } from "../approval-bridge.js";
 import { listPendingUserInputs, submitUserInput, type UserInputAnswers } from "../user-input-bridge.js";
+import { listAsyncUserInputs } from "../async-user-input.js";
 import { automationLevel, newestExecutionSettings, permissionForAutomation } from "../automation-level.js";
 import { normalizeDelegationSettings } from "../delegation-settings.js";
 import {executionPolicyErrorCode,osExecutionIdentity,probeNativeSandbox,resolveExecutionPolicy,sandboxEnvironmentIdentity,trustedHostOptInValid,trustedHostSettingKey,type ExecutionPolicy,type SandboxCapability} from "../execution-policy.js";
@@ -115,6 +117,8 @@ export class CodexProvider implements AgentProvider {
   }
 
   private stateFile(id: string) { return path.join(this.stateDir, `${id.replaceAll(":", "_")}.json`); }
+  /** The worker's stderr; a crash outside its own try/catch leaves its only trace here. */
+  private stderrFile(id: string) { return path.join(this.stateDir, `${id.replaceAll(":", "_")}.stderr.log`); }
   async probeNativeExecution(workspace=this.config.root,force=false){
     const binary=codexRuntimeSelection(this.config.appRoot).binary??"",identity=sandboxEnvironmentIdentity(binary,"local","local"),host=await this.db.getHost("local").catch(()=>null),persisted=host?.capabilities?.nativeSandbox as SandboxCapability|undefined;
     if(force)this.nativeCapability=null;
@@ -134,7 +138,7 @@ export class CodexProvider implements AgentProvider {
   }
   listApprovals(task:DeckTask){if(!task.commandMarker?.startsWith("claudex-workhouse-codex:"))return[];return listPendingApprovals(this.stateFile(task.id));}
   respondApproval(task:DeckTask,approvalId:string,decision:ApprovalDecision){if(!task.commandMarker?.startsWith("claudex-workhouse-codex:"))throw Object.assign(new Error("Only an Claudex Workhouse Codex worker can receive approvals."),{statusCode:403});return submitApprovalDecision(this.stateFile(task.id),approvalId,decision);}
-  listUserInputs(task:DeckTask){if(!task.commandMarker?.startsWith("claudex-workhouse-codex:"))return[];return listPendingUserInputs(this.stateFile(task.id));}
+  listUserInputs(task:DeckTask){if(!task.commandMarker?.startsWith("claudex-workhouse-codex:"))return[];return [...listPendingUserInputs(this.stateFile(task.id)),...listAsyncUserInputs(this.config.dataRoot,task.id)];}
   respondUserInput(task:DeckTask,requestId:string,answers:UserInputAnswers){if(!task.commandMarker?.startsWith("claudex-workhouse-codex:"))throw Object.assign(new Error("Only an Claudex Workhouse Codex worker can receive user input."),{statusCode:403});return submitUserInput(this.stateFile(task.id),requestId,answers);}
   private projectForCwd(cwd: string | null | undefined) { return this.config.projects.find((item) => item.realPath === cwd) ?? null; }
   // Same policy as Claude sessions: an unregistered workspace is still usable
@@ -233,7 +237,7 @@ export class CodexProvider implements AgentProvider {
       this.workerStateSignatures.set(task.id,signature);
       const identity={...task,pid:state.pid??task.pid,pgid:state.pgid??task.pgid,processStart:state.processStart??task.processStart,commandMarker:state.marker??task.commandMarker},active=["pending","queued","running","waiting","unknown"].includes(state.status??task.status);
       if(active&&!this.processMatchesWorker(identity)){
-        state.status="stopped";state.updatedAt=new Date().toISOString();state.error=state.error??"Worker process is no longer running.";state.interruptionCause="worker-process-lost";state.interruptionDetectedAt=state.updatedAt;
+        state.status="stopped";state.updatedAt=new Date().toISOString();state.error=state.error??workerLostMessage(this.stderrFile(task.id));state.interruptionCause="worker-process-lost";state.interruptionDetectedAt=state.updatedAt;
         try{const temporary=`${stateFile}.${process.pid}.${crypto.randomUUID()}.tmp`;fs.writeFileSync(temporary,JSON.stringify(state));fs.renameSync(temporary,stateFile);}catch{}
       }
       const imageOutputs=mergePersistedImageOutputs(task.metadata?.imageOutputs,state.imageOutputs);
@@ -581,7 +585,7 @@ export class CodexProvider implements AgentProvider {
   async deleteThread(threadId: string) {
     if (!this.deleteVerified) throw Object.assign(new Error("Permanent deletion is disabled until fixture impact verification completes."), { statusCode:503 });
     const linked:DeckTask[]=[];
-    for(const task of await this.db.listProviderTasks("codex")) if(task.threadId===threadId) linked.push(task.commandMarker?.startsWith("claudex-workhouse-codex:")?await this.refreshWorker(task):task);
+    for(const task of await this.db.listThreadTasks("codex",threadId)) linked.push(task.commandMarker?.startsWith("claudex-workhouse-codex:")?await this.refreshWorker(task):task);
     const active = linked.find((task) => ["pending","queued","running","waiting"].includes(task.status));
     if (active) throw Object.assign(new Error("Stop the verified worker before deleting its session record."), { statusCode:409 });
     await withCodexAppServer(this.config.root, 30000, (client) => client.request("thread/delete", { threadId }, 30000));
@@ -633,10 +637,13 @@ export class CodexProvider implements AgentProvider {
     const externalMcp=await prepareExternalMcpEnvironment({db:this.db,taskTempDir,taskId:id,provider:"codex",runtimeProfile,port:this.config.port});
     const providerPrompt=[input.prompt,externalMcp.promptSuffix].filter(Boolean).join("\n\n");
     seedTaskEmotion(this.config.dataRoot,"codex",id,resumeThreadId);
+    let stderrFd:number|null=null;
+    try{stderrFd=fs.openSync(this.stderrFile(id),"a",0o600);}catch{/* diagnostics only; never block the launch */}
     const child = spawn(process.execPath, [workerPath, this.stateFile(id), id, mode, input.project.realPath, marker, resumeThreadId ?? "", providerPrompt, JSON.stringify(settings)], {
-      cwd:input.project.realPath, detached:true, shell:false, windowsHide:true, stdio:"ignore",env:{...process.env,
+      cwd:input.project.realPath, detached:true, shell:false, windowsHide:true, stdio:["ignore","ignore",stderrFd??"ignore"],env:{...process.env,
         CLAUDEX_WORKHOUSE_ROOT:this.config.appRoot,CLAUDEX_WORKHOUSE_APP_ROOT:this.config.appRoot,CLAUDEX_WORKHOUSE_DATA_ROOT:this.config.dataRoot,TMPDIR:taskTempDir,TMP:taskTempDir,TEMP:taskTempDir,CLAUDEX_WORKHOUSE_RUNTIME_PROFILE:runtimeProfile,CLAUDEX_WORKHOUSE_CONVERSATION_ATTACHMENTS:JSON.stringify(runtimeProfile==="conversation"?conversationAttachmentPaths(input.prompt,path.join(this.config.dataDir,"uploads")):[]),CLAUDEX_WORKHOUSE_DELEGATION_SETTINGS:serializedDelegation,...emotionMcpEnvironment("codex",this.config.port,id,undefined,runtimeProfile),CLAUDEX_WORKHOUSE_MANAGED_PROVIDER_MCP_URL:`http://127.0.0.1:${this.config.port}/mcp/claudex-workhouse`,CLAUDEX_WORKHOUSE_CURRENT_TASK_ID:id,CLAUDEX_WORKHOUSE_MANAGED_PROVIDER_TOKEN:managedProviderToken,...externalMcp.environment}
     });
+    if(stderrFd!==null)fs.closeSync(stderrFd);
     child.unref();
     const createdAt = now();
     return this.db.upsertTask({
@@ -779,4 +786,20 @@ export class CodexProvider implements AgentProvider {
       return{ok:false,detail:{category:code==="ENOENT"?"runtime_not_found":"runtime_unavailable",source:runtime.source,version:null,code}};
     }
   }
+}
+
+const WORKER_STDERR_TAIL_BYTES=16*1024;
+/** Lost-worker error text, carrying the end of the worker's stderr when it left any. */
+export function workerLostMessage(stderrFile:string){
+  const base="Worker process is no longer running.";
+  let tail="";
+  try{
+    const fd=fs.openSync(stderrFile,"r");
+    try{const size=fs.fstatSync(fd).size,length=Math.min(size,WORKER_STDERR_TAIL_BYTES),buffer=Buffer.alloc(length);fs.readSync(fd,buffer,0,length,size-length);tail=buffer.toString("utf8");}
+    finally{fs.closeSync(fd);}
+  }catch{return base;}
+  const lines=redactSensitiveText(tail).split(/\r?\n/).map(line=>line.trimEnd()).filter(Boolean);
+  const errorLine=[...lines].reverse().find(line=>/^\w*(Error|Exception)\b|^Error:|FATAL|out of memory/i.test(line));
+  const excerpt=(errorLine??lines.at(-1)??"").slice(0,500);
+  return excerpt?`${base} Last worker error: ${excerpt}`:base;
 }

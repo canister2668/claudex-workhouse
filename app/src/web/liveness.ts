@@ -66,7 +66,7 @@ export const initialTaskLiveness=(lastEventAt=0,taskId="",status?:string,started
 
 export function phaseForEvent(event:AgentEvent,previous:TaskPhase,provider:TaskStreamProvider=event.provider??"codex"):TaskPhase{
   if(event.type==="approval_required")return"waiting-approval";
-  if(event.type==="user_input_required")return"waiting-user";
+  if(event.type==="user_input_required")return event.metadata?.delivery==="async"?previous:"waiting-user";
   if(event.type==="approval_resolved"||event.type==="user_input_resolved")return"reasoning";
   if(event.type==="task_started")return"queued";
   if(event.type==="task_completed")return"completed";
@@ -134,7 +134,7 @@ const planFrom=(event:AgentEvent):TaskPlanSummary|undefined=>{
   return{title:typeof raw?.title==="string"?raw.title:undefined,currentStep:active>=0?active+1:steps.filter(item=>item.status==="completed").length,totalSteps:steps.length,steps,updatedAt:eventAt(event,Date.now())};
 };
 const decisionFrom=(event:AgentEvent):TaskDecisionSummary|undefined=>{
-  if(event.type!=="user_input_required")return undefined;
+  if(event.type!=="user_input_required"||event.metadata?.delivery==="async")return undefined;
   const questions=Array.isArray(event.metadata?.questions)?(event.metadata?.questions as any[]):[];
   return{id:String(event.metadata?.requestId??event.itemId??event.eventId??"decision"),title:String(questions[0]?.question??event.content),description:String(event.content??""),questions:questions.map((item,index)=>({id:String(item.id??index),header:String(item.header??""),question:String(item.question??""),options:Array.isArray(item.options)?item.options.map((option:any)=>({label:String(option.label??option.value??""),description:typeof option.description==="string"?option.description:undefined})):[]})),createdAt:eventAt(event,Date.now())};
 };

@@ -226,9 +226,9 @@ describe("progress heartbeat presentation",()=>{
 
   it("reveals only root final output that arrives after mount",()=>{
     const conversation=source("Conversation.svelte"),styles=source("styles.css");
-    expect(conversation).toContain("isFinalAssistantOutput(event as DisplayEvent,rootThreadId,events as DisplayEvent[],!busy)");
+    expect(conversation).toContain("$: finalOutputResolver=finalAssistantOutputResolver(events as DisplayEvent[],rootThreadId,!busy);");
     expect(conversation).toContain("if(finalRevealReady&&finalRevealTaskWasBusy)");
-    expect(conversation).toContain("knownFinalEventKeys=rootFinalEventKeys(events);\n    finalRevealReady=true;");
+    expect(conversation).toContain("knownFinalEventKeys=rootFinalEventKeys(events,finalOutputResolver);\n    finalRevealReady=true;");
     expect(conversation).toContain("class:final-output-reveal={revealingFinalEventKeys.has(eventAnchorIdentity(event))}");
     expect(styles).toContain(".bubble.agent.final-output-reveal{animation:final-output-reveal .17s ease-out both}");
     expect(styles).toContain(".bubble.agent.final-output-reveal{animation:none}");
@@ -236,7 +236,7 @@ describe("progress heartbeat presentation",()=>{
 
   it("styles the live writing wave and explicit final-answer surface",()=>{
     const conversation=source("Conversation.svelte"),styles=source("styles.css");
-    expect(conversation).toContain("$: liveWritingEventKey=latestLiveWritingKey(events);");
+    expect(conversation).toContain("$: liveWritingEventKey=latestLiveWritingKey(events,finalOutputResolver);");
     expect(conversation).toContain('class:final-output-card={finalOutput}');
     expect(conversation).toContain('class="live-writing-wave"');
     expect(conversation).toContain('$t("conversation.finalAnswer")');

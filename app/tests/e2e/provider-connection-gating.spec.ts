@@ -74,12 +74,12 @@ test("a disconnected provider keeps its sessions but leaves every new-session pa
   await page.locator(".new-button").click();
   const dialog=page.getByRole("dialog",{name:"새 작업"});
   await expect(dialog).toBeVisible();
-  const engine=dialog.locator("#create-provider .sel");
-  await expect(engine.getByRole("button",{name:"Codex"})).toBeVisible();
-  await expect(engine.getByRole("button",{name:"Claude"})).toHaveCount(0);
-  await expect(engine.getByRole("button",{name:"Grok"})).toHaveCount(0);
+  const engine=dialog.getByLabel("엔진",{exact:true});
+  await expect(engine.locator("option",{hasText:"Codex"})).toHaveCount(1);
+  await expect(engine.locator("option",{hasText:"Claude"})).toHaveCount(0);
+  await expect(engine.locator("option",{hasText:"Grok"})).toHaveCount(0);
   // The stored default was Claude; it falls back to the connected provider.
-  await expect(engine.getByRole("button",{name:"Codex"})).toHaveClass(/active/);
+  await expect(engine).toHaveValue("codex");
 
   await dialog.getByRole("button",{name:"대화",exact:true}).click();
   const conversation=page.getByRole("dialog",{name:"새 대화"});
@@ -107,9 +107,9 @@ test("no connected provider shows connection guidance and blocks creation",async
   await page.locator(".new-button").click();
   const dialog=page.getByRole("dialog",{name:"새 작업"});
   await expect(dialog.getByText("연결된 프로바이더가 없습니다",{exact:true})).toBeVisible();
-  await expect(dialog.getByRole("group",{name:"실행 모델",exact:true})).toHaveCount(0);
+  await expect(dialog.getByLabel("엔진",{exact:true})).toHaveCount(0);
   await dialog.getByLabel("요청",{exact:true}).fill("연결이 없으면 시작할 수 없어야 한다");
-  await expect(dialog.getByRole("button",{name:"지금 시작",exact:true})).toBeDisabled();
+  await expect(dialog.getByRole("button",{name:"시작",exact:true})).toBeDisabled();
   // The Enter key path must honour the same invariant as the disabled button.
   await dialog.getByLabel("요청",{exact:true}).press("Enter");
   await page.waitForTimeout(500);

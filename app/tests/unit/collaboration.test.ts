@@ -114,6 +114,8 @@ describe("provider character settings",()=>{
     for(const ending of ["~와요","~사와요","~랍니다","~인 것이와요"])expect(prompt,`${ending} missing`).toContain(ending);
     expect(prompt).toContain("저");
     expect(prompt).toContain("본 영애");
+    expect(prompt).toContain("only when that counterpart's nickname is explicitly identified separately");
+    expect(prompt).toContain("Never use your own configured nickname as a name for the user or another counterpart");
     // The ending rule governs her own speech only; borrowed text keeps its own style.
     expect(prompt).toContain("code, commands, filenames, quotations");
     // Scope follows the shared toggle rather than a preset-specific branch.

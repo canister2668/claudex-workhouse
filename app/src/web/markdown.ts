@@ -1,7 +1,7 @@
 import DOMPurify from "dompurify";
 import { marked, Renderer, Tokenizer } from "marked";
 import type { AgentEvent } from "./events";
-import { translate } from "./i18n";
+import { currentLocale, translate } from "./i18n";
 import { workspaceFilePreviewHref } from "./workspace-viewer-state";
 
 const markdownOptions = {
@@ -194,6 +194,32 @@ export function parseMarkdown(source: string, context: MarkdownLinkContext = {})
   }) as string;
 }
 
+// A live session re-renders every card whenever one event arrives, and each
+// card's HTML is a pure function of its text, link context and locale. Parsing
+// and sanitizing hundreds of unchanged messages on every stream flush is what
+// made long sessions freeze the browser, so memoize the finished HTML.
+// Bounded by characters as well as entries: a streaming answer produces a new
+// (larger) source on every flush, and those drafts must not pile up in memory.
+const RENDER_CACHE_LIMIT=1000,RENDER_CACHE_CHAR_LIMIT=8_000_000;
+const renderCache=new Map<string,string>();
+let renderCacheChars=0;
+const workspaceKeys=new WeakMap<object,string>();
+function workspaceListKey(workspaces:MarkdownLinkContext["workspaces"]){
+  if(!workspaces?.length)return "";
+  let key=workspaceKeys.get(workspaces);
+  if(key===undefined){key=JSON.stringify(workspaces.map(item=>[item.id,item.canonicalPath,item.hostId]));workspaceKeys.set(workspaces,key);}
+  return key;
+}
+
 export function renderMarkdown(source: string, context: MarkdownLinkContext = {}) {
-  return DOMPurify.sanitize(parseMarkdown(source, context), sanitizeOptions);
+  const key=JSON.stringify([currentLocale(),context.workspaceId??null,context.workspacePath??null,context.executionHostId??null,Boolean(context.inlineImages),workspaceListKey(context.workspaces)])+"\u0000"+source;
+  const cached=renderCache.get(key);
+  if(cached!==undefined){renderCache.delete(key);renderCache.set(key,cached);return cached;}
+  const html=DOMPurify.sanitize(parseMarkdown(source, context), sanitizeOptions);
+  renderCache.set(key,html);renderCacheChars+=key.length+html.length;
+  while(renderCache.size>RENDER_CACHE_LIMIT||(renderCacheChars>RENDER_CACHE_CHAR_LIMIT&&renderCache.size>1)){
+    const [oldestKey,oldestHtml]=renderCache.entries().next().value!;
+    renderCache.delete(oldestKey);renderCacheChars-=oldestKey.length+oldestHtml.length;
+  }
+  return html;
 }

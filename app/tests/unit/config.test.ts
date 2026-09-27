@@ -40,6 +40,26 @@ describe("configured projects", () => {
     }finally{fs.rmSync(root,{recursive:true,force:true});}
   });
 
+  it("runs the managed runtime even when the configured path still points at an older binary",async()=>{
+    const root=fs.mkdtempSync(path.join(os.tmpdir(),"claudex-workhouse-managed-runtime-")),configDir=path.join(root,"config");
+    const legacy=path.join(root,"runtime","bin","claude"),managed=path.join(root,"runtime","claude-bin","claude");
+    fs.mkdirSync(configDir,{recursive:true});
+    for(const binary of[legacy,managed]){fs.mkdirSync(path.dirname(binary),{recursive:true});fs.writeFileSync(binary,"#!/bin/sh\nexit 0\n",{mode:0o700});}
+    fs.writeFileSync(path.join(configDir,"claudex-workhouse.json"),JSON.stringify({
+      host:"127.0.0.1",port:3410,externalOrigin:"http://127.0.0.1:3410",allowedEmail:"admin@example.com",teamDomain:"",audience:"",authMode:"local",promptMaxLength:50000,commandTimeoutMs:60000,commandOutputLimit:1048576,claudeBinary:"runtime/bin/claude"
+    }));
+    fs.writeFileSync(path.join(configDir,"projects.json"),JSON.stringify({projects:[]}));
+    vi.stubEnv("CLAUDEX_WORKHOUSE_APP_ROOT","");vi.stubEnv("CLAUDEX_WORKHOUSE_DATA_ROOT","");vi.stubEnv("CLAUDEX_WORKHOUSE_ROOT",root);vi.stubEnv("CLAUDEX_WORKHOUSE_CLAUDE_BIN","");vi.resetModules();
+    const{loadConfig,claudeBinaryCandidates}=await import("../../src/server/config.js");
+    try{
+      // Auto-update installs into runtime/claude-bin, so a stale configured path
+      // must never keep the service on the older binary.
+      expect(loadConfig().claudeBinary).toBe(managed);
+      expect(claudeBinaryCandidates("runtime/bin/claude",root,"linux",undefined)[0]).toBe(managed);
+      expect(claudeBinaryCandidates("runtime/bin/claude",root,"linux","/opt/claude")[0]).toBe("/opt/claude");
+    }finally{fs.rmSync(root,{recursive:true,force:true});}
+  });
+
   it("loads immutable application files separately from mutable data",async()=>{
     const appRoot=fs.mkdtempSync(path.join(os.tmpdir(),"claudex-workhouse-app-root-")),dataRoot=fs.mkdtempSync(path.join(os.tmpdir(),"claudex-workhouse-data-root-")),configDir=path.join(dataRoot,"config"),claudeBinary=path.join(dataRoot,"runtime","bin","claude");
     fs.mkdirSync(configDir,{recursive:true});fs.mkdirSync(path.dirname(claudeBinary),{recursive:true});fs.writeFileSync(claudeBinary,"#!/bin/sh\nexit 0\n",{mode:0o700});

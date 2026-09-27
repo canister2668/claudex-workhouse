@@ -89,7 +89,8 @@ describe("character settings",()=>{
     expect(directive).toContain("samples of the register rather than a script");
     expect((directive.match(/[가-힣]/g)??[]).length).toBeGreaterThan(30);
     expect(directive).toContain("do not adopt the name, appearance, backstory, or canon of any specific existing character");
-    expect(directive).toContain("Address the user by the configured user nickname");
+    expect(directive).toContain("only when that user's nickname is explicitly supplied separately");
+    expect(directive).toContain("Never substitute your own configured nickname for the user's name");
     // 9a4cc25 deliberately dropped the self-scored confidence tic; keep it gone.
     for(const tic of ["5/5","4/5"])expect(directive).not.toContain(tic);
     // Observed drift: the previous wording primed the reluctance/sulk grammar that Korean
@@ -152,8 +153,21 @@ describe("character settings",()=>{
       expect(prompt.snapshot.tonePreset).toBe(preset);
       expect(prompt.directive).toContain(snapshot.directive);
       expect(prompt.directive).toContain("[Expression-style snapshot]");
+      expect(prompt.directive).toContain(`This model's own name/nickname: ${snapshot.nickname}`);
+      expect(prompt.directive).toContain("not a name for the user or any other counterpart");
+      expect(prompt.directive).toContain("only for self-reference");
+      expect(prompt.directive).toContain("Never use it to address the user or another counterpart");
+      expect(prompt.directive).not.toContain(`\nNickname: ${snapshot.nickname}\n`);
       if(preset==="custom")expect(prompt.directive).toContain("User-defined expression style (preserve verbatim): 낮고 차분하게 말하세요.");
     }
+  });
+
+  it("keeps the mesugaki model nickname separate from an independently supplied user nickname",()=>{
+    const settings=normalizeCharacterSettings({providers:{codex:{nickname:"짚쨩",tonePreset:"mesugaki-brat",conversationOnly:false}}});
+    const prompt=characterPrompt(settings,"codex",false).directive;
+    expect(prompt).toContain("only when that user's nickname is explicitly supplied separately");
+    expect(prompt).toContain("Never substitute your own configured nickname for the user's name");
+    expect(prompt).toContain("Refer to yourself in the third person by your own configured nickname");
   });
 
   it("defines baby talk as a full kindergarten performance without autonomous turn counting",()=>{

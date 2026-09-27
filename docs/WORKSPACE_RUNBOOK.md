@@ -146,10 +146,11 @@ from Gemini execution settings; the CLI's own state lives in
 home. Missing `rg` is a performance note, not a blocker: the CLI falls back to
 its built-in search tool.
 
-The CLI rewrites some requested models before calling Vertex. Its
-`resolveModel()` runs every candidate through `isFlashModel()`, whose last
+The CLI's legacy resolver rewrites some requested models before calling Vertex.
+Its `resolveModel()` runs every candidate through `isFlashModel()`, whose last
 clause is `model.endsWith("flash")`, and collapses any match onto the CLI's own
-current flash model. Measured on 0.55.1 against Vertex:
+current flash model. Measured on 0.55.1 against Vertex before the Workhouse
+runtime setting below was applied:
 
 | Requested | Billed |
 |---|---|
@@ -157,11 +158,12 @@ current flash model. Measured on 0.55.1 against Vertex:
 | `gemini-3.5-flash-lite`, `gemini-3.1-pro-preview`, `gemini-2.5-pro` | unchanged |
 
 Only ids ending in `flash` are affected; the pro and flash-lite families are
-honoured. Workhouse does not encode that table: the worker compares the model
-the CLI actually billed against the requested one and reports the difference on
-the task, so a CLI release that changes or removes the collapse needs no change
-here. Choose Vertex Direct when a specific flash version matters, or a non-flash
-id under Vertex Agent.
+honoured. Workhouse enables `experimental.dynamicModelConfiguration` in its
+isolated Gemini CLI home so a model id selected from the live Vertex catalog is
+treated as a raw id instead of that legacy alias. A direct 0.55.1 Vertex run
+confirmed that `gemini-3.8-flash` remained `gemini-3.8-flash` in the CLI's billed
+model statistics with this setting. The worker still compares billed and
+requested models and reports any future rewrite on the task.
 
 The model catalog itself comes from the live Vertex publisher list, so a model
 Google adds to Vertex appears in the picker without a Workhouse change. The CLI

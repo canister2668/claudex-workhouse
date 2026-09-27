@@ -1,8 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { activeAgentStatus, activeSessions, avatarSessionRows, avatarTaskStreamKey, chooseProviderRecent, collaborationRecentStatuses, prioritizeCollaborationStatus, recentCompletedSessions, taskForRecentSession } from "../../src/web/agent-status.js";
+import { activeAgentStatus, activeSessions, avatarSessionRows, avatarTaskStreamKey, chooseProviderRecent, collaborationRecentStatuses, prioritizeCollaborationStatus, recentCompletedSessions, taskForRecentSession, terminalEventSuperseded } from "../../src/web/agent-status.js";
 import { createTaskState } from "../../src/web/task-state.js";
 
 describe("recent completed sessions", () => {
+  it("lets a fresh active snapshot replace an earlier terminal stream event",()=>{
+    const recent={provider:"claude" as const,taskId:"claude:early",status:"running",title:"work",updatedAt:"2026-09-25T02:02:23.189Z"};
+    expect(terminalEventSuperseded(recent,"2026-09-25T01:59:13.676Z")).toBe(true);
+    expect(terminalEventSuperseded(recent,"2026-09-25T02:03:00.000Z")).toBe(false);
+  });
   it("resolves an avatar entry to its exact provider task or newest matching thread",()=>{const rows=[{id:"claude-task",provider:"claude" as const,status:"completed",title:"Claude",updatedAt:"2026-07-14T01:00:00Z",threadId:"shared"},{id:"codex-old",provider:"codex" as const,status:"completed",title:"old",updatedAt:"2026-07-14T01:00:00Z",threadId:"thread"},{id:"codex-new",provider:"codex" as const,status:"completed",title:"new",updatedAt:"2026-07-14T02:00:00Z",threadId:"thread"}];expect(taskForRecentSession(rows,{provider:"codex",taskId:"codex-old",threadId:"thread",status:"completed",title:"old",updatedAt:""})?.id).toBe("codex-old");expect(taskForRecentSession(rows,{provider:"codex",taskId:null,threadId:"thread",status:"completed",title:"thread",updatedAt:""})?.id).toBe("codex-new");expect(taskForRecentSession(rows,{provider:"codex",taskId:null,threadId:"shared",status:"completed",title:"wrong provider",updatedAt:""})).toBeNull();});
   it("keeps one latest completed row per thread", () => {
     const rows = [

@@ -21,6 +21,14 @@ describe("Codex native turn presentation",()=>{
     expect(event).toMatchObject({type:"unknown",content:"Codex 기록 항목: futureItem",metadata:{nativeItemType:"futureItem"}});
   });
 
+  it("keeps a running native collaboration in the agent roster",()=>{
+    const events=codexTurnsToEvents([{id:"turn-collab",items:[
+      {type:"userMessage",content:[{type:"text",text:"병렬 조사"}]},
+      {type:"collabAgentToolCall",status:"inProgress",prompt:"조사",receiverThreadIds:["child"]}
+    ]}]);
+    expect(events[1]).toMatchObject({type:"agent_started",metadata:{receiverThreadIds:["child"]}});
+  });
+
   it("keeps image view and generated image paths relative to the task cwd",()=>{
     const events=codexTurnsToEvents([{id:"turn-images",items:[
       {id:"view",type:"imageView",path:"/workspace/docs/preview.png"},
@@ -46,5 +54,16 @@ describe("Codex native turn presentation",()=>{
     expect(codexConversationEvents(history,current,false)).toEqual(current);
     const combined=codexConversationEvents(history,current,true);
     expect(combined.map(event=>event.content)).toEqual(["이전 입력 3","이전 출력 3","이전 입력 4","이전 출력 4","이전 입력 5","이전 출력 5","현재 입력","현재 출력"]);
+  });
+
+  it("keeps exactly the latest completed output visible while a follow-up starts",()=>{
+    const history=codexTurnsToEvents(Array.from({length:3},(_,index)=>({id:`turn-${index+1}`,items:[
+      {id:`user-${index+1}`,type:"userMessage",content:[{type:"text",text:`이전 입력 ${index+1}`}]},
+      {id:`answer-${index+1}`,type:"agentMessage",text:`이전 출력 ${index+1}`}
+    ]})));
+    const current=[{type:"message",content:"새 후속 입력",turnId:"turn-4",itemId:"user-4",metadata:{role:"user"}}] as any[];
+    expect(codexConversationEvents(history,current,true,1).map(event=>event.content)).toEqual([
+      "이전 입력 3","이전 출력 3","새 후속 입력"
+    ]);
   });
 });

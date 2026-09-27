@@ -1,11 +1,10 @@
 <script lang="ts">
   import {onMount} from "svelte";
   import {t} from "./i18n";
-  import {modelLabel} from "./session-ui";
+  import ModelPicker from "./ModelPicker.svelte";
 
   type ProviderId="codex"|"claude"|"deepseek"|"ollama"|"antigravity"|"grok";
   const providers:ProviderId[]=["codex","claude","grok","deepseek","ollama","antigravity"];
-  const names:Record<ProviderId,string>={codex:"OpenAI",claude:"Anthropic",grok:"xAI",deepseek:"DeepSeek",ollama:"Ollama",antigravity:"Google"};
 
   export let api:(path:string,init?:RequestInit)=>Promise<any>;
   export let sourceProvider:ProviderId;
@@ -48,16 +47,16 @@
 </script>
 
 <div class="target-picker" aria-busy={loading}>
-  <div class="provider-field"><span class="field-label">{$t("targetPicker.company")}</span><div class="provider-tabs" role="tablist" aria-label={$t("targetPicker.company")}>{#each providers as item}<button type="button" role="tab" aria-selected={provider===item} aria-disabled={Boolean(disabledReasons[item])} class:active={provider===item} disabled={Boolean(disabledReasons[item])} title={disabledReasons[item]} onclick={()=>chooseProvider(item)}><strong>{names[item]}</strong><small>{item==="antigravity"?"Gemini":item==="claude"?"Claude Code":item==="codex"?"Codex":item}</small></button>{/each}</div></div>
   {#if loading}<p class="picker-note">{$t("targetPicker.loading")}</p>{:else if error}<p class="picker-error">{error}</p>{:else}
-    <label>{$t("session.model")}<select value={model} onchange={(event)=>chooseModel((event.currentTarget as HTMLSelectElement).value)}>{#each models[provider] as item}<option value={item.id}>{modelLabel(item)}</option>{/each}</select></label>
-    {#if selectedEfforts().length}<label>{$t("session.reasoning")}<select bind:value={effort}>{#each selectedEfforts() as item}<option value={item.id}>{$t(`session.effort.${item.id}`)}</option>{/each}</select></label>{/if}
-    {#if provider==="codex"&&selectedModel()?.serviceTiers?.some((item:any)=>item.id==="priority")}<label>{$t("session.speed")}<select value={tier??""} onchange={(event)=>tier=(event.currentTarget as HTMLSelectElement).value||null}><option value="">{$t("model.standard")}</option><option value="priority">{$t("session.fastUsage")}</option></select></label>{/if}
+    <!-- One picker for every hand-off target: agent, model, effort, speed. A
+         provider the host cannot run, or one without models, stays listed but
+         disabled with the reason as its title. -->
+    <ModelPicker fields={["provider","model","effort","tier"]} layout="stack" {providers} {provider} disabledProviders={disabledReasons} models={models[provider]} {model} efforts={selectedEfforts()} {effort} hasPriority={provider==="codex"&&Boolean(selectedModel()?.serviceTiers?.some((item:any)=>item.id==="priority"))} {tier} idPrefix={`target-${selectionKey}`} onprovider={chooseProvider} onmodel={chooseModel} oneffort={(value)=>effort=value} ontier={(value)=>tier=value}/>
+    {#if disabledReasons[provider]}<p class="picker-warning">{disabledReasons[provider]}</p>{/if}
     {#if provider===sourceProvider}<p class="picker-warning">{$t("targetPicker.sameProviderWarning")}</p>{/if}<p class="picker-note">{$t("targetPicker.permissionDerived")}</p>
   {/if}
 </div>
 
 <style>
-  .target-picker{display:grid;gap:.7rem}.target-picker label,.provider-field{display:grid;gap:.35rem}.field-label{font-size:inherit}.provider-tabs{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:.35rem}.provider-tabs button{display:grid;gap:.15rem;min-width:0;padding:.55rem .4rem;text-align:center}.provider-tabs button.active{border-color:var(--accent);background:var(--accent-soft)}.provider-tabs button:disabled{opacity:.42}.provider-tabs strong,.provider-tabs small{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.provider-tabs small,.picker-note,.picker-warning{font-size:.7rem}.picker-note{color:var(--muted)}.picker-note,.picker-warning{margin:0}.picker-warning{color:var(--warn)}.picker-error{margin:0;color:var(--danger)}
-  @media(max-width:600px){.provider-tabs{display:flex;overflow-x:auto;padding-bottom:.2rem}.provider-tabs button{min-width:94px;min-height:52px}}
+  .target-picker{display:grid;gap:.7rem}.picker-note,.picker-warning{font-size:.7rem}.picker-note{color:var(--muted)}.picker-note,.picker-warning{margin:0}.picker-warning{color:var(--warn)}.picker-error{margin:0;color:var(--err)}
 </style>

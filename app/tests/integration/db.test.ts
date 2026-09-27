@@ -88,6 +88,8 @@ describe("Claudex Workhouse SQLite worker", () => {
     expect(await db.recoverSessionMessages(now)).toBe(1);
     expect(await db.deleteSessionMessage(removable.id)).toBe(true);
     expect((await db.latestThreadTask("claude",sessionId))?.threadId).toBe(sessionId);
+    const threadTasks=await db.listThreadTasks("claude",sessionId);
+    expect(threadTasks).toHaveLength(2);expect(threadTasks.every(item=>item.threadId===sessionId)).toBe(true);
     await db.enqueueSessionMessage({id:crypto.randomUUID(),provider:"claude",threadId:sessionId,sourceTaskId:sessionMember.id,prompt:"deleted with session",createdAt:now,updatedAt:now});
     expect(await db.deleteTaskSession("claude",sessionId)).toBe(2);
     expect((await db.listProviderTasks("claude")).filter(item=>item.threadId===sessionId)).toHaveLength(0);

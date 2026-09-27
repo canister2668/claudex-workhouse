@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { mapAntigravityQuotaError, mapClaudeQuota, mapCodexQuota, mapDeepseekBalance, mapGrokQuota, mapOllamaPlan, mapOllamaQuota, quotaCacheDuration, readFreshCodexRateLimits, QUOTA_CACHE_OK_MS, QUOTA_CACHE_TRANSIENT_MS } from "../../src/server/quota.js";
+import { codexQuotaForModel, codexQuotaPoolForModel, mapAntigravityQuotaError, mapClaudeQuota, mapCodexQuota, mapDeepseekBalance, mapGrokQuota, mapOllamaPlan, mapOllamaQuota, quotaCacheDuration, readFreshCodexRateLimits, restorableClaudeQuota, QUOTA_CACHE_OK_MS, QUOTA_CACHE_TRANSIENT_MS } from "../../src/server/quota.js";
 
 describe("quota mapping", () => {
   it("refreshes the Codex account before reading limits after a plan change",async()=>{
@@ -26,6 +26,17 @@ describe("quota mapping", () => {
     expect(quotaCacheDuration({claude:{error:"rate_limited"},codex:{error:null}})).toBe(QUOTA_CACHE_OK_MS);
     expect(quotaCacheDuration({claude:{error:"rate_limited"},codex:{error:"unavailable"}})).toBe(QUOTA_CACHE_TRANSIENT_MS);
   });
+  it("restores a recent Claude reading and ages out the session window first",()=>{
+    const now=Date.UTC(2026,8,9,12,0,0);
+    const quota={fiveHour:{pct:12,resetsAt:null,resetLabel:null,durationMins:300},sevenDay:{pct:30,resetsAt:null,resetLabel:null,durationMins:10080},status:"ok" as const};
+    expect(restorableClaudeQuota({quota,at:new Date(now-60_000).toISOString()},now)).toEqual(quota);
+    expect(restorableClaudeQuota({quota,at:new Date(now-30*60_000).toISOString()},now)).toEqual({...quota,fiveHour:null,status:"partial"});
+    expect(restorableClaudeQuota({quota,at:new Date(now-2*60*60_000).toISOString()},now)).toBeNull();
+    expect(restorableClaudeQuota({quota:{fiveHour:null,sevenDay:null,status:"partial"},at:new Date(now).toISOString()},now)).toBeNull();
+    expect(restorableClaudeQuota(null,now)).toBeNull();
+    expect(restorableClaudeQuota({quota,at:"not-a-date"},now)).toBeNull();
+  });
+
   it("maps a lone Codex weekly primary by duration instead of position", () => {
     const quota = mapCodexQuota({ rateLimits:{ planType:"pro", primary:{ usedPercent:17, windowDurationMins:10080, resetsAt:1784491650 }, secondary:null } });
     expect(quota?.fiveHour).toBeNull();
@@ -83,6 +94,23 @@ describe("quota mapping", () => {
     });
     expect(quota?.sevenDay).toMatchObject({pct:60,durationMins:10080});
     expect(quota?.sevenDay?.resetsAt).toBe("2026-08-05T04:10:45.000Z");
+    expect(quota?.modelPools).toEqual([expect.objectContaining({limitId:"codex_bengalfox",label:"Spark",modelIds:["gpt-5.3-codex-spark"],sevenDay:expect.objectContaining({pct:0})})]);
+  });
+
+  it("keeps the Spark five-hour pool separate and resolves it only for Spark tasks",()=>{
+    const quota=mapCodexQuota({
+      rateLimits:{planType:"prolite",primary:{usedPercent:6,windowDurationMins:10080,resetsAt:1787801943},secondary:null},
+      rateLimitsByLimitId:{
+        codex:{planType:"prolite",primary:{usedPercent:6,windowDurationMins:10080,resetsAt:1787801943},secondary:null},
+        codex_bengalfox:{planType:"prolite",primary:{usedPercent:82,windowDurationMins:300,resetsAt:1787225960},secondary:{usedPercent:14,windowDurationMins:10080,resetsAt:1787812760}}
+      }
+    });
+    expect(quota?.fiveHour).toBeNull();
+    expect(quota?.sevenDay?.pct).toBe(6);
+    expect(codexQuotaPoolForModel(quota,"gpt-5.6-sol")).toBeNull();
+    expect(codexQuotaForModel(quota,"gpt-5.6-sol")).toMatchObject({fiveHour:null,sevenDay:{pct:6}});
+    expect(codexQuotaPoolForModel(quota,"gpt-5.3-codex-spark")).toMatchObject({limitId:"codex_bengalfox",label:"Spark"});
+    expect(codexQuotaForModel(quota,"gpt-5.3-codex-spark")).toMatchObject({fiveHour:{pct:82},sevenDay:{pct:14}});
   });
 
   it("keeps compatibility with app-server responses lacking durations", () => {

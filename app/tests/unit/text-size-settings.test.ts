@@ -12,8 +12,9 @@ describe("independent reading text sizes",()=>{
     expect(source).toContain("sessionTextSize,conversationTextSize");
     expect(source).toContain("applySessionTextSize(normalizeTextSize(value.sessionTextSize))");
     expect(source).toContain("applyConversationTextSize(normalizeTextSize(value.conversationTextSize))");
-    expect(source).toContain('$t("settings.sessionTextSize")');
-    expect(source).toContain('$t("settings.conversationTextSize")');
+    const page=web("settings/GeneralDisplayPage.svelte");
+    expect(page).toContain('$t("settings.sessionTextSize")');
+    expect(page).toContain('$t("settings.conversationTextSize")');
   });
 
   it("uses 13, 14, 15, and 16px tokens on both reading surfaces",()=>{

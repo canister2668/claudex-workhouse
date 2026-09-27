@@ -15,7 +15,7 @@ const avatarDock=fs.readFileSync(path.join(process.cwd(),"src","web","AgentAvata
 describe("workhouse overview redesign",()=>{
   it("keeps overview and session browsing as distinct, reachable views",()=>{
     expect(app).toContain("let overviewOpen=liveWorkRedesignEnabled()");
-    expect(app).toContain('class:active={overviewOpen} onclick={openOverview}');
+    expect(app).toContain('class:active={!globalOpen&&(overviewOpen)} onclick={openOverview}');
     expect(app).not.toContain('{#if !selected&&!selectedCollaboration&&!codexDetailOpen}\n      <nav class="primary-nav"');
     expect(app).toContain("function closeCurrentDetail()");
     expect(app).not.toContain('["conversation",$t("nav.conversation")]');
@@ -75,7 +75,11 @@ describe("workhouse overview redesign",()=>{
     expect(styles).toContain(".path-tail-ellipsis{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;direction:rtl;text-align:left}");
     expect(conversation).not.toContain('class="process-panel"');
     expect(conversation).toContain('class="provider-quota {quotaTone}"');
-    expect(conversation).toContain("providerQuota?.fiveHour??providerQuota?.sevenDay??null");
+    expect(conversation).toContain("quotaForProviderModel(providerQuota,provider,providerModel)");
+    expect(conversation).toContain("resolvedQuota.quota?.fiveHour??resolvedQuota.quota?.sevenDay??null");
+    expect(conversation).toContain("resolvedQuota.pool.label");
+    expect(app).toContain("providerModel={selected.effectiveModel??selected.requestedModel??selected.metadata?.model??null}");
+    expect(codexSessions).toContain("providerModel={selected?.effectiveModel??selected?.requestedModel??selected?.metadata?.model??null}");
     expect(conversation).toContain('`${$t("quota.weekly")} ${$t("quota.label")}`');
     expect(conversation).not.toContain('class="session-quota');
     expect(contextMeter).toContain("class:context-window-card={open}");

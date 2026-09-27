@@ -114,6 +114,7 @@ export class WorkerHub {
     return new Promise<unknown>((resolve,reject)=>{const timer=setTimeout(()=>{connection.pending.delete(requestId);reject(Object.assign(new Error("Worker command timed out."),{statusCode:504,code:"WORKER_TIMEOUT"}));},timeoutMs);timer.unref?.();connection.pending.set(requestId,{command,resolve,reject,timer});connection.socket.send(JSON.stringify(message));});
   }
   isOnline(hostId:string){const connection=this.connections.get(hostId);return connection?.ready===true&&connection.socket.readyState===1;}
+  hasOnlineConnection(){for(const connection of this.connections.values())if(connection.ready===true&&connection.socket.readyState===1)return true;return false;}
   private async disconnected(connection:Connection){
     if(this.connections.get(connection.hostId)!==connection)return;
     this.connections.delete(connection.hostId);this.rejectPending(connection,new Error("Worker went offline."));

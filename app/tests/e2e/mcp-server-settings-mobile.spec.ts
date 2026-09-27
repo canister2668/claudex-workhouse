@@ -38,8 +38,8 @@ test("external MCP settings fit mobile and save a read-only remote server",async
   const more=page.getByRole("button",{name:"추가 작업",exact:true});
   if(await more.isVisible())await more.click();
   await page.getByRole("button",{name:"설정 열기",exact:true}).click();
-  const settings=page.getByRole("dialog",{name:"설정"});
-  await settings.getByRole("button",{name:"외부 MCP",exact:true}).click();
+  const settings=page.getByRole("region",{name:"설정"});
+  await settings.getByRole("button",{name:"MCP 서버",exact:true}).click();
   await expect(settings.getByRole("heading",{name:"외부 MCP 서버"})).toBeVisible();
   await expect(settings.getByText("Grok은 지원하지 않음",{exact:true})).toBeVisible();
   await settings.getByRole("button",{name:"서버 추가",exact:true}).click();

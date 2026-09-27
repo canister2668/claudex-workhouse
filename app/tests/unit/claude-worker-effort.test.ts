@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import fs from "node:fs";
 import path from "node:path";
 import { spawn } from "node:child_process";
+import {readStreamEvents} from "../../src/server/stream-events.js";
 
 // Drive the built Claude worker with a fake `claude` binary that records the
 // exact argv it was invoked with, and assert the official `--effort` flag is
@@ -37,6 +38,24 @@ function runWorker(effort: string, model = "default", legacy = false,emotionMcpU
 
 
 describe("Claude worker reasoning effort flag", () => {
+  it("waits for CLI exit before completing a parent with earlier child results",async()=>{
+    const root=fs.mkdtempSync(path.join(process.cwd(),".deck-worker-early-result-"));roots.push(root);
+    const jobs=path.join(root,"data","claude-jobs"),statePath=path.join(jobs,"claude_early.json"),fake=path.join(root,"claude-fake.mjs"),gate=path.join(root,"continue"),marker=path.join(root,"early");fs.mkdirSync(jobs,{recursive:true});
+    fs.writeFileSync(fake,`#!/usr/bin/env node\nimport fs from "node:fs";\nconsole.log(JSON.stringify({type:"result",subtype:"success",is_error:false,result:"child result",session_id:"11111111-1111-4111-8111-111111111111"}));\nfs.writeFileSync(${JSON.stringify(marker)},"");\nwhile(!fs.existsSync(${JSON.stringify(gate)}))await new Promise(resolve=>setTimeout(resolve,20));\nconsole.log(JSON.stringify({type:"assistant",message:{content:[{type:"text",text:"parent answer"}]}}));\nconsole.log(JSON.stringify({type:"result",subtype:"success",is_error:false,result:"parent answer"}));\n`);fs.chmodSync(fake,0o700);
+    const child=spawn(process.execPath,[path.resolve("dist-server/claude-worker.js"),statePath,"claude:early",fake,"new",root,"claudex-workhouse:early",":read-only","default","default","default","","work"],{cwd:root,stdio:"ignore",env:{...process.env,CLAUDEX_WORKHOUSE_RUNTIME_PROFILE:"conversation"}});
+    try{
+      const deadline=Date.now()+5000;
+      while(!fs.existsSync(marker)&&Date.now()<deadline)await new Promise(resolve=>setTimeout(resolve,20));
+      expect(fs.existsSync(marker)).toBe(true);
+      await new Promise(resolve=>setTimeout(resolve,150));
+      expect(JSON.parse(fs.readFileSync(statePath,"utf8")).status).toBe("running");
+      expect(readStreamEvents(root,"claude:early").events.some(event=>event.terminal)).toBe(false);
+      fs.writeFileSync(gate,"");
+      await new Promise<void>((resolve,reject)=>{const timer=setTimeout(()=>reject(new Error("Claude worker did not exit")),5000);child.once("close",()=>{clearTimeout(timer);resolve();});});
+      expect(JSON.parse(fs.readFileSync(statePath,"utf8"))).toMatchObject({status:"completed",result:"parent answer"});
+      expect(readStreamEvents(root,"claude:early").events.filter(event=>event.terminal)).toHaveLength(1);
+    }finally{if(child.exitCode===null)child.kill("SIGKILL");}
+  },15000);
   it("forwards --effort when a concrete level is requested", async () => {
     const { argv } = await runWorker("xhigh");
     const i = argv.indexOf("--effort");

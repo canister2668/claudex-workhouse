@@ -8,7 +8,7 @@ import {beginWorkerEmotion,updateWorkerEmotion} from "./worker-emotion.js";
 import {automationLevel} from "./automation-level.js";
 import {executionPolicyTurnInstructions} from "./automation-level.js";
 import {delegationDeveloperInstructions,normalizeDelegationSettings} from "./delegation-settings.js";
-import {classifyGeminiCliError,geminiApprovalMode,geminiCliArguments,geminiCliExitFailure,geminiShellAvailable,resolveGeminiSessionFile} from "./gemini-cli-runtime.js";
+import {geminiApprovalMode,geminiCliArguments,geminiCliExitFailure,geminiCliResultFailure,geminiShellAvailable,resolveGeminiSessionFile} from "./gemini-cli-runtime.js";
 import {geminiContextUsage,geminiModelBreakdown,geminiOutputUsage,geminiToolEndEvent,geminiToolShape,geminiToolStartEvent,geminiToolSummary,geminiUsage,geminiWorkerActivity,type GeminiStreamEvent} from "./gemini-cli-events.js";
 
 /**
@@ -225,9 +225,9 @@ const consume=(line:string)=>{
       }
     }
     if(String(value.status??"")==="error"){
-      const message=String(value.error?.message??"Gemini CLI failed without a message.");
-      appendLog(message);
-      streamFailure=classifyGeminiCliError(message);
+      const message=typeof value.error?.message==="string"?value.error.message:"";
+      if(message)appendLog(message);
+      streamFailure=geminiCliResultFailure(message,state.log);
     }
   }
   state.updatedAt=new Date().toISOString();

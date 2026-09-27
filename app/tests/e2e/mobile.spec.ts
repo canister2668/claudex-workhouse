@@ -194,12 +194,12 @@ test("mobile task list, details, and PWA shell fit the viewport", async ({ page 
     await expect(floatingAvatarSide).toHaveClass(/collapsed/);
   }
   await expect(page.locator(".task-list > .task-card").first().locator("strong").first()).toHaveText("External Codex task fixture");
-  const engineTabs=page.getByRole("navigation",{name:"엔진 필터"});const primaryNav=page.getByRole("navigation",{name:"주요 화면"});await expect(engineTabs.getByRole("button",{name:"대화",exact:true})).toHaveCount(0);await expect(page.getByRole("button",{name:/linked conversation fixture/})).toHaveCount(0);await expect(page.getByRole("button",{name:/Claude와 Codex 모바일 협업/})).toHaveCount(0);await engineTabs.getByRole("button",{name:"협업 작업",exact:true}).click();await expect(page.getByRole("button",{name:/Claude와 Codex 모바일 협업/})).toBeVisible();await expect(page.getByText("Long review provider session",{exact:true})).toHaveCount(0);await engineTabs.getByRole("button",{name:"연결 세션",exact:true}).click();await expect(page.getByRole("button",{name:/Codex linked conversation fixture/})).toBeVisible();await expect(page.getByRole("button",{name:/Claude linked conversation fixture/})).toBeVisible();await expect(page.getByText("Long review provider session",{exact:true})).toHaveCount(0);await expect(page.locator(".task-list > .task-card")).toHaveCount(2);await engineTabs.getByRole("button",{name:"Codex",exact:true}).click();await expect(page.getByText("Codex linked conversation fixture",{exact:true})).toHaveCount(0);await engineTabs.getByRole("button",{name:"Claude",exact:true}).click();await expect(page.getByText("Claude linked conversation fixture",{exact:true})).toHaveCount(0);await primaryNav.getByRole("button",{name:"대화",exact:true}).click();
+  const engineTabs=page.getByRole("navigation",{name:"엔진 필터"});const primaryNav=page.getByRole("navigation",{name:"주요 화면"});const openFilters=async()=>{const trigger=page.getByRole("button",{name:"필터",exact:true});if((await trigger.getAttribute("aria-expanded"))!=="true")await trigger.click();};await expect(engineTabs.getByRole("button",{name:"대화",exact:true})).toHaveCount(0);await expect(page.getByRole("button",{name:/linked conversation fixture/})).toHaveCount(0);await expect(page.getByRole("button",{name:/Claude와 Codex 모바일 협업/})).toHaveCount(0);await engineTabs.getByRole("button",{name:"협업 작업",exact:true}).click();await expect(page.getByRole("button",{name:/Claude와 Codex 모바일 협업/})).toBeVisible();await expect(page.getByText("Long review provider session",{exact:true})).toHaveCount(0);await engineTabs.getByRole("button",{name:"연결 세션",exact:true}).click();await expect(page.getByRole("button",{name:/Codex linked conversation fixture/})).toBeVisible();await expect(page.getByRole("button",{name:/Claude linked conversation fixture/})).toBeVisible();await expect(page.getByText("Long review provider session",{exact:true})).toHaveCount(0);await expect(page.locator(".task-list > .task-card")).toHaveCount(2);await engineTabs.getByRole("button",{name:"Codex",exact:true}).click();await expect(page.getByText("Codex linked conversation fixture",{exact:true})).toHaveCount(0);await engineTabs.getByRole("button",{name:"Claude",exact:true}).click();await expect(page.getByText("Claude linked conversation fixture",{exact:true})).toHaveCount(0);await primaryNav.getByRole("button",{name:"대화",exact:true}).click();
   await expect(engineTabs).toHaveCount(0);await expect(page.getByRole("button",{name:/별도 대화 탭 fixture/})).toBeVisible();await expect(page.getByRole("button",{name:/두 번째 대화 삭제 fixture/})).toBeVisible();await expect(page.getByRole("button",{name:/Claude와 Codex 모바일 협업/})).toHaveCount(0);await expect(page.locator(".task-list > .task-card:not(.collaboration-card)")).toHaveCount(0);
   await page.getByRole("button",{name:"작업 생성"}).click();const conversationCreate=page.getByRole("dialog",{name:"새 대화"});await expect(conversationCreate.getByRole("button",{name:"대화",exact:true})).toHaveClass(/active/);const toneRow=(provider:string)=>conversationCreate.locator(`.cwho[data-provider="${provider}"] .cpick-field`);const toneSheet=()=>page.getByRole("dialog",{name:"Codex 말투"});await expect(toneRow("codex")).toContainText("장난기 많은 학원물 친구");await expect(toneRow("codex")).toContainText("글로벌");await expect(toneRow("claude")).toContainText("츤데레");await expect(toneRow("claude")).toContainText("글로벌");await toneRow("codex").click();await expect(toneSheet().getByRole("button",{name:/글로벌 설정 그대로/})).toHaveAttribute("aria-pressed","true");await toneSheet().getByRole("button",{name:"츤데레",exact:true}).click();await toneSheet().getByRole("button",{name:"완료",exact:true}).click();/* One participant overriding its tone must not move the others off the global preset. */await expect(toneRow("codex")).toContainText("츤데레");await expect(toneRow("codex")).toContainText("이 세션만");await expect(toneRow("claude")).toContainText("츤데레");await expect(toneRow("claude")).toContainText("글로벌");await toneRow("codex").click();await toneSheet().getByRole("button",{name:/글로벌 설정 그대로/}).click();await toneSheet().getByRole("button",{name:"완료",exact:true}).click();await expect(toneRow("codex")).toContainText("장난기 많은 학원물 친구");await expect(toneRow("codex")).toContainText("글로벌");await conversationCreate.getByRole("button",{name:"닫기"}).click();
-  await page.getByRole("button",{name:"여러 개 삭제"}).click();await page.getByRole("button",{name:/별도 대화 탭 fixture/}).click();await page.getByRole("button",{name:/두 번째 대화 삭제 fixture/}).click();await page.getByRole("button",{name:"삭제",exact:true}).click();const conversationDeleteDialog=page.getByRole("alertdialog",{name:/대화 세션 2개 영구 삭제/});await expect(conversationDeleteDialog).toContainText("연결된 Codex·Claude 세션");await conversationDeleteDialog.getByRole("checkbox").check();await conversationDeleteDialog.getByRole("button",{name:"2개 영구 삭제"}).click();await expect.poll(()=>conversationDeleteRequests.length).toBe(2);
+  await page.getByRole("button",{name:"선택",exact:true}).click();await page.getByRole("button",{name:/별도 대화 탭 fixture/}).click();await page.getByRole("button",{name:/두 번째 대화 삭제 fixture/}).click();await page.getByRole("button",{name:"삭제",exact:true}).click();const conversationDeleteDialog=page.getByRole("alertdialog",{name:/대화 세션 2개 영구 삭제/});await expect(conversationDeleteDialog).toContainText("연결된 Codex·Claude 세션");await conversationDeleteDialog.getByRole("checkbox").check();await conversationDeleteDialog.getByRole("button",{name:"2개 영구 삭제"}).click();await expect.poll(()=>conversationDeleteRequests.length).toBe(2);
   await primaryNav.getByRole("button",{name:"세션",exact:true}).click();
-  await engineTabs.getByRole("button",{name:"협업 작업",exact:true}).click();
+  await openFilters();await engineTabs.getByRole("button",{name:"협업 작업",exact:true}).click();
   await page.getByRole("button",{name:/Claude와 Codex 모바일 협업/}).click();
   await expect(page.getByRole("region",{name:"협업 타임라인"})).toBeVisible();
   await expect(page.locator(".participant-block")).toHaveCount(2);
@@ -215,14 +215,14 @@ test("mobile task list, details, and PWA shell fit the viewport", async ({ page 
   await expectDefaultHeading(".codex-detail .task-heading");
   await expectDefaultHeadingTitle(".codex-detail .task-heading","Codex mobile fixture");
   await primaryNav.getByRole("button",{name:"세션",exact:true}).click();
-  await engineTabs.getByRole("button",{name:"전체",exact:true}).click();
+  await openFilters();await engineTabs.getByRole("button",{name:"전체",exact:true}).click();
   await page.getByRole("button",{name:"Codex 상태 및 최근 세션"}).click();
   const avatarSessions=page.getByRole("dialog",{name:"Codex 아바타 및 세션"});await avatarSessions.getByRole("button",{name:/External Codex task fixture/}).click();
   await expectDefaultHeading(".codex-detail .task-heading");
   await expectDefaultHeadingTitle(".codex-detail .task-heading","External Codex task fixture");
   await primaryNav.getByRole("button",{name:"세션",exact:true}).click();
-  await engineTabs.getByRole("button",{name:"전체",exact:true}).click();
-  await page.getByRole("button",{name:"여러 개 삭제"}).click();
+  await openFilters();await engineTabs.getByRole("button",{name:"전체",exact:true}).click();
+  await page.getByRole("button",{name:"선택",exact:true}).click();
   const allDeleteCodex=page.locator(".task-list > .task-card").filter({hasText:"All delete Codex fixture"});
   const allDeleteClaude=page.locator(".task-list > .task-card").filter({hasText:"All delete Claude fixture"});
   await allDeleteCodex.click();await expect(allDeleteCodex).toHaveAttribute("aria-pressed","true");
@@ -230,11 +230,13 @@ test("mobile task list, details, and PWA shell fit the viewport", async ({ page 
   await page.getByRole("button",{name:"삭제",exact:true}).click();
   const allDeleteDialog=page.getByRole("alertdialog",{name:/전체 탭 세션 2개 영구 삭제/});await allDeleteDialog.getByRole("checkbox").check();await allDeleteDialog.getByRole("button",{name:"2개 영구 삭제"}).click();
   await expect.poll(()=>taskDeleteRequests.length).toBe(2);
-  await page.getByRole("navigation",{name:"엔진 필터"}).getByRole("button",{name:"Claude",exact:true}).click();
+  await openFilters();await page.getByRole("navigation",{name:"엔진 필터"}).getByRole("button",{name:"Claude",exact:true}).click();
   await expect(page.getByRole("button",{name:/Claude bulk fixture one/})).toBeVisible();
-  await expect(page.locator(".task-card.active-task").filter({hasText:"Claude active assist fixture"})).toContainText("연결 정상");
-  await page.getByRole("button",{name:"작업 생성"}).click();const claudeCreate=page.getByRole("dialog",{name:"새 작업"});await expect(claudeCreate.getByRole("button",{name:"단독 작업",exact:true})).toHaveClass(/active/);await expect(claudeCreate.getByRole("group",{name:"엔진",exact:true}).getByRole("button",{name:"Claude",exact:true})).toHaveClass(/active/);await expect(claudeCreate.getByRole("button",{name:/Opus|Fable|Sonnet|Haiku|기본/}).first()).toBeVisible();await claudeCreate.getByLabel("요청",{exact:true}).evaluate((target)=>{const transfer=new DataTransfer();transfer.items.add(new File([new Uint8Array([137,80,78,71])],"image.png",{type:"image/png"}));target.dispatchEvent(new ClipboardEvent("paste",{bubbles:true,cancelable:true,clipboardData:transfer}));});await expect(claudeCreate.getByText("clipboard-test.png",{exact:true})).toBeVisible();await claudeCreate.getByRole("button",{name:"닫기"}).click();
-  await page.getByRole("button",{name:"여러 개 삭제"}).click();
+  // A healthy transport shows no "연결 정상" word next to the live indicator; only the phase does.
+  await expect(page.locator(".task-card.active-task").filter({hasText:"Claude active assist fixture"}).locator(".heartbeat-bar")).toBeVisible();
+  await expect(page.locator(".task-card.active-task").filter({hasText:"Claude active assist fixture"})).not.toContainText("연결 정상");
+  await page.getByRole("button",{name:"작업 생성"}).click();const claudeCreate=page.getByRole("dialog",{name:"새 작업"});await expect(claudeCreate.getByRole("button",{name:"단독 작업",exact:true})).toHaveClass(/active/);await expect(claudeCreate.getByLabel("엔진",{exact:true})).toHaveValue("claude");await expect(claudeCreate.getByLabel("모델",{exact:true}).locator("option:checked")).toHaveText(/Opus|Fable|Sonnet|Haiku|기본/);await claudeCreate.getByLabel("요청",{exact:true}).evaluate((target)=>{const transfer=new DataTransfer();transfer.items.add(new File([new Uint8Array([137,80,78,71])],"image.png",{type:"image/png"}));target.dispatchEvent(new ClipboardEvent("paste",{bubbles:true,cancelable:true,clipboardData:transfer}));});await expect(claudeCreate.getByText("clipboard-test.png",{exact:true})).toBeVisible();await claudeCreate.getByRole("button",{name:"닫기"}).click();
+  await page.getByRole("button",{name:"선택",exact:true}).click();
   await page.getByRole("button",{name:/Claude bulk fixture one/}).click();await page.getByRole("button",{name:/Claude bulk fixture two/}).click();await page.getByRole("button",{name:"삭제",exact:true}).click();
   const claudeDeleteDialog=page.getByRole("alertdialog",{name:/Claude 세션 2개 영구 삭제/});await claudeDeleteDialog.getByRole("checkbox").check();await claudeDeleteDialog.getByRole("button",{name:"2개 영구 삭제"}).click();
   await expect.poll(()=>taskDeleteRequests.length).toBe(4);
@@ -266,7 +268,7 @@ test("mobile task list, details, and PWA shell fit the viewport", async ({ page 
   await page.evaluate(()=>new Promise<void>(resolve=>requestAnimationFrame(()=>requestAnimationFrame(()=>resolve()))));
   const brandBeforeDetail=await page.locator(".brand strong").boundingBox();
   await page.getByRole("navigation",{name:"엔진 필터"}).getByRole("button",{name:"Codex",exact:true}).click();
-  await page.getByRole("button",{name:"작업 생성"}).click();const codexCreate=page.getByRole("dialog",{name:"새 작업"});await expect(codexCreate.getByRole("button",{name:"단독 작업",exact:true})).toHaveClass(/active/);await expect(codexCreate.getByRole("group",{name:"엔진",exact:true}).getByRole("button",{name:"Codex",exact:true})).toHaveClass(/active/);await expect(codexCreate.getByRole("button",{name:/^GPT(?: |-|$)/}).first()).toBeVisible();await codexCreate.getByRole("button",{name:"닫기"}).click();
+  await page.getByRole("button",{name:"작업 생성"}).click();const codexCreate=page.getByRole("dialog",{name:"새 작업"});await expect(codexCreate.getByRole("button",{name:"단독 작업",exact:true})).toHaveClass(/active/);await expect(codexCreate.getByLabel("엔진",{exact:true})).toHaveValue("codex");await expect(codexCreate.getByLabel("모델",{exact:true}).locator("option:checked")).toHaveText(/^GPT(?: |-|$)/);await codexCreate.getByRole("button",{name:"닫기"}).click();
   await expect(page.getByRole("navigation",{name:"상태 필터"}).getByRole("button",{name:"실행 중",exact:true})).toBeVisible();
   const codexFilters=page.getByRole("region",{name:"세션 상세 필터"});
   await expect(codexFilters).toBeVisible();
@@ -275,7 +277,7 @@ test("mobile task list, details, and PWA shell fit the viewport", async ({ page 
   await expect(page.getByRole("button",{name:/^필터/})).toHaveCount(0);
   await expect.poll(async()=>page.locator(".session-card").count()).toBeGreaterThan(0);
 
-  await page.getByRole("button",{name:"여러 개 삭제"}).click();
+  await page.getByRole("button",{name:"선택",exact:true}).click();
   await expect(page.getByRole("button",{name:/Codex mobile fixture/})).toBeDisabled();
   await page.getByRole("button",{name:/Bulk delete fixture one/}).click();
   await page.getByRole("button",{name:/Bulk delete fixture two/}).click();
@@ -287,7 +289,7 @@ test("mobile task list, details, and PWA shell fit the viewport", async ({ page 
   await expect.poll(()=>bulkDeleteRequests.length).toBe(2);
   await expect(page.getByRole("button",{name:/Bulk delete fixture one/})).toHaveCount(0);
   await expect(page.getByRole("button",{name:/Bulk delete fixture two/})).toHaveCount(0);
-  await expect(page.getByRole("button",{name:"여러 개 삭제"})).toBeVisible();
+  await expect(page.getByRole("button",{name:"선택",exact:true})).toBeVisible();
   await page.getByRole("button",{name:/Codex mobile fixture/}).click();
   await expectDefaultHeading(".codex-detail .task-heading");
   const codexHistoryControl=page.locator(".codex-detail .running-history-control");
@@ -371,15 +373,18 @@ test("mobile task list, details, and PWA shell fit the viewport", async ({ page 
   const moreActions=page.getByRole("button",{name:"추가 작업"});
   if(await moreActions.isVisible())await moreActions.click();
   await page.getByRole("button",{name:"설정 열기"}).click();
-  const settings=page.getByRole("dialog",{name:"설정"});
+  const settings=page.getByRole("region",{name:"설정"});
   await expect(settings.getByRole("button",{name:"개요",exact:true})).toHaveCount(0);
-  await expect(settings.getByRole("button",{name:"서버 및 Worker",exact:true})).toBeVisible();
-  await settings.getByRole("button",{name:"서버 및 Worker",exact:true}).click();
+  await expect(settings.getByRole("button",{name:"호스트·Worker",exact:true})).toBeVisible();
+  await settings.getByRole("button",{name:"호스트·Worker",exact:true}).click();
   await expect(settings.getByRole("heading",{name:"서버 및 실행 장치",exact:true})).toBeVisible();
-  await settings.getByRole("button",{name:"계정",exact:true}).click();
-  await expect(settings.getByText("공급자 연결",{exact:true}).first()).toBeVisible();
-  await expect(settings.getByText("Codex",{exact:true})).toBeVisible();
-  await expect(settings.getByText("Claude Code",{exact:true})).toBeVisible();
+  // Provider accounts live on each agent page under 계정·연결.
+  const settingsNav=settings.getByRole("navigation",{name:"설정"});
+  await settingsNav.getByRole("button",{name:"Claude",exact:true}).click();
+  await settings.getByRole("button",{name:"계정·연결",exact:true}).click();
+  await expect(settings.getByText("Claude Code",{exact:true}).first()).toBeVisible();
+  await settingsNav.getByRole("button",{name:"Codex",exact:true}).click();
+  await expect(settings.locator(".provider-connection-card").getByText("Codex",{exact:true})).toBeVisible();
   await expect(settings.getByRole("navigation",{name:"설정"})).toBeVisible();
   const originalViewport=page.viewportSize()!;
   await page.setViewportSize({width:1100,height:900});
@@ -405,9 +410,9 @@ test("mobile task list, details, and PWA shell fit the viewport", async ({ page 
   await expect(settings.getByText("이 토큰으로 조회되는 저장소가 없습니다.")).toBeVisible();
   await expect(settings.getByText("octocat · HTTPS · 이 호스트에서 사용 중",{exact:true})).toBeVisible();
   await page.setViewportSize(originalViewport);
-  await settings.getByRole("button",{name:"작업공간",exact:true}).click();
+  await settings.getByRole("button",{name:"작업공간·프로젝트",exact:true}).click();
   await expect(settings.getByRole("heading",{name:"프로젝트",exact:true})).toBeVisible();
-  await settings.getByRole("button",{name:"시스템",exact:true}).click();
+  await settings.getByRole("button",{name:"시스템·업데이트",exact:true}).click();
   await expect(settings.getByRole("heading",{name:"Claudex Workhouse 업데이트",exact:true})).toBeVisible();
   await expect(settings.getByText("애플리케이션 업데이트는 Provider 런타임 업데이트와 별도로 적용됩니다.",{exact:true})).toBeVisible();
   const installedVersion=settings.locator(".application-update-current");
@@ -430,24 +435,22 @@ test("mobile task list, details, and PWA shell fit the viewport", async ({ page 
   // The dialog reopens on the session type used last, so pick the single-task
   // tab before asserting anything that only exists there.
   await createDialog.locator(".create-kinds").getByRole("button",{name:"단독 작업",exact:true}).click();
-  // Work location collapses to a summary row and expands in place.
-  await expect(createDialog.locator("#create-workspace .cpick")).toBeVisible();
-  await createDialog.locator("#create-workspace .cpick").click();
+  // The run is one sentence of dropdown tokens: agent·model, workspace, automation.
+  await expect(createDialog.locator("#create-workspace")).toBeVisible();
+  await expect(createDialog.locator(".host-choice-grid")).toHaveCount(0);
+  // Everything else folds under 고급, including the execution host grid.
+  await createDialog.locator("summary",{hasText:"고급"}).click();
   await expect(createDialog.locator(".host-choice-grid")).toBeVisible();
-  await expect(createDialog.locator(".workspace-choice-grid")).toBeVisible();
-  await createDialog.locator("#create-workspace .cpick").click();
-  // Work mode and automation are inline selections now: no popover, and the
-  // chosen value is the filled one.
-  const createMode=createDialog.locator("#create-workmode .sel");
-  await expect(createMode.getByRole("button",{name:"바로 실행",exact:true})).toHaveClass(/active/);
-  await createMode.getByRole("button",{name:"계획 먼저",exact:true}).click();
-  await expect(createMode.getByRole("button",{name:"계획 먼저",exact:true})).toHaveClass(/active/);
-  const createAutomation=createDialog.locator("#create-automation .cf").last().locator(".sel");
+  const planFirst=createDialog.getByRole("switch",{name:"계획 먼저",exact:true});
+  await expect(planFirst).toHaveAttribute("aria-checked","false");
+  await planFirst.click();
+  await expect(planFirst).toHaveAttribute("aria-checked","true");
+  const createAutomation=createDialog.getByLabel("자동화 수준",{exact:true});
   // Planning first is a read-only mode, so the automation level follows it.
-  await expect(createAutomation.getByRole("button",{name:"읽기 전용",exact:true})).toHaveClass(/active/);
-  await createMode.getByRole("button",{name:"바로 실행",exact:true}).click();
-  await createAutomation.getByRole("button",{name:"자동 실행",exact:true}).click();
-  await expect(createAutomation.getByRole("button",{name:"자동 실행",exact:true})).toHaveClass(/active/);
+  await expect(createAutomation).toHaveValue("read");
+  await planFirst.click();
+  await createAutomation.selectOption("auto");
+  await expect(createAutomation).toHaveValue("auto");
   await page.getByRole("dialog").getByRole("button",{name:"대화",exact:true}).click();
   await expect(page.getByText("대화 모드 참가자는 항상 읽기 전용입니다. 아래 리뷰 도구를 켜도 파일 수정 권한은 부여되지 않습니다.")).toBeVisible();
   const conversationDialog=page.getByRole("dialog");

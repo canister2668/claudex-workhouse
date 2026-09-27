@@ -56,3 +56,6 @@ __pycache__/
 /release-files/
 /artifacts/
 /answer-card-folding-mockup.html
+
+# Local secrets (reverse-proxy auth secret, MCP credentials, ...)
+/secrets/

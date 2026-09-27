@@ -1,9 +1,9 @@
 import{expect,test}from"@playwright/test";
 
 for(const fixture of[
-  {locale:"ko",more:"추가 작업",tab:"정보 및 라이선스",display:"화면·알림",sourceLabel:"현재 버전의 소스 코드",status:"수정본",summary:"Claudex Workhouse는 AGPL-3.0-only 라이선스를 사용합니다.",guide:"한국어 라이선스 안내",localizedLicense:"LICENSE.ko.md"},
-  {locale:"en",more:"More actions",tab:"About & Licenses",display:"Display & notifications",sourceLabel:"Source code for this version",status:"Modified",summary:"Claudex Workhouse is licensed under AGPL-3.0-only.",guide:"English license guide",localizedLicense:"LICENSE"},
-  {locale:"ja",more:"その他の操作",tab:"情報とライセンス",display:"表示・通知",sourceLabel:"このバージョンのソースコード",status:"変更版",summary:"Claudex Workhouse は AGPL-3.0-only でライセンスされています。",guide:"日本語ライセンス案内",localizedLicense:"LICENSE.ja.md"},
+  {locale:"ko",more:"추가 작업",tab:"정보·라이선스",display:"일반·화면",sourceLabel:"현재 버전의 소스 코드",status:"수정본",summary:"Claudex Workhouse는 AGPL-3.0-only 라이선스를 사용합니다.",guide:"한국어 라이선스 안내",localizedLicense:"LICENSE.ko.md"},
+  {locale:"en",more:"More actions",tab:"About & licenses",display:"General & display",sourceLabel:"Source code for this version",status:"Modified",summary:"Claudex Workhouse is licensed under AGPL-3.0-only.",guide:"English license guide",localizedLicense:"LICENSE"},
+  {locale:"ja",more:"その他の操作",tab:"情報・ライセンス",display:"一般・表示",sourceLabel:"このバージョンのソースコード",status:"変更版",summary:"Claudex Workhouse は AGPL-3.0-only でライセンスされています。",guide:"日本語ライセンス案内",localizedLicense:"LICENSE.ja.md"},
 ]){
   test(`${fixture.locale} modified-build legal notices remain directly accessible on mobile`,async({page})=>{
     await page.addInitScript(locale=>{localStorage.setItem("claudex-ui-locale",locale);class SilentEventSource{constructor(public url:string){}addEventListener(){}close(){}}Object.defineProperty(globalThis,"EventSource",{value:SilentEventSource,configurable:true});},fixture.locale);

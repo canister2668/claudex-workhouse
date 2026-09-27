@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import { persistAsyncUserInput } from "./async-user-input.js";
 import fs from "node:fs";
 import path from "node:path";
 import type { FastifyInstance } from "fastify";
@@ -8,6 +9,7 @@ import { z } from "zod";
 import type { DeckDatabase } from "./db/client.js";
 import { assertAutomationSupported, assertAutomationWithinSource, automationLevel, permissionForAutomation, type AutomationLevel } from "./automation-level.js";
 import { normalizeDelegationSettings } from "./delegation-settings.js";
+import { resolveManagedModel, type ManagedModelCatalog } from "./managed-provider-models.js";
 import type { CollaborationOrchestrator } from "./collaboration/orchestrator.js";
 import type { ActiveSourceSnapshot } from "./collaboration/orchestrator.js";
 import { ProviderResultAdapter } from "./collaboration/provider-result.js";
@@ -31,7 +33,7 @@ function delay(ms:number){return new Promise(resolve=>setTimeout(resolve,ms));}
 
 export type ManagedProviderSnapshot={
   provider:ProviderId;ownership:"claudex-workhouse";source:"claudex-workhouse";workspace:string;workspaceId:string;
-  collaborationId:string|null;taskId:string;threadId:string|null;status:string;result:string|null;error:string|null;
+  collaborationId:string|null;taskId:string;threadId:string|null;status:string;result:string|null;error:string|null;model:string|null;
 };
 
 type RefreshTask=(task:DeckTask)=>Promise<DeckTask>;
@@ -41,7 +43,13 @@ type ProviderExecutionGate=(provider:ProviderId,model?:string|null)=>Promise<voi
 export class ManagedProviderBridge{
   private owner=crypto.randomUUID();
   private results=new ProviderResultAdapter();
-  constructor(private db:DeckDatabase,private collaboration:CollaborationOrchestrator,private refreshTask:RefreshTask,private resumeTask:ResumeTask,private beforeProviderExecution:ProviderExecutionGate=async()=>{}){}
+  constructor(private db:DeckDatabase,private collaboration:CollaborationOrchestrator,private refreshTask:RefreshTask,private resumeTask:ResumeTask,private beforeProviderExecution:ProviderExecutionGate=async()=>{},private modelCatalog?:()=>Promise<ManagedModelCatalog>){}
+
+  async models(input:{provider:ProviderId;model?:string}){
+    if(!this.modelCatalog)throw new Error("Managed model catalog is unavailable; no model was selected.");
+    const catalog=await this.modelCatalog(),delegation=normalizeDelegationSettings((await this.db.getSystemSetting("delegation.launch-modes"))?.value)[input.provider];
+    return{provider:input.provider,source:"global-enabled-catalog",updatedAt:catalog.updatedAt,models:catalog.settings[input.provider].models,configuredModel:delegation.model,reasoningEffort:delegation.reasoningEffort,launchMode:delegation.launchMode,resolvedModel:input.model?resolveManagedModel(catalog.settings,input.provider,input.model):null,availability:"Enabled configuration, not a provider authentication or execution probe."};
+  }
 
   private async restoreLegacyIdentity(task:DeckTask){
     if(task.workspaceId){const stored=await this.db.getWorkspace(task.workspaceId);if(stored&&!stored.archivedAt)return task;task={...task,workspaceId:null};}
@@ -95,7 +103,7 @@ export class ManagedProviderBridge{
 
   private async collaborationSnapshot(source:DeckTask,collaborationId:string,refresh=true):Promise<ManagedProviderSnapshot|null>{
     const detail=await this.collaboration.detail(collaborationId),session=detail.session as CollaborationSession;
-    if(session.mode!=="assist"||!session.sourceTaskId||!await this.sameSourceThread(source,session.sourceTaskId))throw Object.assign(new Error("Managed provider task is outside the current source provider thread scope."),{statusCode:403});
+    if(session.mode!=="assist"||!session.sourceTaskId||!await this.sameOrchestratorScope(source,session.sourceTaskId))throw Object.assign(new Error("Managed provider task is outside the current Claudex Workhouse workspace scope."),{statusCode:403});
     const participants=detail.participants as CollaborationParticipant[],assistant=participants.find(item=>item.id!==session.primaryParticipantId);
     const runs=(detail.runs as CollaborationRun[]).filter(item=>item.participantId===assistant?.id&&item.providerTaskId).sort((a,b)=>b.sequence-a.sequence),run=runs[0];
     if(!assistant||!run?.providerTaskId)return null;
@@ -105,29 +113,39 @@ export class ManagedProviderBridge{
     return this.snapshot(task,session.id);
   }
 
-  private async sameSourceThread(source:DeckTask,sourceTaskId:string){
+  private inOrchestratorScope(source:DeckTask,target:DeckTask){
+    return Boolean(source.owned&&target.owned&&source.ownership==="claudex-workhouse"&&target.ownership==="claudex-workhouse"&&source.source==="claudex-workhouse"&&target.source==="claudex-workhouse"&&source.executionHostId&&source.executionHostId===target.executionHostId&&source.workspaceId&&source.workspaceId===target.workspaceId);
+  }
+
+  private async sameOrchestratorScope(source:DeckTask,sourceTaskId:string){
     if(sourceTaskId===source.id)return true;
     const original=await this.db.getTask(sourceTaskId);
-    const sourceThread=source.providerSessionId??source.threadId,originalThread=original?.providerSessionId??original?.threadId;
-    return Boolean(original&&source.owned&&original.owned&&source.ownership==="claudex-workhouse"&&original.ownership==="claudex-workhouse"&&source.source==="claudex-workhouse"&&original.source==="claudex-workhouse"&&source.provider===original.provider&&sourceThread&&sourceThread===originalThread&&source.executionHostId===original.executionHostId&&source.workspaceId===original.workspaceId);
+    return Boolean(original&&this.inOrchestratorScope(source,original));
+  }
+
+  private async resolveManagedTask(source:DeckTask,reference:string){
+    const exact=await this.db.getTask(reference);
+    if(exact&&this.inOrchestratorScope(source,exact))return exact;
+    if(!source.executionHostId||!source.workspaceId)return null;
+    return this.db.getManagedTaskByReference(reference,source.executionHostId,source.workspaceId);
   }
 
   private async linkedTask(source:DeckTask,taskId:string,refresh=true){
-    let task=await this.db.getTask(taskId);
+    let task=await this.resolveManagedTask(source,taskId);
     let linkedSourceId=typeof task?.metadata?.managedProviderSourceTaskId==="string"?task.metadata.managedProviderSourceTaskId:null;
-    if(task&&task.ownership==="claudex-workhouse"&&task.source==="claudex-workhouse"&&(!linkedSourceId||!await this.sameSourceThread(source,linkedSourceId))&&typeof task.metadata?.collaborationSessionId==="string"){
+    if(task&&(!linkedSourceId||!await this.sameOrchestratorScope(source,linkedSourceId))&&typeof task.metadata?.collaborationSessionId==="string"){
       const session=await this.db.getCollaborationSession(task.metadata.collaborationSessionId) as CollaborationSession|null;
       const runLinked=session?Boolean((await this.db.listCollaborationRuns(session.id)).some((run:CollaborationRun)=>run.providerTaskId===task!.id)):false;
-      if(session?.mode==="assist"&&runLinked&&session.sourceTaskId&&await this.sameSourceThread(source,session.sourceTaskId)){linkedSourceId=session.sourceTaskId;task=await this.db.upsertTask({...task,metadata:{...task.metadata,managedProviderSourceTaskId:linkedSourceId,managedProviderCollaborationId:session.id,managedProviderLinkRecoveredAt:new Date().toISOString()}});}
+      if(session?.mode==="assist"&&runLinked&&session.sourceTaskId&&await this.sameOrchestratorScope(source,session.sourceTaskId)){linkedSourceId=session.sourceTaskId;task=await this.db.upsertTask({...task,metadata:{...task.metadata,managedProviderSourceTaskId:linkedSourceId,managedProviderCollaborationId:session.id,managedProviderLinkRecoveredAt:new Date().toISOString()}});}
     }
-    if(!task||task.ownership!=="claudex-workhouse"||task.source!=="claudex-workhouse"||!linkedSourceId||!await this.sameSourceThread(source,linkedSourceId))throw Object.assign(new Error("Managed provider task not found in the current source provider thread scope."),{statusCode:404});
+    if(!task||!this.inOrchestratorScope(source,task))throw Object.assign(new Error("Managed provider task not found in the current Claudex Workhouse workspace scope."),{statusCode:404});
     if(refresh&&!TERMINAL.has(task.status))task=await this.refreshTask(task).catch(()=>task!);
     return task;
   }
 
   private async snapshot(task:DeckTask,collaborationId:string|null):Promise<ManagedProviderSnapshot>{
     const workspace=task.workspaceId?await this.db.getWorkspace(task.workspaceId):null;
-    return{provider:task.provider,ownership:"claudex-workhouse",source:"claudex-workhouse",workspace:workspace?.displayName??task.projectId,workspaceId:task.workspaceId??"",collaborationId,taskId:task.id,threadId:task.providerSessionId??task.threadId,status:task.status,result:task.result,error:task.error};
+    return{provider:task.provider,ownership:"claudex-workhouse",source:"claudex-workhouse",workspace:workspace?.displayName??task.projectId,workspaceId:task.workspaceId??"",collaborationId,taskId:task.id,threadId:task.providerSessionId??task.threadId,status:task.status,result:task.result,error:task.error,model:task.requestedModel??null};
   }
 
   private resolveSourceSnapshot(source:DeckTask,input:{prompt:string;sourceContent?:string}):ActiveSourceSnapshot{
@@ -138,7 +156,8 @@ export class ManagedProviderBridge{
   }
 
   async create(source:DeckTask,input:{provider:ProviderId;prompt:string;title?:string;sourceContent?:string;automationLevel?:AutomationLevel;model?:string|null;reasoningEffort?:string|null;serviceTier?:"priority"|null;idempotencyKey:string}){
-    await this.beforeProviderExecution(input.provider,input.model);
+    const model=input.model&&input.model!=="default"&&this.modelCatalog?resolveManagedModel((await this.modelCatalog()).settings,input.provider,input.model):input.model;
+    await this.beforeProviderExecution(input.provider,model);
     return this.idempotent(source,"create",input.idempotencyKey,input,async()=>{
       const settings=normalizeDelegationSettings((await this.db.getSystemSetting("delegation.launch-modes").catch(()=>null))?.value);
       if(settings[input.provider].launchMode!=="managed")throw Object.assign(new Error(`${input.provider} delegation is configured for direct execution, not Claudex Workhouse managed execution.`),{statusCode:409,code:"MANAGED_DELEGATION_DISABLED"});
@@ -149,7 +168,7 @@ export class ManagedProviderBridge{
       const sourceAutomation=automationLevel(source.metadata?.automationLevel,source.permissionProfile);
       const targetAutomationLevel=input.automationLevel?assertAutomationWithinSource(input.automationLevel,sourceAutomation):sourceAutomation;
       assertAutomationSupported(input.provider,targetAutomationLevel);
-      const sourceSnapshot=this.resolveSourceSnapshot(source,input),detail=await this.collaboration.createAssist({sourceTask:source,targetProvider:input.provider,executionHostId:source.executionHostId!,workspaceId:source.workspaceId!,title:input.title?.trim()||`${source.title} · ${input.provider} managed task`,prompt:input.prompt,sourceSnapshot,targetAutomationLevel,preserveRequestPaths:true,model:input.model,reasoningEffort:input.reasoningEffort,serviceTier:input.serviceTier});
+      const sourceSnapshot=this.resolveSourceSnapshot(source,input),detail=await this.collaboration.createAssist({sourceTask:source,targetProvider:input.provider,executionHostId:source.executionHostId!,workspaceId:source.workspaceId!,title:input.title?.trim()||`${source.title} · ${input.provider} managed task`,prompt:input.prompt,sourceSnapshot,targetAutomationLevel,preserveRequestPaths:true,model,reasoningEffort:input.reasoningEffort,serviceTier:input.serviceTier});
       const collaborationId=(detail.session as CollaborationSession).id,deadline=Date.now()+20_000;
       let snapshot:ManagedProviderSnapshot|null=null;
       do{snapshot=await this.collaborationSnapshot(source,collaborationId);if(snapshot&&(snapshot.threadId||TERMINAL.has(snapshot.status)))break;await delay(250);}while(Date.now()<deadline);
@@ -210,7 +229,7 @@ function textResult(value:unknown){return{content:[{type:"text" as const,text:JS
 
 export const workspaceInstructionsUpdateToolSchema={markdown:z.string().max(32_768),expectedRevision:z.number().int().min(0),idempotencyKey:z.string().uuid()};
 
-export function registerManagedProviderMcp(app:FastifyInstance,bridge:ManagedProviderBridge,extension?:unknown){
+export function registerManagedProviderMcp(app:FastifyInstance,bridge:ManagedProviderBridge,extension?:unknown,dataRoot?:string){
   const createSchema={provider:providerSchema.describe("Managed target provider. A new task is created even when it matches the source provider."),prompt:z.string().trim().min(1).max(20_000),title:z.string().trim().min(1).max(100).optional(),sourceContent:z.string().trim().min(1).max(20_000).optional(),automationLevel:z.enum(["full","auto","confirm","read"]).optional().describe("Access mode for the managed target. Omit to inherit this source task's effective mode. Any level at or below the source's authority may be selected; a higher one is refused."),model:z.string().trim().min(1).max(120).nullable().optional(),reasoningEffort:z.string().trim().min(1).max(30).nullable().optional(),serviceTier:z.enum(["priority"]).nullable().optional(),idempotencyKey:z.string().uuid()};
   const assertLocal=(ip:string|undefined,headers:Record<string,unknown>)=>{if(headers["cf-ray"]||!isLoopbackAddress(ip))throw Object.assign(new Error("The managed provider MCP endpoint is local-only."),{statusCode:403});};
   const handleManagedProvider=async(request:any,reply:any)=>{
@@ -221,9 +240,14 @@ export function registerManagedProviderMcp(app:FastifyInstance,bridge:ManagedPro
     const server=new McpServer({name:"claudex-workhouse-managed-provider",version:"1.0.0"});
     let extensionOnly=false;
     if(!extensionOnly){
+    server.tool("managed_provider_models","Read the owner's enabled model catalog and configured delegation default for a provider. Call before specifying a model; optionally resolve an exact ID, display name, or unambiguous Claude family/version without guessing. This does not probe provider authentication, change settings, or create a task.",{provider:providerSchema,model:z.string().trim().min(1).max(120).optional()},{readOnlyHint:true,destructiveHint:false,idempotentHint:true,openWorldHint:false},async input=>textResult(await bridge.models(input)));
+    if(dataRoot)server.tool("request_user_input_async","Show the user a choice card or a free-text question in this session. Available for every provider. Continue independent work after calling; the submitted answer is queued as the next user message. Do not wait indefinitely inside the current turn for a queued answer. A selected option is not automatically submitted. Reuse the idempotency key if retrying the same question.",{questions:z.array(z.object({title:z.string().trim().min(1).max(1000),options:z.array(z.string().trim().min(1).max(120)).max(12).optional()})).min(1).max(3),idempotencyKey:z.string().uuid()},{readOnlyHint:false,destructiveHint:false,idempotentHint:true,openWorldHint:false},async input=>{
+      const card=persistAsyncUserInput(dataRoot,source,{id:input.idempotencyKey,questions:input.questions});
+      return textResult({accepted:true,requestId:card.id,delivery:"next-user-message"});
+    });
     server.tool("managed_provider_task_create","Create a separately visible, persistent Claudex Workhouse-managed session for the explicitly named target provider and model. Set automationLevel to choose the target's access mode: read for analysis or review, full/auto for implementation. Omit it and the target inherits this source task's effective mode, including full-auto when active here; a level above this source task's own authority is refused. Several managed sessions may run against the same workspace at once, including several writers, so an existing writer never blocks creation. Its execution deadline is managed independently by Claudex Workhouse; use get/wait to observe it without shortening that deadline.",createSchema,{readOnlyHint:false,destructiveHint:false,idempotentHint:true,openWorldHint:false},async input=>textResult(await bridge.create(source,input)));
-    server.tool("managed_provider_task_get","Get a managed provider task created by this Claudex Workhouse source provider thread.",{taskId:z.string().min(3).max(200)},{readOnlyHint:true,destructiveHint:false,idempotentHint:true,openWorldHint:false},async input=>textResult(await bridge.get(source,input)));
-    server.tool("managed_provider_task_wait","Observe a managed provider task from this source provider thread for up to two minutes. A running result only means this observation ended; it does not stop, fail, or shorten the persistent task.",{taskId:z.string().min(3).max(200),timeoutMs:z.number().int().min(1000).max(120_000).optional()},{readOnlyHint:true,destructiveHint:false,idempotentHint:true,openWorldHint:false},async input=>textResult(await bridge.wait(source,input)));
+    server.tool("managed_provider_task_get","Get a Claudex Workhouse-owned provider task in the current execution host and Workspace. The reference may be a Workhouse task ID, provider job ID, or provider thread ID.",{taskId:z.string().min(3).max(200)},{readOnlyHint:true,destructiveHint:false,idempotentHint:true,openWorldHint:false},async input=>textResult(await bridge.get(source,input)));
+    server.tool("managed_provider_task_wait","Observe a Claudex Workhouse-owned provider task in the current execution host and Workspace for up to two minutes. A running result only means this observation ended; it does not stop, fail, or shorten the persistent task.",{taskId:z.string().min(3).max(200),timeoutMs:z.number().int().min(1000).max(120_000).optional()},{readOnlyHint:true,destructiveHint:false,idempotentHint:true,openWorldHint:false},async input=>textResult(await bridge.wait(source,input)));
     server.tool("managed_provider_task_resume","Send a follow-up in the confirmed managed provider thread and keep the new turn under Claudex Workhouse ownership.",{taskId:z.string().min(3).max(200),prompt:z.string().trim().min(1).max(20_000),idempotencyKey:z.string().uuid()},{readOnlyHint:false,destructiveHint:false,idempotentHint:true,openWorldHint:false},async input=>textResult(await bridge.resume(source,input)));
     server.tool("workspace_instructions_read","Read the managed Markdown settings for the workspace assigned to the current task; the target workspace is fixed and cannot be selected. Activation, sources, and completion policy remain owner-only. Updates apply to the next task, while the current session snapshot remains unchanged.",{}, {readOnlyHint:true,destructiveHint:false,idempotentHint:true,openWorldHint:false},async()=>textResult(await bridge.readInstructions(source)));
     server.tool("workspace_instructions_update","Update only the managed Markdown for the workspace assigned to the current task; the target workspace is fixed and cannot be selected. Activation, sources, completion policy, and agent edit permission remain owner-only. The change applies to the next task, while the current session snapshot remains unchanged.",workspaceInstructionsUpdateToolSchema,{readOnlyHint:false,destructiveHint:false,idempotentHint:true,openWorldHint:false},async input=>textResult(await bridge.updateInstructions(source,input)));

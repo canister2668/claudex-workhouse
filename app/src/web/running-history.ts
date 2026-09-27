@@ -26,6 +26,17 @@ export function recentRunningConversationEvents(events:AgentEvent[],includeHisto
   if(turns.length<2)return events;
   const active=turns.at(-1)!;
   if(!includeHistory)return active;
-  const previous=turns.slice(0,-1).filter(hasAssistantOutput).slice(-Math.max(0,limit));
-  return [...previous.flat(),...active];
+  const previous=turns.slice(0,-1),budget=Math.max(0,limit);
+  if(!budget)return active;
+  // The budget counts answered turns, but the retained window stays contiguous.
+  // Stopped, interrupted and queued-send-now turns reach the transcript with a
+  // request and no final answer; filtering them out erased the turn directly
+  // above the running one — exactly the request the user had just sent.
+  const answered=previous.map((turn,index)=>hasAssistantOutput(turn)?index:-1).filter(index=>index>=0);
+  const start=answered.length>budget
+    ?answered.at(-budget)!
+    :answered.length
+      ?answered[0]!
+      :Math.max(0,previous.length-budget);
+  return [...previous.slice(start).flat(),...active];
 }

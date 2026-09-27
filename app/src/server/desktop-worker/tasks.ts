@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import { listAsyncUserInputs } from "../async-user-input.js";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -83,7 +84,7 @@ export class RemoteTaskManager {
     if(command==="provider.task.status")return this.status(task);
     if(command==="provider.approvals.list")return{approvals:task.provider==="codex"?listPendingApprovals(task.stateFile):[]};
     if(command==="provider.approval.respond")return{accepted:true,approval:submitApprovalDecision(task.stateFile,String(payload.approvalId??""),String(payload.decision??"") as ApprovalDecision)};
-    if(command==="provider.userInput.list")return{requests:task.provider==="codex"?listPendingUserInputs(task.stateFile):[]};
+    if(command==="provider.userInput.list")return{requests:[...(task.provider==="codex"?listPendingUserInputs(task.stateFile):[]),...listAsyncUserInputs(this.home,task.id)]};
     if(command==="provider.userInput.respond")return{accepted:true,request:submitUserInput(task.stateFile,String(payload.requestId??""),payload.answers??{})};
     if(command==="provider.task.stop")return this.stop(task);
     if(command==="provider.session.delete")return this.deleteSession(task,payload);

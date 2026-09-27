@@ -26,6 +26,41 @@ if ($null -eq $portableLauncher) {
   throw 'Portable ZIP does not contain Claudex Workhouse.exe.'
 }
 
+function Assert-PortablePayloadManifest([string]$PortableFolder) {
+  $currentFile = Join-Path $PortableFolder 'current.json'
+  $manifestFile = Join-Path $PortableFolder 'payload-manifest.json'
+  $current = Get-Content -LiteralPath $currentFile -Raw | ConvertFrom-Json
+  $manifest = Get-Content -LiteralPath $manifestFile -Raw | ConvertFrom-Json
+  $payloadRoot = Join-Path $PortableFolder ([string]$current.payloadDirectory)
+  $verified = 0
+  foreach ($entry in $manifest.files) {
+    $relative = [string]$entry.path
+    $file = Join-Path $payloadRoot $relative
+    if (-not (Test-Path -LiteralPath $file -PathType Leaf)) {
+      throw "Portable payload manifest file is missing after ZIP extraction: $relative"
+    }
+    $item = Get-Item -LiteralPath $file -Force
+    if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+      throw "Portable payload manifest file is a reparse point after ZIP extraction: $relative attributes=$($item.Attributes)"
+    }
+    if ([long]$item.Length -ne [long]$entry.size) {
+      throw "Portable payload manifest size differs after ZIP extraction: $relative expected=$($entry.size) actual=$($item.Length)"
+    }
+    $actualHash = (Get-FileHash -LiteralPath $file -Algorithm SHA256).Hash.ToLowerInvariant()
+    if ($actualHash -ne [string]$entry.sha256) {
+      throw "Portable payload manifest hash differs after ZIP extraction: $relative"
+    }
+    $verified++
+  }
+  $actual = @(Get-ChildItem -LiteralPath $payloadRoot -File -Recurse -Force).Count
+  if ($verified -ne $actual) {
+    throw "Portable payload manifest file count differs after ZIP extraction: manifest=$verified actual=$actual"
+  }
+  Write-Host "portable payload manifest passed after ZIP extraction: files=$verified"
+}
+
+Assert-PortablePayloadManifest -PortableFolder $portableLauncher.DirectoryName
+
 function Wait-ServerStopped {
   $deadline = (Get-Date).AddSeconds(30)
   while ((Get-Date) -lt $deadline) {

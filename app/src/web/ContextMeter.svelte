@@ -15,18 +15,23 @@
   $: remaining=usage?.usedTokens!==null&&usage?.usedTokens!==undefined&&usage?.windowTokens
     ?Math.max(0,usage.windowTokens-usage.usedTokens)
     :null;
-  $: tone=pct!==null&&pct>=90?"critical":pct!==null&&pct>=75?"warning":"normal";
+  // Context is the number that ends a session, so it escalates before the
+  // provider quota does: 80% warns, 90% is critical, and each threshold
+  // carries a short word so the bar is never the only signal.
+  $: tone=pct!==null&&pct>=90?"critical":pct!==null&&pct>=80?"warning":"normal";
+  $: toneLabel=tone==="critical"?$t("context.toneCritical"):tone==="warning"?$t("context.toneWarning"):"";
   $: label=compacting?$t("context.compacting"):usage?.lastCompactedAt&&usage.usedTokens===null?$t("context.compacted"):pct!==null?`${$t("context.label")} ${Math.round(pct)}%`:usage?.usedTokens!==null&&usage?.usedTokens!==undefined?`${$t("context.label")} ${formatContextTokens(usage.usedTokens)}`:$t("context.pending");
 </script>
 
 <div class="context-meter {tone}" class:open>
   <div class:context-detail={open}>
-    <button type="button" class:context-summary={!open} class:context-window-card={open} class:context-window-toggle={open} class:warning={open&&tone==="warning"} class:critical={open&&tone==="critical"} onclick={()=>open=!open} aria-expanded={open} aria-label={open?`${providerDisplayName(provider)} ${$t("context.sessionQuota")} ${pct!==null?`${Math.round(pct)}%`:""}`:`${providerDisplayName(provider)} ${label}`}>
+    <button type="button" class:context-summary={!open} class:context-window-card={open} class:context-window-toggle={open} class:warning={open&&tone==="warning"} class:critical={open&&tone==="critical"} onclick={()=>open=!open} aria-expanded={open} aria-label={open?`${providerDisplayName(provider)} ${$t("context.sessionQuota")} ${pct!==null?`${Math.round(pct)}%`:""}${toneLabel?` · ${toneLabel}`:""}`:`${providerDisplayName(provider)} ${label}${toneLabel?` · ${toneLabel}`:""}`}>
       {#if !open}
         <Gauge size={14}/><span>{label}</span>
+        {#if toneLabel}<em class="context-tone">{toneLabel}</em>{/if}
         <i aria-hidden="true"><b style={`width:${pct??0}%`}></b></i>
       {:else}
-        <span class="context-window-head"><strong>{$t("context.sessionQuota")}</strong>{#if pct!==null}<b>{Math.round(pct)}%</b>{/if}</span>
+        <span class="context-window-head"><strong>{$t("context.sessionQuota")}</strong>{#if toneLabel}<em class="context-tone">{toneLabel}</em>{/if}{#if pct!==null}<b>{Math.round(pct)}%</b>{/if}</span>
         <span class="context-window-bar" aria-hidden="true"><i style={`width:${pct??0}%`}></i></span>
         <span class="context-window-values">
           {#if usage?.usedTokens!==null&&usage?.usedTokens!==undefined}<small>{$t("context.sessionUsed",{count:formatContextTokens(usage.usedTokens)})}</small>{/if}

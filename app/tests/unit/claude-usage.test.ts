@@ -57,4 +57,51 @@ for line in sys.stdin:
       expect(parsed).toMatchObject({ok:true,plan:"Max",five_hour:{utilization:12},seven_day:{utilization:30}});
     }finally{fs.rmSync(directory,{recursive:true,force:true});}
   });
+
+  it("reports a throttled usage screen as rate limited instead of unavailable",()=>{
+    const directory=fs.mkdtempSync(path.join(os.tmpdir(),"claude-usage-limited-")),binary=path.join(directory,"fake-claude.py");
+    fs.writeFileSync(binary,`#!/usr/bin/env python3
+import os
+import sys
+import tty
+tty.setcbreak(0)  # the real TUI reads single keys, so the retry key needs no newline
+print("plan mode on",flush=True)
+while os.read(0,1) not in (b"\\r", b"\\n"): pass
+while True:
+    print("Error: Usage endpoint is rate limited. Please try again in a moment.",flush=True)
+    print("r to retry",flush=True)
+    if not os.read(0,1): break
+`);
+    fs.chmodSync(binary,0o700);
+    try{
+      const parsed=JSON.parse(execFileSync("python3",[helper,binary,directory],{encoding:"utf8",timeout:30_000,env:{...process.env,CLAUDE_USAGE_RETRY_SECONDS:"0.2"}}));
+      expect(parsed).toMatchObject({ok:false,error:"rate_limited"});
+    }finally{fs.rmSync(directory,{recursive:true,force:true});}
+  });
+
+  it("recovers when the in-screen retry clears the throttle",()=>{
+    const directory=fs.mkdtempSync(path.join(os.tmpdir(),"claude-usage-retry-")),binary=path.join(directory,"fake-claude.py");
+    fs.writeFileSync(binary,`#!/usr/bin/env python3
+import os
+import sys
+import tty
+tty.setcbreak(0)  # the real TUI reads single keys, so the retry key needs no newline
+print("plan mode on",flush=True)
+while os.read(0,1) not in (b"\\r", b"\\n"): pass
+print("Error: Usage endpoint is rate limited. Please try again in a moment.",flush=True)
+print("r to retry",flush=True)
+os.read(0,1)
+print("Claude Max",flush=True)
+print("Current session",flush=True)
+print("7% used",flush=True)
+print("Current week (all models)",flush=True)
+print("21% used",flush=True)
+while os.read(0,1): pass
+`);
+    fs.chmodSync(binary,0o700);
+    try{
+      const parsed=JSON.parse(execFileSync("python3",[helper,binary,directory],{encoding:"utf8",timeout:30_000,env:{...process.env,CLAUDE_USAGE_RETRY_SECONDS:"0.2"}}));
+      expect(parsed).toMatchObject({ok:true,five_hour:{utilization:7},seven_day:{utilization:21}});
+    }finally{fs.rmSync(directory,{recursive:true,force:true});}
+  });
 });
