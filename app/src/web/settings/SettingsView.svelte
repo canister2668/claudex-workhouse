@@ -7,7 +7,7 @@
   import { dragScrollX } from "../drag-scroll";
   import { t } from "../i18n";
   import { providerDisplayName } from "../provider-display";
-  import { filterSettingsGroups, providerOfPage, settingsPageLabel, type SettingsPageId, type SettingsProviderId } from "./settings-nav";
+  import { SETTINGS_PROVIDERS, filterSettingsGroups, providerOfPage, providerPage, settingsPageLabel, type SettingsPageId, type SettingsProviderId } from "./settings-nav";
 
   export let page: SettingsPageId = "general";
   export let providerStates: Partial<Record<SettingsProviderId, "connected" | "disconnected" | "unknown" | "unavailable">> = {};
@@ -25,7 +25,24 @@
 
   let query = "";
   $: groups = filterSettingsGroups(query, $t, providerDisplayName);
-  $: pageTitle = settingsPageLabel(page, $t, providerDisplayName);
+  // The six agent pages share one nav entry ("에이전트별 설정") so the nav, and the
+  // phone's horizontal tab row in particular, stays short; the agent is then
+  // picked from a chip row at the top of the page.
+  const AGENTS = "agents" as const;
+  type NavItem = SettingsPageId | typeof AGENTS;
+  let lastProvider: SettingsProviderId = "claude";
+  $: lastProvider = providerOfPage(page) ?? lastProvider;
+  $: agentPage = providerOfPage(page) !== null;
+  function navItems(pages: readonly SettingsPageId[]): NavItem[] {
+    const items: NavItem[] = [];
+    for (const item of pages) {
+      if (providerOfPage(item)) { if (!items.includes(AGENTS)) items.push(AGENTS); }
+      else items.push(item);
+    }
+    return items;
+  }
+  $: agentsDirty = SETTINGS_PROVIDERS.some(provider => dirtyPages.has(providerPage(provider)));
+  $: pageTitle = agentPage ? $t("settings.page.agents") : settingsPageLabel(page, $t, providerDisplayName);
   function choose(next: SettingsPageId) { onselect(next); }
   const dotState = (provider: SettingsProviderId) => providerStates[provider] ?? "unknown";
 </script>
@@ -41,13 +58,18 @@
       {#each groups as group (group.id)}
         <div class="settings-nav-group" role="group" aria-label={$t(group.labelKey)}>
           <span class="settings-nav-group-label">{$t(group.labelKey)}</span>
-          {#each group.pages as item (item)}
-            {@const provider = providerOfPage(item)}
-            <button type="button" class:active={page === item} aria-current={page === item ? "page" : undefined} onclick={() => choose(item)}>
-              {#if provider}<i class="settings-provider-dot state-{dotState(provider)}" aria-hidden="true"></i>{/if}
-              <span>{settingsPageLabel(item, $t, providerDisplayName)}</span>
-              {#if dirtyPages.has(item)}<i class="settings-dirty-dot" aria-label={$t("common.changed")}></i>{/if}
-            </button>
+          {#each navItems(group.pages) as item (item)}
+            {#if item === AGENTS}
+              <button type="button" class:active={agentPage} aria-current={agentPage ? "page" : undefined} onclick={() => choose(providerPage(lastProvider))}>
+                <span>{$t("settings.page.agents")}</span>
+                {#if agentsDirty}<i class="settings-dirty-dot" aria-label={$t("common.changed")}></i>{/if}
+              </button>
+            {:else}
+              <button type="button" class:active={page === item} aria-current={page === item ? "page" : undefined} onclick={() => choose(item)}>
+                <span>{settingsPageLabel(item, $t, providerDisplayName)}</span>
+                {#if dirtyPages.has(item)}<i class="settings-dirty-dot" aria-label={$t("common.changed")}></i>{/if}
+              </button>
+            {/if}
           {/each}
         </div>
       {:else}
@@ -59,6 +81,17 @@
     <header class="settings-content-head">
       <h3 class="settings-content-title">{pageTitle}</h3>
     </header>
+    {#if agentPage}
+      <nav class="settings-provider-switch" aria-label={$t("settings.page.agents")} use:dragScrollX>
+        {#each SETTINGS_PROVIDERS as provider (provider)}
+          <button type="button" class:active={providerOfPage(page) === provider} aria-current={providerOfPage(page) === provider ? "page" : undefined} onclick={() => choose(providerPage(provider))}>
+            <i class="settings-provider-dot state-{dotState(provider)}" aria-hidden="true"></i>
+            <span>{providerDisplayName(provider)}</span>
+            {#if dirtyPages.has(providerPage(provider))}<i class="settings-dirty-dot" aria-label={$t("common.changed")}></i>{/if}
+          </button>
+        {/each}
+      </nav>
+    {/if}
     <div class="settings-tab-panel settings-content settings-tab-{page}">
       <slot/>
     </div>

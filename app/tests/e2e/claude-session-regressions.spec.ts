@@ -72,7 +72,7 @@ test("keeps Claude classification on the latest turn and restores tabs after lea
   if((page.viewportSize()?.width??0)<=599)await expect(page.locator(".task-heading")).toHaveClass(/collapsed/);
   else await expect(page.locator(".task-heading")).not.toHaveClass(/collapsed/);
   await page.locator(".agent-avatar-slot.claude .avatar-mini").click();
-  await page.locator(".agent-avatar-slot.claude .recent-session-list.active-list button").click();
+  await page.locator(".agent-popover .recent-session-list.active-list button").click();
   await page.locator(".brand-back").click();
   await expect(page.getByRole("navigation",{name:"엔진 필터"})).toBeVisible();
   await openFilters();

@@ -38,7 +38,9 @@ test("changed session file compares its Git change before local draft edits",asy
   });
 
   await page.goto("/?task=diff-task");
-  const changedFile=page.locator(".session-side-rail").getByRole("button",{name:/src\/visible\.ts/});
+  // Changed files open from the heading chip's list, as they did from the old right rail.
+  await page.locator(".task-heading .changed-files-chip").click();
+  const changedFile=page.locator(".changed-files-pop").getByRole("button",{name:/src\/visible\.ts/});
   await changedFile.click();
   const viewer=page.locator(".viewer-dialog .viewer"),editor=viewer.locator("textarea.editor"),compare=viewer.getByRole("button",{name:"변경 비교",exact:true});
   await expect(editor).toHaveValue(content);

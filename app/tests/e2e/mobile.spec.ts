@@ -1,10 +1,20 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
+
+// Session actions left the right rail for the heading's ⋯ menu (App: 작업 메뉴
+// with menu items; native Codex: its existing ⋯ action menu). A visible direct
+// button, such as the phone composer sheet's, still wins.
+async function sessionAction(page:Page,name:string){
+  const direct=page.getByRole("button",{name,exact:true}).filter({visible:true});
+  if(await direct.count())return direct.first();
+  const trigger=page.locator(".task-heading .task-heading-menu, .task-heading .more").first();
+  if(await trigger.getAttribute("aria-expanded")!=="true")await trigger.click();
+  return page.getByRole("menuitem",{name,exact:true}).or(page.locator(".task-heading .action-menu").getByRole("button",{name,exact:true})).first();
+}
 
 test("mobile task list, details, and PWA shell fit the viewport", async ({ page }, testInfo) => {
   test.setTimeout(120_000);
   page.setDefaultTimeout(10_000);
   const phoneViewport=(page.viewportSize()?.width??Number.POSITIVE_INFINITY)<=599;
-  const wideViewport=(page.viewportSize()?.width??0)>=901;
   const expectDefaultHeading=async(selector:string)=>{
     const heading=page.locator(selector);
     if(phoneViewport)await expect(heading).toHaveClass(/collapsed/);
@@ -262,7 +272,7 @@ test("mobile task list, details, and PWA shell fit the viewport", async ({ page 
   await page.screenshot({path:`test-results/${testInfo.project.name}-work-visibility.png`});
   await page.locator(".composer textarea").fill("Claude 실행 중 대기 입력");await page.locator(".composer .send").click();
   const claudeQueue=page.getByRole("region",{name:"대기열"});await expect(claudeQueue.getByText("Claude 실행 중 대기 입력")).toBeVisible();await claudeQueue.getByRole("button",{name:"삭제"}).click();await expect(claudeQueue).toHaveCount(0);
-  const claudeActiveAssist=page.getByRole("button",{name:"검토 모델 선택",exact:true});await expect(claudeActiveAssist).toBeVisible();await claudeActiveAssist.click();
+  const claudeActiveAssist=await sessionAction(page,"검토 모델 선택");await expect(claudeActiveAssist).toBeVisible();await claudeActiveAssist.click();
   const claudeAssistDialog=page.getByRole("dialog",{name:"보조 검토 모델 선택"});await expect(claudeAssistDialog.getByText(/현재까지의 대화 스냅샷/)).toBeVisible();await expect(claudeAssistDialog.getByLabel("요청")).toHaveValue(/Live mobile output/);await claudeAssistDialog.getByRole("button",{name:"닫기"}).click();
   await page.getByRole("button",{name:"뒤로",exact:true}).click();
   await page.evaluate(()=>new Promise<void>(resolve=>requestAnimationFrame(()=>requestAnimationFrame(()=>resolve()))));
@@ -333,21 +343,26 @@ test("mobile task list, details, and PWA shell fit the viewport", async ({ page 
     await expect(controlsToggle).toHaveAttribute("aria-expanded","true");
     await expect(detailActions).toBeVisible();
   }
-  const activeAssistButton=page.getByRole("button",{name:"검토 모델 선택",exact:true});await expect(activeAssistButton).toBeVisible();await activeAssistButton.click();
+  const activeAssistButton=await sessionAction(page,"검토 모델 선택");await expect(activeAssistButton).toBeVisible();await activeAssistButton.click();
   const activeAssistDialog=page.getByRole("dialog",{name:"보조 검토 모델 선택"});await expect(activeAssistDialog.getByText(/현재까지의 대화 스냅샷/)).toBeVisible();await expect(activeAssistDialog.getByRole("tab",{name:/^DeepSeek/})).toBeVisible();await activeAssistDialog.getByRole("button",{name:"닫기"}).click({timeout:20_000});
   await primaryNav.getByRole("button",{name:"세션",exact:true}).click();
   await page.getByRole("button",{name:/Codex assist fixture/}).click();
-  let changedFile=page.getByRole("button",{name:/src\/App\.ts/});
-  if(!wideViewport){
-    await expect(page.locator(".session-side-rail")).toBeHidden();
-    const changedFilesToggle=page.locator(".changed-files-toggle");await expect(changedFilesToggle).toBeVisible();await expect(changedFilesToggle).toHaveAttribute("aria-expanded","false");await expect(changedFile).toBeHidden();await changedFilesToggle.click();await expect(changedFilesToggle).toHaveAttribute("aria-expanded","true");await expect(changedFile).toBeVisible();await changedFilesToggle.click();await expect(changedFile).toBeHidden();await changedFilesToggle.click();await expect(changedFile).toBeVisible();
-  }else{changedFile=page.locator(".session-side-rail").getByRole("button",{name:/src\/App\.ts/});await expect(changedFile).toBeVisible();}
+  // Changed files sit behind the heading chip at every width: a popover on
+  // wider screens, a bottom sheet on phones (<=760px). The right rail is gone.
+  await expect(page.locator(".session-side-rail")).toHaveCount(0);
+  const changedFilesChip=page.locator(".task-heading .changed-files-chip"),changedFilesPop=page.locator(".changed-files-pop");
+  const changedFile=changedFilesPop.getByRole("button",{name:/src\/App\.ts/});
+  await expect(changedFilesChip).toBeVisible();await expect(changedFilesChip).toHaveAttribute("aria-expanded","false");await expect(changedFile).toBeHidden();
+  await changedFilesChip.click();await expect(changedFilesChip).toHaveAttribute("aria-expanded","true");await expect(changedFile).toBeVisible();
+  if((page.viewportSize()?.width??0)<=760)await expect(changedFilesPop).toHaveClass(/sheet/);else await expect(changedFilesPop).not.toHaveClass(/sheet/);
+  await changedFilesChip.click();await expect(changedFile).toBeHidden();await changedFilesChip.click();await expect(changedFile).toBeVisible();
   await changedFile.click();
   const workspaceViewer=page.locator(".viewer-dialog .viewer");await expect(workspaceViewer).toBeVisible();const mobileEditor=workspaceViewer.locator("textarea.editor");await expect(mobileEditor).toBeVisible({timeout:15_000});await expect(mobileEditor).toHaveValue("export const mobile = false;\n");await expect(workspaceViewer.getByRole("button",{name:"뷰어",exact:true})).toBeVisible();await expect(workspaceViewer.getByRole("button",{name:"수정기",exact:true})).toHaveAttribute("aria-pressed","true");await expect(workspaceViewer.getByRole("button",{name:"변경 비교",exact:true})).toBeVisible();await expect(mobileEditor).toHaveAttribute("wrap","off");await workspaceViewer.getByRole("button",{name:"자동 줄바꿈",exact:true}).click();await expect(mobileEditor).toHaveAttribute("wrap","soft");await mobileEditor.fill("export const mobile = true;\n");await workspaceViewer.getByRole("button",{name:"변경 비교",exact:true}).click();await expect(workspaceViewer.locator("pre.diff")).toContainText("- export const mobile = false;");await expect(workspaceViewer.locator("pre.diff")).toContainText("+ export const mobile = true;");await expect(workspaceViewer.locator(".diff-shell")).toBeVisible();await expect(workspaceViewer.getByText("− 삭제",{exact:true})).toBeVisible();await expect(workspaceViewer.getByText("+ 추가",{exact:true})).toBeVisible();await workspaceViewer.getByRole("button",{name:"변경 비교",exact:true}).click();await expect(mobileEditor).toHaveValue("export const mobile = true;\n");await workspaceViewer.getByRole("button",{name:"변경 비교",exact:true}).click();await expect(workspaceViewer.locator("pre.diff")).toBeVisible();await workspaceViewer.getByRole("button",{name:"뷰어",exact:true}).click();await expect(workspaceViewer.locator("pre.code")).toContainText("export const mobile = false;");await workspaceViewer.getByRole("button",{name:"수정기",exact:true}).click();await expect(mobileEditor).toHaveValue("export const mobile = true;\n");await workspaceViewer.getByRole("button",{name:"저장",exact:true}).click();await expect(workspaceViewer.locator("pre.code")).toHaveClass(/wrap-lines/);
   await expect.poll(()=>editorWrites.length).toBe(1);expect(editorWrites[0]).toMatchObject({content:"export const mobile = true;\n",expectedRevision:"revision-1"});
   const viewerDialog=page.locator(".viewer-dialog"),appShell=page.locator(".shell"),fileList=workspaceViewer.getByRole("navigation",{name:"파일 목록"});
   await workspaceViewer.getByRole("button",{name:"좌우 반반"}).click();await expect(viewerDialog).toHaveClass(/layout-columns/);await expect(fileList).toBeHidden();
-  await expect(page.locator(".session-side-rail")).toBeHidden();
+  // A split viewer already takes the second column, so the left sessions panel steps aside.
+  await expect(page.locator(".session-panel")).toHaveCount(0);
   const splitSessionGeometry=await page.evaluate(()=>{const shell=document.querySelector(".shell")!.getBoundingClientRect(),main=document.querySelector(".detail-main")!.getBoundingClientRect(),composer=document.querySelector(".composer")!.getBoundingClientRect();return{shellWidth:shell.width,mainWidth:main.width,composerLeft:composer.left,composerRight:composer.right,shellLeft:shell.left,shellRight:shell.right};});
   expect(splitSessionGeometry.mainWidth).toBeGreaterThan(splitSessionGeometry.shellWidth*.85);
   expect(splitSessionGeometry.composerLeft).toBeGreaterThanOrEqual(splitSessionGeometry.shellLeft);
@@ -361,9 +376,9 @@ test("mobile task list, details, and PWA shell fit the viewport", async ({ page 
   await workspaceViewer.getByRole("button",{name:"전체 화면"}).click();await expect(viewerDialog).toHaveClass(/layout-fullscreen/);await workspaceViewer.getByRole("button",{name:"기본 창"}).click();await expect(viewerDialog).toHaveClass(/layout-window/);
   expect(await page.evaluate(()=>document.documentElement.scrollWidth-window.innerWidth)).toBeLessThanOrEqual(0);await workspaceViewer.getByRole("button",{name:"대화상자 닫기"}).click();
   const collapsedActions=page.getByRole("button",{name:"작업 메뉴 펼치기",exact:true});if(await collapsedActions.isVisible())await collapsedActions.click();
-  const assistButton=page.getByRole("button",{name:"검토 모델 선택",exact:true});await expect(assistButton).toBeVisible();await assistButton.click();
+  const assistButton=await sessionAction(page,"검토 모델 선택");await expect(assistButton).toBeVisible();await assistButton.click();
   const assistDialog=page.getByRole("dialog",{name:"보조 검토 모델 선택"});await expect(assistDialog).toBeVisible();await expect(assistDialog.getByLabel("요청")).toHaveValue(/Codex final result/);await assistDialog.getByRole("tab",{name:/^DeepSeek/}).click();await expect(assistDialog.locator(".target-picker select").first()).toHaveValue("deepseek-review");expect(await assistDialog.evaluate(element=>element.scrollWidth-element.clientWidth)).toBeLessThanOrEqual(1);await assistDialog.getByRole("button",{name:"닫기"}).click();await assistButton.click();await expect(page.getByRole("dialog",{name:"보조 검토 모델 선택"}).getByRole("tab",{name:/^DeepSeek/})).toHaveAttribute("aria-selected","true");await page.getByRole("dialog",{name:"보조 검토 모델 선택"}).getByRole("button",{name:"닫기"}).click();
-  const handoffButton=page.getByRole("button",{name:"작업 인계",exact:true}).filter({visible:true}).first();await handoffButton.click();const handoffDialog=page.getByRole("dialog",{name:"작업 인계"});await expect(handoffDialog.getByRole("tab",{name:/^Google/})).toBeVisible();await handoffDialog.getByRole("tab",{name:/^Google/}).click();await expect(handoffDialog.locator(".target-picker select").first()).toHaveValue("gemini-review");expect(await handoffDialog.evaluate(element=>element.scrollWidth-element.clientWidth)).toBeLessThanOrEqual(1);await handoffDialog.getByRole("button",{name:"닫기"}).click();
+  const handoffButton=await sessionAction(page,"작업 인계");await handoffButton.click();const handoffDialog=page.getByRole("dialog",{name:"작업 인계"});await expect(handoffDialog.getByRole("tab",{name:/^Google/})).toBeVisible();await handoffDialog.getByRole("tab",{name:/^Google/}).click();await expect(handoffDialog.locator(".target-picker select").first()).toHaveValue("gemini-review");expect(await handoffDialog.evaluate(element=>element.scrollWidth-element.clientWidth)).toBeLessThanOrEqual(1);await handoffDialog.getByRole("button",{name:"닫기"}).click();
   await primaryNav.getByRole("button",{name:"세션",exact:true}).click();
 
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
@@ -486,7 +501,7 @@ test("mobile task list, details, and PWA shell fit the viewport", async ({ page 
   await expectDefaultHeading(".task-heading");
   if(phoneViewport)await page.locator(".task-heading .heading-toggle").click();
   await expect(page.locator(".task-heading h1")).toBeVisible();
-  await expect(page.getByRole("button",{name:"작업 인계",exact:true})).toBeVisible();
+  await expect(await sessionAction(page,"작업 인계")).toBeVisible();
   await page.evaluate(()=>new Promise<void>(resolve=>requestAnimationFrame(()=>requestAnimationFrame(()=>resolve()))));
   const brandInDetail=await page.locator(".brand strong").boundingBox();
   // The brand wordmark is hidden below 600px, so its position can only be

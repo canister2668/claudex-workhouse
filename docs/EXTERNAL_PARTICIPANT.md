@@ -39,7 +39,7 @@ API key. The management API also exposes `GET
 `tunnel-key` and `tunnel-token`; those routes never return stored secrets.
 Once both files exist, run the client's
 `doctor --profile workhouse-participant --profile-dir
-/volume2/claudex-workhouse/runtime/openai-tunnel-client/profiles --explain`
+<installation root>/runtime/openai-tunnel-client/profiles --explain`
 before starting its managed runtime. A prepared profile is not a live tunnel.
 
 ## Owner grant

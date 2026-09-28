@@ -46,6 +46,8 @@
   import { isTransientApiError } from "./api-client";
   import type { ApiRequestOptions } from "./api-client";
   import TaskOutcomeSummary from "./TaskOutcomeSummary.svelte";
+  import ChangedFilesChip from "./ChangedFilesChip.svelte";
+  import { collectChangedFiles, type ChangedFileEntry } from "./session-panel";
   import { hasTaskOutcomeDetails, taskOutcomeSummary } from "./task-outcome";
   import TaskRecoveryCard from "./TaskRecoveryCard.svelte";
   import PullRequestDialog from "./PullRequestDialog.svelte";
@@ -98,9 +100,9 @@
   }
   $: syncRunningHistoryPreference(selected);
   const defaultHeadingCollapsed=()=>defaultSessionHeadingCollapsed(typeof window==="undefined"?Number.POSITIVE_INFINITY:window.innerWidth);
-  let headingCollapsed=defaultHeadingCollapsed();let headingKey="";let outcomeMobileExpanded=false;let outcomeMobileDismissed=false;let outcomeTaskKey="";
+  let headingCollapsed=defaultHeadingCollapsed();let headingKey="";let outcomeMobileExpanded=false;let outcomeMobileDismissed=false;let outcomeTaskKey="";let outcomeDesktopOpen=false;
   $: {const nextHeadingKey=selected?.threadId??selected?.taskId??"";if(nextHeadingKey!==headingKey){headingKey=nextHeadingKey;headingCollapsed=defaultHeadingCollapsed();}}
-  $: {const nextOutcomeTaskKey=selected?.taskId??selected?.threadId??"";if(nextOutcomeTaskKey!==outcomeTaskKey){outcomeTaskKey=nextOutcomeTaskKey;outcomeMobileExpanded=false;outcomeMobileDismissed=false;}}
+  $: {const nextOutcomeTaskKey=selected?.taskId??selected?.threadId??"";if(nextOutcomeTaskKey!==outcomeTaskKey){outcomeTaskKey=nextOutcomeTaskKey;outcomeMobileExpanded=false;outcomeMobileDismissed=false;outcomeDesktopOpen=false;}}
   // Mirrors the Claude detail view: phones fade the whole chrome, while wider
   // screens keep bottom controls fixed and fold only the heading while reading.
   $: setChromeBlocking("codex",Boolean(selected&&(selected.status==="waiting"||selected.metadata?.approvalLoop)));
@@ -182,20 +184,13 @@
   $: historyEvents=codexTurnsToEvents(turns,selected?.cwd??null);
   $: conversationHistory=codexConversationEvents(historyEvents,handoffEvents,true);
   $: conversationEvents=codexConversationEvents(conversationHistory,events,Boolean(selected&&activeStatus(selected.status)),showRunningHistory?3:1);
-  let detailFileEntries:Array<{path:string;add:number;del:number;pathBase:"workspace"|"task-cwd"|"unresolved"}>=[];
-  $: {
-    const files=new Map<string,{add:number;del:number;pathBase:"workspace"|"task-cwd"|"unresolved"}>();
-    for(const event of conversationEvents){
-      if(event.type!=="file_change_started"&&event.type!=="file_change_completed")continue;
-      const path=String(event.metadata?.path??"");if(!path)continue;
-      const rawBase=event.metadata?.pathBase,pathBase=rawBase==="workspace"||rawBase==="task-cwd"?rawBase:"unresolved";
-      const current=files.get(path)??{add:0,del:0,pathBase};
-      current.add+=Number(event.metadata?.additions??0);current.del+=Number(event.metadata?.deletions??0);
-      if(current.pathBase!==pathBase)current.pathBase="unresolved";
-      files.set(path,current);
-    }
-    detailFileEntries=[...files].map(([path,stats])=>({path,...stats}));
-  }
+  $: detailFileEntries=collectChangedFiles(conversationEvents);
+  const detailFileCanOpen=(file:ChangedFileEntry)=>Boolean(selected?.workspaceId&&onOpenFile&&file.pathBase!=="unresolved"&&(file.pathBase==="workspace"||selected?.taskId));
+  const openDetailFile=(file:ChangedFileEntry)=>{if(detailFileCanOpen(file))onOpenFile?.({path:file.path,pathBase:file.pathBase as "workspace"|"task-cwd",sourceTaskId:selected?.taskId??undefined,workspaceId:selected?.workspaceId});};
+  // Same result entry points as the App session view: in place when wide,
+  // the composer badge sheet when compact.
+  $: selectedOutcomeAvailable=Boolean(selected&&!followupStarting&&["completed","failed"].includes(selected.status)&&hasTaskOutcomeDetails(taskOutcomeSummary(selectedOutcomeTask(),conversationEvents)));
+  function showTaskOutcome(){actionOpen=false;if(window.innerWidth<=900){outcomeMobileExpanded=true;outcomeMobileDismissed=false;}else outcomeDesktopOpen=true;}
   const statusIcon=(value:string)=>value==="completed"?Check:value==="failed"?CircleAlert:value==="running"?Activity:value==="waiting"?Clock3:value==="stopped"?Square:Clock3;
   const executionBackendLabel=(metadata:any)=>metadata?.executionBackend?$t(`execution.${metadata.executionBackend}`):metadata?.executionUiLabel??null;
   function filterSummary(){const values=[search.trim()?`${$t("common.search")}: ${search.trim()}`:null,projectId?`${$t("session.project")}: ${projectName(projectId)}`:null,source?`${$t("session.source")}: ${sourceLabel(source)}`:null,ownership?`${$t("session.owner")}: ${ownershipLabel(ownership)}`:null,status?`${$t("session.statusFilter")}: ${statusLabel(status)}`:null,model?`${$t("session.model")}: ${model}`:null,archived?$t("session.archived"):null].filter(Boolean);return values.join(" · ")||$t("common.all");}
@@ -403,18 +398,19 @@
   <main class="codex-detail">
     <div class="detail-main">
       <section class="task-heading" class:collapsed={headingCollapsed} inert={chromeHidden} use:chromeCollapse>
-        <div class="task-heading-top"><SessionBadges provider="codex" status={selected.status} liveMode={liveMode} ownership={selected.ownership}/>{#if headingCollapsed}<strong class="collapsed-title">{selected.title}</strong>{/if}<button class="icon-button more" aria-label={$t("common.more")} onclick={()=>actionOpen=!actionOpen}><MoreVertical size={19}/></button><button class="heading-toggle" aria-label={$t(headingCollapsed?"session.expandTitle":"session.collapseTitle")} title={$t(headingCollapsed?"session.expandTitle":"session.collapseTitle")} onclick={()=>headingCollapsed=!headingCollapsed}>{#if headingCollapsed}<ChevronDown size={18}/>{:else}<ChevronUp size={18}/>{/if}</button></div>
+        <div class="task-heading-top"><SessionBadges provider="codex" status={selected.status} liveMode={liveMode} ownership={selected.ownership}/>{#if headingCollapsed}<strong class="collapsed-title">{selected.title}</strong>{/if}<span class="task-heading-tools"><ChangedFilesChip files={detailFileEntries} canOpen={detailFileCanOpen} onopen={openDetailFile}/></span><button class="icon-button more" aria-label={$t("common.more")} onclick={()=>actionOpen=!actionOpen}><MoreVertical size={19}/></button><button class="heading-toggle" aria-label={$t(headingCollapsed?"session.expandTitle":"session.collapseTitle")} title={$t(headingCollapsed?"session.expandTitle":"session.collapseTitle")} onclick={()=>headingCollapsed=!headingCollapsed}>{#if headingCollapsed}<ChevronDown size={18}/>{:else}<ChevronUp size={18}/>{/if}</button></div>
         {#if !headingCollapsed}<div class="heading-expanded">{#if renameEditing}<div class="session-title-editor"><input bind:value={renameTitle} aria-label={$t("session.rename")} maxlength="100" onkeydown={renameKeydown} use:focusRename/><button type="button" class="save" aria-label={$t("common.save")} title={$t("common.save")} disabled={!renameTitle.trim()||renameSaving} onclick={saveRename}>{#if renameSaving}<LoaderCircle class="spin" size={17}/>{:else}<Check size={17}/>{/if}</button><button type="button" aria-label={$t("common.cancel")} title={$t("common.cancel")} disabled={renameSaving} onclick={cancelRename}><X size={17}/></button></div>{:else}<div class="session-title-row"><h1>{selected.title}</h1><button type="button" class="session-title-edit" aria-label={$t("session.rename")} title={$t("session.rename")} onclick={beginRename}><Pencil size={15}/></button></div>{/if}
         <p>{selected.projectId??$t("session.unregisteredProject")} · {sourceLabel(selected.source)}{#if executionBackendLabel(selected.metadata)} · {executionBackendLabel(selected.metadata)}{/if} · {relativeTime(selected.updatedAt)}</p>
         {#if selected.threadId}<div class="id-row"><button class="copy-id" onclick={copySelected} title={$t("session.copyThreadId")}><span>{$t("session.thread")}</span><code>{shortId(selected.threadId)}</code><Clipboard size={15}/></button></div>{/if}</div>{/if}
         <ContextMeter provider="codex" usage={contextUsage} canCompact={Boolean(selected.ownership==="claudex-workhouse"&&selected.threadId)} busy={activeStatus(selected.status)} compacting={contextRequestBusy||Boolean(selected.metadata?.operation==="context_compaction"&&activeStatus(selected.status))} oncompact={compactContext}/>
-        {#if actionOpen}<div class="action-menu"><button onclick={showSettings}><Settings/>{$t("session.settings")}</button>{#if selected.archived}<button onclick={()=>mutate("unarchive")}><ArchiveRestore/>{$t("common.back")}</button>{:else}<button onclick={()=>mutate("archive")}><Archive/>{$t("session.archived")}</button>{/if}<hr/><button class="destructive" disabled={!capabilities.delete} onclick={()=>{deleteOpen=true;deleteAcknowledged=false;actionOpen=false}}><Trash2/>{$t("session.deletePermanent")}</button></div>{/if}
+        {#if actionOpen}<div class="action-menu">{#if selectedOutcomeAvailable}<button onclick={showTaskOutcome}><FileText/>{$t("outcome.viewDetails")}</button>{/if}{#if selected.canMutate}<button title={$t("session.fork")} onclick={()=>{actionOpen=false;mutate("fork");}} disabled={sending}><GitBranch/>{$t("session.fork")}</button>{/if}{#if selected.taskId&&selected.ownership==="claudex-workhouse"}<button title={$t("handoff.newSessionTitle")} onclick={()=>{actionOpen=false;handoffOpen=true;}} disabled={sending}><ArrowRightLeft/>{$t("handoff.title")}</button><button title={$t(!selected.workspaceId?"assist.noWorkspace":activeStatus(selected.status)?"assist.runningTitle":"assist.title")} onclick={()=>{actionOpen=false;openAssist();}} disabled={sending||!selected.workspaceId}><Bot/>{$t("assist.chooseReviewer")}</button>{/if}{#if selected.taskId&&selected.status==="completed"&&selected.workspaceId&&selectedDeckTask()}<button title={$t("pr.title")} onclick={()=>{actionOpen=false;pullRequestOpen=true;}} disabled={sending}><GitPullRequest/>{$t("pr.action")}</button>{/if}<hr/><button onclick={showSettings}><Settings/>{$t("session.settings")}</button>{#if selected.archived}<button onclick={()=>mutate("unarchive")}><ArchiveRestore/>{$t("common.back")}</button>{:else}<button onclick={()=>mutate("archive")}><Archive/>{$t("session.archived")}</button>{/if}<hr/><button class="destructive" disabled={!capabilities.delete} onclick={()=>{deleteOpen=true;deleteAcknowledged=false;actionOpen=false}}><Trash2/>{$t("session.deletePermanent")}</button></div>{/if}
       </section>
       {#if selected.taskId}<ApprovalPanel {api} task={{id:selected.taskId,provider:"codex",status:selected.status,executionHostId:selected.executionHostId??null,workspaceId:selected.workspaceId??null,title:selected.title}}/>{/if}
       {#if selected.taskId}<TaskRecoveryCard {api} task={selectedOutcomeTask()} onstarted={openTaskSession}/>{/if}
       {#if !followupStarting}<TaskOutcomeSummary {api} task={selectedOutcomeTask()} events={conversationEvents} mobileCollapsible={selected.canMutate&&selected.ownership==="claudex-workhouse"} mobileExpanded={outcomeMobileExpanded} mobileDismissed={outcomeMobileDismissed} hideOnWide onclose={()=>{outcomeMobileExpanded=false;outcomeMobileDismissed=true;}}/>{/if}
+      {#if outcomeDesktopOpen&&selectedOutcomeAvailable}<div class="outcome-in-place"><TaskOutcomeSummary {api} task={selectedOutcomeTask()} events={conversationEvents} onclose={()=>outcomeDesktopOpen=false}/></div>{/if}
       {#if !events.length&&turnCursor}<button class="load-more" disabled={turnsLoading} onclick={()=>moreTurns(false)}>{$t(turnsLoading?"common.loading":"conversation.moreHistory")}</button>{/if}
-      {#if conversationEvents.length}{#key selected?.threadId??selected?.taskId??"closed"}<Conversation provider="codex" providerModel={selected?.effectiveModel??selected?.requestedModel??selected?.metadata?.model??null} events={conversationEvents} request={selected?.preview??""} requestTimestamp={selected?.createdAt??null} responseTimestamp={selected?.updatedAt??null} busy={followupStarting||["pending","queued","running","waiting"].includes(selected?.status??"")&&liveMode!=="History"} liveMode={followupStarting?"Delayed":liveMode} rootThreadId={selected?.threadId??null} {providerQuota} persistedOutputUsage={selectedOutcomeTask()?.metadata?.outputUsage} {scrollAutoSwitch} onScrollDirection={handleConversationScroll} onRevealChrome={()=>applyChromePhase("tap")} onScrollActivity={(top,distance,userInitiated)=>{return userInitiated?applyChromePhase("scrolling",top,distance):updateChromeDistance(distance,top);}} runningHistoryVisible={Boolean(activeStatus(selected?.status??"")&&selected?.threadId)} runningHistoryExpanded={showRunningHistory} runningHistoryLoading={turnsLoading} ontogglerunninghistory={toggleRunningHistory} workspaceId={selected?.workspaceId??null} workspacePath={selected?conversationWorkspacePath(selected):null} executionHostId={selected?.executionHostId??"local"} workspaceTargets={workspaces} sourceTaskId={selected?.taskId??null} onopenfile={(file)=>onOpenFile?.({...file,workspaceId:file.workspaceId??selected?.workspaceId})}/>{/key}
+      {#if conversationEvents.length}{#key selected?.threadId??selected?.taskId??"closed"}<Conversation provider="codex" providerModel={selected?.effectiveModel??selected?.requestedModel??selected?.metadata?.model??null} events={conversationEvents} request={selected?.preview??""} requestTimestamp={selected?.createdAt??null} responseTimestamp={selected?.updatedAt??null} busy={followupStarting||["pending","queued","running","waiting"].includes(selected?.status??"")&&liveMode!=="History"} liveMode={followupStarting?"Delayed":liveMode} rootThreadId={selected?.threadId??null} {providerQuota} persistedOutputUsage={selectedOutcomeTask()?.metadata?.outputUsage} {scrollAutoSwitch} onScrollDirection={handleConversationScroll} onRevealChrome={()=>applyChromePhase("tap")} onScrollActivity={(top,distance,userInitiated)=>{return userInitiated?applyChromePhase("scrolling",top,distance):updateChromeDistance(distance,top);}} runningHistoryVisible={Boolean(activeStatus(selected?.status??"")&&selected?.threadId)} runningHistoryExpanded={showRunningHistory} runningHistoryLoading={turnsLoading} ontogglerunninghistory={toggleRunningHistory} workspaceId={selected?.workspaceId??null} workspacePath={selected?conversationWorkspacePath(selected):null} executionHostId={selected?.executionHostId??"local"} workspaceTargets={workspaces} sourceTaskId={selected?.taskId??null} onopenfile={(file)=>onOpenFile?.({...file,workspaceId:file.workspaceId??selected?.workspaceId})} onviewoutcome={selectedOutcomeAvailable?showTaskOutcome:null}/>{/key}
       {:else}<div class="session-empty">{$t("conversation.empty")}</div>{/if}
       {#if selectedAssistId}<CollaborationTimeline collaborationId={selectedAssistId} {api} {codexAvatar} quotaByProvider={{codex:providerQuota}} {enterToSend} embedded onopen={(task)=>onOpenTask?.(task)} onclose={()=>selectedAssistId=null}/>{/if}
       <div class="bottom-chrome-drawer" inert={bottomChromeHidden} use:chromeSlide>
@@ -432,41 +428,6 @@
       {:else}<div class="chat-settings-bar orphan"><button type="button" class="setting-summary tap" disabled title={$t("session.changeModelPermission")} aria-label={$t("session.modelPermissionSettings")}><Settings size={16}/><span>{selected.requestedModel??$t("session.modelUnknown")}</span><span>{effortLabel(selected.requestedReasoningEffort??"medium")}</span><span>{selected.requestedServiceTier==="priority"?"Fast":"Standard"}</span><span>{permLabel(selected.permissionProfile??":workspace")}</span></button></div><p class="composer-unavailable">{$t("session.workspaceUnavailableFollowup")}</p>{/if}
       </div>
     </div>
-    <aside class="session-side-rail" aria-label={$t("session.current")}>
-      <section>
-        <h2>{$t("session.current")}</h2>
-        <dl>
-          <div><dt>{$t("session.provider")}</dt><dd>Codex</dd></div>
-          <div><dt>{$t("common.status")}</dt><dd class="state-text s-{selected.status}">{statusLabel(selected.status)}</dd></div>
-          <div><dt>{$t("workspace.label")}</dt><dd>{selected.projectId??$t("session.unregisteredProject")}</dd></div>
-          <div><dt>{$t("conversation.lastEvent",{time:""})}</dt><dd>{relativeTime(selected.updatedAt)}</dd></div>
-          <div><dt>{$t("session.worker")}</dt><dd>{selected.executionHostId??$t("common.unknown")}</dd></div>
-        </dl>
-      </section>
-      {#if !followupStarting&&["completed","failed"].includes(selected.status)&&hasTaskOutcomeDetails(taskOutcomeSummary(selectedOutcomeTask(),conversationEvents))}<TaskOutcomeSummary {api} task={selectedOutcomeTask()} events={conversationEvents} rail/>{/if}
-      {#if followupStarting||!["completed","failed"].includes(selected.status)||!hasTaskOutcomeDetails(taskOutcomeSummary(selectedOutcomeTask(),conversationEvents))}
-      <section>
-        <h2>{$t("session.controls")}</h2>
-        <div class="session-side-actions">
-          {#if selected.canMutate}<button title={$t("session.fork")} onclick={()=>mutate("fork")} disabled={sending}><GitBranch size={18}/><span>{$t("session.fork")}</span></button>{/if}
-          {#if selected.taskId&&selected.ownership==="claudex-workhouse"}<button title={$t("handoff.newSessionTitle")} onclick={()=>handoffOpen=true} disabled={sending}><ArrowRightLeft size={18}/><span>{$t("handoff.title")}</span></button>{/if}
-          {#if selected.taskId&&selected.ownership==="claudex-workhouse"}<button title={$t(!selected.workspaceId?"assist.noWorkspace":activeStatus(selected.status)?"assist.runningTitle":"assist.title")} onclick={openAssist} disabled={sending||!selected.workspaceId}><Bot size={18}/><span>{$t("assist.chooseReviewer")}</span></button>{/if}
-          {#if selected.taskId&&selected.status==="completed"&&selected.workspaceId&&selectedDeckTask()}<button title={$t("pr.title")} onclick={()=>pullRequestOpen=true} disabled={sending}><GitPullRequest size={18}/><span>{$t("pr.action")}</span></button>{/if}
-        </div>
-      </section>
-      {/if}
-      <section>
-        <h2>{$t("conversation.changedFiles")} <span>{detailFileEntries.length}</span></h2>
-        {#if detailFileEntries.length}
-          <div class="session-side-files">
-            {#each detailFileEntries.slice(0,9) as file}
-              {@const canOpen=Boolean(selected.workspaceId&&onOpenFile&&file.pathBase!=="unresolved"&&(file.pathBase==="workspace"||selected.taskId))}
-              <button disabled={!canOpen} onclick={()=>canOpen&&onOpenFile?.({path:file.path,pathBase:file.pathBase as "workspace"|"task-cwd",sourceTaskId:selected?.taskId??undefined,workspaceId:selected?.workspaceId})}><code class="path-tail-ellipsis" title={file.path} dir="rtl"><bdi dir="ltr">{file.path}</bdi></code><span><em>+{file.add}</em><i>-{file.del}</i></span></button>
-            {/each}
-          </div>
-        {:else}<p class="session-side-empty">{$t("workspace.noChanges")}</p>{/if}
-      </section>
-    </aside>
   </main>
 {/if}
 

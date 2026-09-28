@@ -6,14 +6,14 @@ const viewports=[
   {name:"phone-max-599",width:599,height:900,immersive:true},
   {name:"controls-boundary-600-portrait",width:600,height:900,immersive:false},
   {name:"controls-boundary-600-landscape",width:600,height:375,immersive:true},
-  {name:"mobile-nav-max-760",width:760,height:500,immersive:true,rail:false},
-  {name:"tablet-min-761",width:761,height:500,immersive:true,rail:false},
+  {name:"mobile-nav-max-760",width:760,height:500,immersive:true,panelToggle:false},
+  {name:"tablet-min-761",width:761,height:500,immersive:true,panelToggle:true},
   {name:"compact-height-max-720",width:800,height:720,immersive:true},
   {name:"compact-height-over-721",width:800,height:721,immersive:false},
-  {name:"tablet-portrait",width:800,height:1280,immersive:false,rail:false},
-  {name:"tablet-max-900",width:900,height:1280,immersive:false,rail:false},
-  {name:"wide-min-901",width:901,height:1280,immersive:false,rail:true},
-  {name:"galaxy-tab-ultra",width:916,height:1356,immersive:false,rail:true},
+  {name:"tablet-portrait",width:800,height:1280,immersive:false,panelToggle:true},
+  {name:"tablet-max-900",width:900,height:1280,immersive:false,panelToggle:true},
+  {name:"wide-min-901",width:901,height:1280,immersive:false,panelToggle:true},
+  {name:"galaxy-tab-ultra",width:916,height:1356,immersive:false,panelToggle:true},
   {name:"compact-max-1024",width:1024,height:600,immersive:true},
   {name:"compact-over-1025",width:1025,height:600,immersive:false}
 ] as const;
@@ -57,10 +57,14 @@ test("scroll chrome stays stable across responsive boundaries",async({page},test
   for(const viewport of viewports)await test.step(viewport.name,async()=>{
     await page.setViewportSize({width:viewport.width,height:viewport.height});
     await page.goto(`/?task=matrix-task&viewport=${viewport.name}`);
-    const shell=page.locator(".shell"),conversation=page.locator(".conversation"),heading=page.locator(".task-heading"),drawer=page.locator(".bottom-chrome-drawer"),composer=page.locator(".composer"),badge=page.locator(".work-status-badge"),nav=page.locator(".primary-nav"),rail=page.locator(".session-side-rail");
-    if("rail" in viewport){
-      if(viewport.rail)await expect(rail).toBeVisible();
-      else await expect(rail).toBeHidden();
+    const shell=page.locator(".shell"),conversation=page.locator(".conversation"),heading=page.locator(".task-heading"),drawer=page.locator(".bottom-chrome-drawer"),composer=page.locator(".composer"),badge=page.locator(".work-status-badge"),nav=page.locator(".primary-nav"),panelToggle=page.locator(".session-panel-toggle");
+    // No right rail at any width; the left sessions panel toggle starts where
+    // the phone tab bar ends, and the panel stays closed below 1280px.
+    await expect(page.locator(".session-side-rail")).toHaveCount(0);
+    if("panelToggle" in viewport){
+      if(viewport.panelToggle)await expect(panelToggle).toBeVisible();
+      else await expect(panelToggle).toHaveCount(0);
+      await expect(page.locator(".session-panel")).toHaveCount(0);
     }
     if(viewport.immersive)await expect(shell).toHaveClass(/chrome-drawer-enabled/);
     else await expect(shell).not.toHaveClass(/chrome-drawer-enabled/);

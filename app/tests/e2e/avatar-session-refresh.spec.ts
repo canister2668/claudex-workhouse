@@ -36,7 +36,7 @@ test("avatar session panel recovers from an empty cache without reloading the pa
 
   await page.goto("/");
   await page.locator(".agent-avatar-slot.codex").getByRole("button").first().click();
-  const panel=page.locator(".agent-avatar-slot.codex .recent-session-pop");
+  const panel=page.locator(".agent-popover");
   await expect(panel.getByRole("alert")).toContainText(/Not available|사용할 수 없음/);
   await panel.getByRole("button",{name:/Retry|다시 시도/}).click();
   await expect.poll(()=>providerReads).toBe(2);
@@ -45,7 +45,7 @@ test("avatar session panel recovers from an empty cache without reloading the pa
   await page.getByRole("button",{name:/Collaboration Board|협업 게시판/}).click();
   await expect(page.locator(".board-page")).toBeVisible();
   await page.locator(".agent-avatar-slot.codex").getByRole("button").first().click();
-  await page.locator(".recent-session-pop").getByRole("button",{name:/아바타에서 복구된 세션/}).click();
+  await page.locator(".agent-popover").getByRole("button",{name:/아바타에서 복구된 세션/}).click();
   await expect(page.locator(".board-page")).toBeHidden();
 });
 
@@ -84,8 +84,8 @@ test("home and Codex avatar use the shared startup snapshot before slow synchron
   await page.goto("/");
   await expect(page.locator(".overview-active")).toContainText("즉시 보이는 Codex 작업",{timeout:1000});
   await page.locator(".agent-avatar-slot.codex").getByRole("button").first().click();
-  await expect(page.locator(".agent-avatar-slot.codex .recent-session-pop")).toContainText("즉시 보이는 Codex 작업",{timeout:1000});
-  await expect(page.locator(".agent-avatar-slot.codex .recent-session-pop")).toContainText("동기화된 Codex 작업",{timeout:4000});
+  await expect(page.locator(".agent-popover")).toContainText("즉시 보이는 Codex 작업",{timeout:1000});
+  await expect(page.locator(".agent-popover")).toContainText("동기화된 Codex 작업",{timeout:4000});
   expect(taskRequests).toContain("?snapshot=true");
   expect(taskRequests).toContain("?provider=codex&snapshot=true");
 

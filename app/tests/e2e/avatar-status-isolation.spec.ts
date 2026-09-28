@@ -85,9 +85,10 @@ test("avatar status is task-scoped and compatible providers receive terminal eve
   });
 
   await page.goto("/",{waitUntil:"domcontentloaded"});
-  await expect(page.locator(".agent-avatar-slot.codex .avatar-speech")).toHaveCount(0);
+  await expect(page.locator(".agent-avatar-slot.codex")).toHaveClass(/phase-idle/);
   await expect(page.getByText("오염된 이전 작업",{exact:true})).toHaveCount(0);
-  await expect(page.locator(".agent-avatar-slot.antigravity .avatar-speech")).toContainText("실행 중");
+  await expect(page.locator(".agent-active-row .agent-avatar-slot.antigravity .avatar-ring.ring-running")).toBeVisible();
+  await expect(page.locator(".agent-avatar-slot.antigravity .avatar-mini")).toHaveAttribute("aria-label",/Gemini: 작업 중/);
   await page.getByRole("navigation",{name:"주요 화면"}).getByRole("button",{name:"세션",exact:true}).click();
   expect(await page.evaluate(()=> (window as any).__emitAvatarEvent("/api/emotion/stream","deepseek-emotion",{emotion:"chu",line:"DeepSeek 작업 대사",statusLine:"정상",outfit:"DeepSeek",source:"mcp-deepseek",sessionId:"stale-deepseek-thread",taskId:"deepseek:new-task"}))).toBeGreaterThan(0);
   expect(await page.evaluate(()=> (window as any).__emitAvatarEvent("/api/emotion/stream","ollama-emotion",{emotion:"chu",line:"Ollama 작업 대사",statusLine:"정상",outfit:"Ollama",sessionId:"stale-ollama-thread",taskId:"ollama:new-task"}))).toBeGreaterThan(0);
@@ -98,7 +99,9 @@ test("avatar status is task-scoped and compatible providers receive terminal eve
   await expect.poll(()=>page.evaluate(()=> (window as any).__avatarStreamUrls())).toContainEqual(expect.stringContaining("/api/tasks/antigravity/"));
 
   expect(await page.evaluate(()=> (window as any).__emitAvatarEvent("/api/tasks/antigravity/","agent-event",{type:"task_completed",content:"done",sequence:999,terminal:true,timestamp:new Date().toISOString()}))).toBeGreaterThan(0);
-  await expect(page.locator(".agent-avatar-slot.antigravity .avatar-speech")).toContainText("완료");
+  // A finish returns only that avatar to the pile, marked until it is seen.
+  await expect(page.locator(".agent-pile .agent-avatar-slot.antigravity .avatar-unseen-dot")).toBeVisible();
+  await expect(page.locator(".agent-avatar-slot.antigravity .avatar-mini")).toHaveAttribute("aria-label",/Gemini: 완료 · 확인하지 않은 결과/);
 });
 
 test("a stale completed turn cannot own the avatar after its follow-up starts",async({page})=>{
@@ -137,7 +140,7 @@ test("a stale completed turn cannot own the avatar after its follow-up starts",a
   await page.goto("/",{waitUntil:"domcontentloaded"});
   await page.getByRole("navigation",{name:"주요 화면"}).getByRole("button",{name:"세션",exact:true}).click();
   await page.locator(".agent-avatar-slot.codex").getByRole("button").first().click();
-  const panel=page.locator(".agent-avatar-slot.codex .recent-session-pop");
+  const panel=page.locator(".agent-popover");
   await expect(panel).toContainText("새 작업 시작 훅");
   await expect(panel).not.toContainText("이전 완료 훅");
   await expect.poll(()=>page.evaluate(()=>(window as any).__avatarStreamUrls())).toContainEqual(expect.stringContaining("/api/tasks/codex/codex%3Anext/events/stream"));
@@ -149,7 +152,7 @@ test("a stale completed turn cannot own the avatar after its follow-up starts",a
   await page.reload({waitUntil:"domcontentloaded"});
   await page.getByRole("navigation",{name:"주요 화면"}).getByRole("button",{name:"세션",exact:true}).click();
   await page.locator(".agent-avatar-slot.codex").getByRole("button").first().click();
-  const racedPanel=page.locator(".agent-avatar-slot.codex .recent-session-pop");
+  const racedPanel=page.locator(".agent-popover");
   await expect(racedPanel).not.toContainText("이전 완료 훅");
   await expect(racedPanel.locator(".recent-avatar-profile img")).toHaveAttribute("src",/Gpt-Codex\/coding\.webp$/);
 });

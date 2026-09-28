@@ -1,6 +1,8 @@
 <script lang="ts">
   import { onDestroy, onMount, tick } from "svelte";
   import { flip } from "svelte/animate";
+  import { crossfade, fade } from "svelte/transition";
+  import { agentPhase, emptyArrangement, fitActiveRow, formatElapsed, markSeen, nextArrangement, pileOf, pileWidth, type AgentPhase, type ActiveRowFit } from "./agent-arrangement";
   import EmotionAvatar from "./EmotionAvatar.svelte";
   import { avatarTaskStreamKey, terminalEventSuperseded, type AgentRecentSession, type AgentRecentStatus } from "./agent-status";
   import { DEFAULT_AVATAR_COLLAPSE_DELAY_MS, type AvatarTrayShape } from "./avatar-notice";
@@ -172,16 +174,18 @@
         sync("codex",codex);sync("claude",claude);sync("grok",grok);sync("antigravity",antigravity);sync("deepseek",deepseek);sync("ollama",ollama);
       }
     };
-    const outside=(event:PointerEvent)=>{if(dock&&!dock.contains(event.target as Node)){openProvider=null;resetVisible=null;clearResetTimer();}};
-    const key=(event:KeyboardEvent)=>{if(event.key==="Escape"){openProvider=null;resetVisible=null;clearResetTimer();}};
+    const outside=(event:PointerEvent)=>{if(dock&&!dock.contains(event.target as Node)){closePopover();resetVisible=null;clearResetTimer();}};
+    const key=(event:KeyboardEvent)=>{if(event.key==="Escape"){closePopover();resetVisible=null;clearResetTimer();}};
+    const phone=window.matchMedia("(max-width:760px)"),syncPhone=()=>phoneSheet=phone.matches;
+    syncPhone();phone.addEventListener("change",syncPhone);
     const reposition=()=>{for(const provider of providers)restoreFloatingPosition(provider);};
     document.addEventListener("visibilitychange",visibility);
     document.addEventListener("pointerdown",outside);
     document.addEventListener("keydown",key);
     window.addEventListener("resize",reposition);window.visualViewport?.addEventListener("resize",reposition);window.visualViewport?.addEventListener("scroll",reposition);
-    return()=>{document.removeEventListener("visibilitychange",visibility);document.removeEventListener("pointerdown",outside);document.removeEventListener("keydown",key);window.removeEventListener("resize",reposition);window.visualViewport?.removeEventListener("resize",reposition);window.visualViewport?.removeEventListener("scroll",reposition);dragCleanup?.();clearResetTimer();};
+    return()=>{phone.removeEventListener("change",syncPhone);document.removeEventListener("visibilitychange",visibility);document.removeEventListener("pointerdown",outside);document.removeEventListener("keydown",key);window.removeEventListener("resize",reposition);window.visualViewport?.removeEventListener("resize",reposition);window.visualViewport?.removeEventListener("scroll",reposition);dragCleanup?.();clearResetTimer();};
   });
-  onDestroy(()=>{for(const provider of providers)sources[provider]?.();});
+  onDestroy(()=>{for(const provider of providers)sources[provider]?.();if(clock)clearInterval(clock);});
 
   const label = (provider:AvatarProvider,recent:AgentRecentStatus|null,status?:string) => {
     const name=providerName(provider);
@@ -207,12 +211,62 @@
   const providerName=(provider:AvatarProvider)=>({codex:"Codex",claude:"Claude",grok:"Grok",antigravity:"Gemini",deepseek:"DeepSeek",ollama:"Ollama"})[provider];
   const sessionKey=(provider:AvatarProvider,session:AgentRecentSession)=>`task:${provider}:${session.taskId??session.threadId??""}`;
   const collapseNotices=()=>{codexNotice?.collapse();claudeNotice?.collapse();};
-  const toggle=(provider:AvatarProvider)=>{
+  // One popover for every agent: the avatar that opened it is pre-selected and
+  // the tab row switches agent without closing it.
+  let popEl:HTMLDivElement|null=null;
+  let popStyle="";
+  let phoneSheet=false;
+  function placePopover(anchor:Element|null|undefined){
+    if(!anchor)return;
+    const rect=anchor.getBoundingClientRect(),view=viewport(),width=Math.min(360,view.width-20);
+    const left=Math.min(Math.max(rect.left+rect.width/2-width/2,view.left+10),view.left+view.width-width-10);
+    popStyle=`left:${left}px;top:${rect.bottom+8}px;width:${width}px;max-height:${Math.max(220,view.top+view.height-rect.bottom-20)}px`;
+  }
+  const slotButton=(provider:AvatarProvider)=>dock?.querySelector<HTMLElement>(`.agent-avatar-slot.${provider} .avatar-mini`)??null;
+  const toggle=(provider:AvatarProvider,anchor?:Element|null)=>{
     resetVisible=null;clearResetTimer();
-    openProvider=openProvider===provider?null:provider;
-    if(openProvider)collapseNotices();
-    onOpen?.(openProvider);
+    if(openProvider===provider){closePopover();return;}
+    openProvider=provider;
+    arrangement=markSeen(arrangement,provider);
+    placePopover(anchor??dock?.querySelector(`.agent-avatar-slot.${provider}`));
+    collapseNotices();
+    onOpen?.(provider);
+    void tick().then(()=>popEl?.querySelector<HTMLElement>('[role="tab"][aria-selected="true"]')?.focus({preventScroll:true}));
   };
+  function selectTab(provider:AvatarProvider){
+    if(openProvider===provider)return;
+    openProvider=provider;
+    arrangement=markSeen(arrangement,provider);
+    onOpen?.(provider);
+  }
+  function closePopover(restoreFocus=false){
+    const last=openProvider;
+    if(!last)return;
+    openProvider=null;onOpen?.(null);
+    // An agent behind "+N" has no avatar of its own to return to.
+    if(restoreFocus)void tick().then(()=>(slotButton(last)??dock?.querySelector<HTMLElement>(".agent-overflow-chip"))?.focus());
+  }
+  function popoverKey(event:KeyboardEvent){
+    if(!openProvider||!popEl)return;
+    const target=event.target as HTMLElement;
+    if(event.key==="Escape"){event.preventDefault();event.stopPropagation();closePopover(true);return;}
+    if(target.getAttribute("role")==="tab"&&["ArrowLeft","ArrowRight","Home","End"].includes(event.key)){
+      event.preventDefault();
+      const list=connectedList,index=list.indexOf(openProvider);
+      const next=event.key==="Home"?list[0]:event.key==="End"?list[list.length-1]:list[(index+(event.key==="ArrowRight"?1:-1)+list.length)%list.length];
+      if(!next)return;
+      selectTab(next);
+      void tick().then(()=>popEl?.querySelector<HTMLElement>(`#agent-pop-tab-${next}`)?.focus());
+      return;
+    }
+    if(event.key==="ArrowDown"||event.key==="ArrowUp"){
+      const rows=[...popEl.querySelectorAll<HTMLElement>(".agent-pop-row")];
+      if(!rows.length)return;
+      event.preventDefault();
+      const index=rows.indexOf(target),down=event.key==="ArrowDown";
+      rows[index<0?(down?0:rows.length-1):Math.min(rows.length-1,Math.max(0,index+(down?1:-1)))].focus();
+    }
+  }
   const choose=async(session:AgentRecentSession)=>{const select=onSelect;openProvider=null;onOpen?.(null);await tick();await select?.(session);};
   const displayStatus=(provider:AvatarProvider,recent:AgentRecentStatus|null,statuses:Record<LiveProvider,string>)=>statuses[provider]||recent?.status;
   // Newest arrival first; providers that never spoke keep the declared order.
@@ -234,56 +288,153 @@
     .map(entry=>entry.item);
   // A pinned card only leaves the flow once the user has actually placed it.
   const detached=(provider:AvatarProvider,pinned:Record<Provider,boolean>,positions:Record<Provider,FloatingPosition|null>)=>pinned[provider]&&positions[provider]!==null;
+
+  // Header arrangement (agent-arrangement.ts): working agents stand in the
+  // active row in activation order, everyone else rests in the pile.
+  let arrangement=emptyArrangement<Provider>();
+  let activatedAt:Partial<Record<Provider,number>>={};
+  $: connectedList=providers.filter(provider=>connectedProviders[provider]);
+  $: phases=Object.fromEntries(providerItems.map(item=>[item.provider,agentPhase(liveStatuses[item.provider],item.recent?.status)])) as Record<Provider,AgentPhase>;
+  function arrange(list:Provider[],items:typeof providerItems,current:Record<Provider,AgentPhase>){
+    const next=nextArrangement(arrangement,list.map(provider=>({provider,phase:current[provider],startedAt:items.find(item=>item.provider===provider)?.recent?.startedAt??null})));
+    const stamps:Partial<Record<Provider,number>>={};
+    for(const provider of next.active)stamps[provider]=activatedAt[provider]??Date.now();
+    activatedAt=stamps;
+    // Whatever finishes while its own tab is open has been seen.
+    arrangement=openProvider?markSeen(next,openProvider):next;
+  }
+  $: arrange(connectedList,providerItems,phases);
+  $: pile=pileOf(arrangement,connectedList);
+
+  // The row degrades pill -> circle -> "+N" by measured width, so the agents
+  // can never run over the utilities beside them. Sizes come from the CSS.
+  let zone:HTMLDivElement|null=null;
+  let zoneWidth=0,slotSize=42,pillSize=216,rowGap=6,pileGap=10;
+  function readZone(node:HTMLDivElement){
+    const style=getComputedStyle(node),px=(name:string,fallback:number)=>{const value=parseFloat(style.getPropertyValue(name));return Number.isFinite(value)?value:fallback;};
+    slotSize=px("--slot",42);pillSize=px("--pill",216);rowGap=px("--row-gap",6);pileGap=px("--pile-gap",10);zoneWidth=node.clientWidth;
+  }
+  function measureZone(node:HTMLDivElement){
+    zone=node;const observer=new ResizeObserver(()=>readZone(node));observer.observe(node);readZone(node);
+    return{destroy(){observer.disconnect();if(zone===node)zone=null;}};
+  }
+  $: if(zone&&headerAvatarSizeStep>=0)void tick().then(()=>zone&&readZone(zone));
+  $: fit=(zoneWidth>0
+    ?fitActiveRow(arrangement.active,{available:zoneWidth-pileWidth(pile.length,slotSize)-(pile.length?pileGap:0),pill:pillSize,circle:slotSize,gap:rowGap,more:slotSize})
+    :{mode:"circle",visible:[...arrangement.active],hidden:[]}) as ActiveRowFit<Provider>;
+
+  let now=Date.now(),clock:ReturnType<typeof setInterval>|null=null;
+  $: needsClock=fit.mode==="pill"&&fit.visible.length>0;
+  $: if(needsClock&&!clock){now=Date.now();clock=setInterval(()=>now=Date.now(),1000);}else if(!needsClock&&clock){clearInterval(clock);clock=null;}
+  const elapsedFor=(provider:Provider,recent:AgentRecentStatus|null,stamps:Partial<Record<Provider,number>>,at:number)=>{
+    const started=Date.parse(recent?.startedAt??""),from=Number.isFinite(started)?started:stamps[provider];
+    return from?formatElapsed(at-from):"";
+  };
+  const recentOf=(provider:Provider,items:typeof providerItems)=>items.find(item=>item.provider===provider)?.recent??null;
+  const phaseText=(provider:Provider,status:string|undefined,activity:typeof liveActivity)=>{
+    const live=activity[provider];
+    return live?.labelKey?$t(live.labelKey):live?.phase&&live.phase!=="idle"?$t(`liveness.phase.${live.phase}`):speechTitle(status)||$t("avatar.state.running");
+  };
+  const stateText=(phase:AgentPhase,unseen:"done"|"failed"|undefined)=>`${$t(`avatar.state.${phase}`)}${unseen?` · ${$t("avatar.state.unseen")}`:""}`;
+  const reduceMotion=()=>typeof window!=="undefined"&&window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const motion=(ms:number)=>reduceMotion()?0:ms;
+  const [send,receive]=crossfade({duration:()=>motion(220),fallback:(node)=>fade(node,{duration:motion(140)})});
 </script>
 
+{#snippet avatarBody(provider:Provider,place:"active"|"pile",pill:boolean)}
+  {@const recent=recentOf(provider,providerItems)}
+  {@const status=displayStatus(provider,recent,liveStatuses)}
+  {@const phase=phases[provider]}
+  {@const unseen=arrangement.unseen[provider]}
+  {@const name=providerName(provider)}
+  <span class="avatar-ring ring-{phase}" aria-hidden="true"></span>
+  {#key `${provider}:${status}`}
+    <EmotionAvatar engine={provider} {codexAvatar} onMiniClick={()=>toggle(provider)} miniExpanded={openProvider===provider} miniLabel={$t("avatar.slotLabel",{provider:name,state:stateText(phase,unseen)})} context={{provider,status,sessionId:recent?.threadId,taskId:recent?.taskId}}/>
+  {/key}
+  {#if unseen==="done"&&place==="pile"}<span class="avatar-unseen-dot" aria-hidden="true"></span>{/if}
+  {#if pill}
+    <!-- The pill text repeats the avatar button's label, so it stays out of the
+         tab order and the accessibility tree; it only widens the click target. -->
+    <button type="button" class="agent-pill-body" tabindex="-1" aria-hidden="true" onclick={()=>toggle(provider)}>
+      <strong><span>{name} · {phaseText(provider,status,liveActivity)}</span><time>{elapsedFor(provider,recent,activatedAt,now)}</time></strong>
+      <small>{recent?.title??""}</small>
+    </button>
+  {/if}
+{/snippet}
+
 {#if showAvatars}<div class="agent-avatar-dock header-size-{headerAvatarSizeStep}" aria-label={$t("session.recent")} bind:this={dock}>
-  {#each providerItems.filter(item=>connectedProviders[item.provider]) as item (item.provider)}
-    {@const provider=item.provider}
-    {@const recent=item.recent}
-    {@const name=providerName(provider)}
+  <!-- Active row on the left in activation order, the pile of resting agents
+       on the right. Moving between them is a crossfade, never a reshuffle. -->
+  <div class="agent-zone" use:measureZone>
+    {#if arrangement.active.length}
+      <div class="agent-active-row mode-{fit.mode}" role="group" aria-label={$t("avatar.activeRow")}>
+        {#if fit.hidden.length}
+          <button type="button" class="agent-overflow-chip" aria-label={$t("avatar.moreActive",{count:fit.hidden.length})} title={fit.hidden.map(providerName).join(", ")} onclick={(event)=>toggle(fit.hidden[fit.hidden.length-1],event.currentTarget)}>+{fit.hidden.length}</button>
+        {/if}
+        {#each fit.visible as provider (provider)}
+          <div class="agent-avatar-slot {provider} status-{displayStatus(provider,recentOf(provider,providerItems),liveStatuses)||'idle'} phase-{phases[provider]}" class:pill={fit.mode==="pill"} title={label(provider,recentOf(provider,providerItems),displayStatus(provider,recentOf(provider,providerItems),liveStatuses))} animate:flip={{duration:motion(180)}} in:receive|global={{key:provider}} out:send|global={{key:provider}}>
+            {@render avatarBody(provider,"active",fit.mode==="pill")}
+          </div>
+        {/each}
+      </div>
+    {/if}
+    {#if pile.length}
+      <div class="agent-pile" role="group" aria-label={$t("avatar.pile")}>
+        {#each pile as provider (provider)}
+          <div class="agent-avatar-slot {provider} status-{displayStatus(provider,recentOf(provider,providerItems),liveStatuses)||'idle'} phase-{phases[provider]}" class:unseen={arrangement.unseen[provider]==="done"} title={label(provider,recentOf(provider,providerItems),displayStatus(provider,recentOf(provider,providerItems),liveStatuses))} animate:flip={{duration:motion(180)}} in:receive|global={{key:provider}} out:send|global={{key:provider}}>
+            {@render avatarBody(provider,"pile",false)}
+          </div>
+        {/each}
+      </div>
+    {/if}
+  </div>
+  {#if openProvider}
+    {@const provider=openProvider}
+    {@const recent=recentOf(provider,providerItems)}
     {@const status=displayStatus(provider,recent,liveStatuses)}
-    {@const text=speech(status)}
+    {@const name=providerName(provider)}
     {@const activeSessions=upsertStableRows(activeByProvider[provider],session=>sessionKey(provider,session))}
     {@const completedSessions=upsertStableRows(completedByProvider[provider],session=>sessionKey(provider,session))}
-    <!-- Six identical heads cannot say which one needs a person. Failure keeps
-         full strength plus a ring and badge; a finished head steps back. -->
-    <div class="agent-avatar-slot {provider} status-{status||'idle'}" title={label(provider,recent,status)}>
-      {#if status==="failed"}<span class="avatar-alert-badge" role="img" aria-label={speech(status)}>!</span>{/if}
-      {#key `${provider}:${status}`}
-        <EmotionAvatar engine={provider} {codexAvatar} onMiniClick={()=>toggle(provider)} miniExpanded={openProvider===provider} miniLabel={$t("avatar.statusAndRecent",{provider:name})} context={{provider,status,sessionId:recent?.threadId,taskId:recent?.taskId}}/>
-      {/key}
-      {#if showSpeech&&text}<span class="avatar-speech status-{status}" role="status" title={speechTitle(status)}><span>{text}</span></span>{/if}
-      {#if openProvider===provider}
-        <div class="recent-session-pop" role="dialog" aria-label={$t("avatar.avatarAndSessions",{provider:name})}>
-          <header><strong>{$t("avatar.providerSessions",{provider:name})}</strong><small>{$t("avatar.selectToOpen")}</small></header>
-          {#if liveActivity[provider]}
-            <div class="provider-live-activity"><strong>{$t(liveActivity[provider]!.labelKey||`liveness.phase.${liveActivity[provider]!.phase}`)}</strong>{#if liveActivity[provider]!.raw}<code>{liveActivity[provider]!.raw}</code>{/if}</div>
-          {/if}
+    {#if phoneSheet}<div class="agent-pop-backdrop" aria-hidden="true" onclick={()=>closePopover()}></div>{/if}
+    <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+    <div class="recent-session-pop agent-popover" class:sheet={phoneSheet} role="dialog" tabindex="-1" aria-label={$t("avatar.avatarAndSessions",{provider:name})} style={phoneSheet?"":popStyle} bind:this={popEl} onkeydown={popoverKey}>
+      <div class="agent-pop-tabs" role="tablist" aria-label={$t("avatar.pop.agents")}>
+        {#each connectedList as tab (tab)}
+          <button type="button" role="tab" id="agent-pop-tab-{tab}" class="phase-{phases[tab]}" class:unseen={Boolean(arrangement.unseen[tab])} aria-selected={tab===provider} aria-controls="agent-pop-panel" tabindex={tab===provider?0:-1} onclick={()=>selectTab(tab)}><i class="agent-tab-dot" aria-hidden="true"></i>{providerName(tab)}</button>
+        {/each}
+      </div>
+      <div id="agent-pop-panel" class="agent-pop-panel" role="tabpanel" aria-labelledby="agent-pop-tab-{provider}">
+        <header><strong>{$t("avatar.providerSessions",{provider:name})}</strong><small>{stateText(phases[provider],arrangement.unseen[provider])}</small></header>
+        {#if liveActivity[provider]}
+          <div class="provider-live-activity"><strong>{$t(liveActivity[provider]!.labelKey||`liveness.phase.${liveActivity[provider]!.phase}`)}</strong>{#if liveActivity[provider]!.raw}<code>{liveActivity[provider]!.raw}</code>{/if}</div>
+        {/if}
+        <h4>{$t("avatar.pop.inProgress")}</h4>
+        {#if activeSessions.length}
+          <div class="recent-session-list active-list">
+            {#each activeSessions as session (sessionKey(provider,session))}
+              <button type="button" class="agent-pop-row" onclick={()=>choose(session)}><span class="recent-live"></span><span><strong>{session.title}</strong><small>{statusLabel(session.status)} · {session.projectId??$t("session.unregisteredProject")} · {relativeTime(session.updatedAt)}</small></span></button>
+            {/each}
+          </div>
+        {:else}<p class="agent-pop-empty">{$t("avatar.pop.noneInProgress")}</p>{/if}
+        <h4>{$t("avatar.pop.recent")}</h4>
+        {#if completedSessions.length}
+          <div class="recent-session-list">
+            {#each completedSessions as session (sessionKey(provider,session))}
+              <button type="button" class="agent-pop-row" onclick={()=>choose(session)}><span class="recent-check">✓</span><span><strong>{session.title}</strong><small>{session.projectId??$t("session.unregisteredProject")} · {relativeTime(session.updatedAt)}</small></span></button>
+            {/each}
+          </div>
+        {:else if sessionsLoading[provider]}<p role="status">{$t("common.loading")}</p>
+        {:else if sessionsError[provider]}<p role="alert">{$t("common.notAvailable")} · <button type="button" onclick={()=>onOpen?.(provider)}>{$t("common.retry")}</button></p>
+        {:else}<p class="agent-pop-empty">{$t("avatar.pop.noneRecent")}</p>{/if}
+        <details class="agent-pop-profile">
+          <summary>{$t("avatar.pop.settings")}</summary>
           <div class="recent-avatar-profile">
             <EmotionAvatar variant="panel" engine={provider} {codexAvatar} onCodexAvatarChange={provider==="codex"?onCodexAvatarChange:null} {onAvatarOutfitChange} avatarAutoCollapse={false} allowDrag={false} collapsible={false} {headerAvatarSizeStep} {floatingAvatarSizeStep} floatingPinned={floatingPinned[provider]} onHeaderAvatarSizeChange={setHeaderAvatarSize} onFloatingAvatarSizeChange={setFloatingAvatarSize} onFloatingPinnedChange={pinned=>setFloatingPinned(provider,pinned)} context={{provider,status,sessionId:recent?.threadId,taskId:recent?.taskId}}/>
           </div>
-          {#if activeSessions.length}
-            <h4>{$t("task.status.running")}</h4>
-            <div class="recent-session-list active-list">
-              {#each activeSessions as session (sessionKey(provider,session))}
-                <button type="button" onclick={()=>choose(session)}><span class="recent-live"></span><span><strong>{session.title}</strong><small>{statusLabel(session.status)} · {session.projectId??$t("session.unregisteredProject")} · {relativeTime(session.updatedAt)}</small></span></button>
-              {/each}
-            </div>
-          {/if}
-          {#if completedSessions.length}
-            <h4>{$t("session.recentCompleted")}</h4>
-            <div class="recent-session-list">
-              {#each completedSessions as session (sessionKey(provider,session))}
-                <button type="button" onclick={()=>choose(session)}><span class="recent-check">✓</span><span><strong>{session.title}</strong><small>{session.projectId??$t("session.unregisteredProject")} · {relativeTime(session.updatedAt)}</small></span></button>
-              {/each}
-            </div>
-          {:else if !activeSessions.length&&sessionsLoading[provider]}<p role="status">{$t("common.loading")}</p>
-          {:else if !activeSessions.length&&sessionsError[provider]}<p role="alert">{$t("common.notAvailable")} · <button type="button" onclick={()=>onOpen?.(provider)}>{$t("common.retry")}</button></p>
-          {:else if !activeSessions.length}<p>{$t("session.noResults")}</p>{/if}
-        </div>
-      {/if}
+        </details>
+      </div>
     </div>
-  {/each}
+  {/if}
   {#if showSpeech}
     <!-- The overview hides automatic notices with CSS but keeps them mounted.
          Removing them here recreated each EmotionAvatar on every session-tab

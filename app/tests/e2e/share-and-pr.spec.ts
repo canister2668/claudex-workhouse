@@ -33,6 +33,17 @@ async function fixture(page:Page,options:{share?:boolean;pr?:boolean}={}){
   return{taskPosts:()=>taskPosts,prBody:()=>prBody};
 }
 
+// Session actions left the right rail for the heading's ⋯ menu (App: 작업 메뉴
+// with menu items; native Codex: its existing ⋯ action menu). A visible direct
+// button, such as the phone composer sheet's, still wins.
+async function sessionAction(page:Page,name:string){
+  const direct=page.getByRole("button",{name,exact:true}).filter({visible:true});
+  if(await direct.count())return direct.first();
+  const trigger=page.locator(".task-heading .task-heading-menu, .task-heading .more").first();
+  if(await trigger.getAttribute("aria-expanded")!=="true")await trigger.click();
+  return page.getByRole("menuitem",{name,exact:true}).or(page.locator(".task-heading .action-menu").getByRole("button",{name,exact:true})).first();
+}
+
 test("native share target prefills text and existing attachments without auto-running",async({page})=>{
   const state=await fixture(page,{share:true});
   await page.goto("/?share=11111111-1111-4111-8111-111111111111");
@@ -67,7 +78,7 @@ test("PR draft shows preflight and requires an explicit final confirmation",asyn
   const state=await fixture(page,{pr:true});
   await page.goto("/");
   await page.getByText("Fix mobile sharing").click();
-  await page.getByRole("button",{name:"PR 만들기"}).click();
+  await (await sessionAction(page,"PR 만들기")).click();
   const dialog=page.getByRole("dialog",{name:"Pull Request 만들기"});
   await expect(dialog).toContainText("feature/share");
   await expect(dialog).toContainText("origin/feature/share");

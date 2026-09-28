@@ -70,8 +70,11 @@ describe("workhouse overview redesign",()=>{
     expect(conversation).toContain("buildProgressRows(processRows)");
     expect(conversation).toContain("<BuildProgressCard {build}/>");
     expect(activityStrip).toContain("streamEnabled");
-    expect(app).toContain('class="path-tail-ellipsis" title={file.path} dir="rtl"');
-    expect(codexSessions).toContain('class="path-tail-ellipsis" title={file.path} dir="rtl"');
+    // Changed files moved from the right rail into the heading chip, shared by both session views.
+    const changedFilesChip=fs.readFileSync(path.join(process.cwd(),"src","web","ChangedFilesChip.svelte"),"utf8");
+    expect(changedFilesChip).toContain('class="path-tail-ellipsis" title={file.path} dir="rtl"');
+    expect(app).toContain("<ChangedFilesChip files={detailFileEntries} canOpen={detailFileCanOpen} onopen={openDetailFile}/>");
+    expect(codexSessions).toContain("<ChangedFilesChip files={detailFileEntries} canOpen={detailFileCanOpen} onopen={openDetailFile}/>");
     expect(styles).toContain(".path-tail-ellipsis{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;direction:rtl;text-align:left}");
     expect(conversation).not.toContain('class="process-panel"');
     expect(conversation).toContain('class="provider-quota {quotaTone}"');

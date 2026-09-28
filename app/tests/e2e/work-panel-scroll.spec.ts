@@ -45,19 +45,22 @@ test("work panel follows conversation scrolling while its own scroll stays isola
 
   const originalViewport=page.viewportSize()!;
   if(testInfo.project.name==="desktop-1280"){
-    for(const boundary of [{width:800,rail:false},{width:901,rail:true},{width:916,rail:true}]){
-      await page.setViewportSize({width:boundary.width,height:900});
-      await page.goto(`/?task=scroll-task&rail-boundary=${boundary.width}`);
-      if(boundary.rail)await expect(page.locator(".session-side-rail")).toBeVisible();
-      else await expect(page.locator(".session-side-rail")).toBeHidden();
+    // The right rail is gone: across the old 901px boundary the conversation
+    // column fills the detail width instead of sharing it with a second column.
+    for(const width of [800,901,916]){
+      await page.setViewportSize({width,height:900});
+      await page.goto(`/?task=scroll-task&rail-boundary=${width}`);
+      await expect(page.locator(".detail-main")).toBeVisible();
+      await expect(page.locator(".session-side-rail")).toHaveCount(0);
+      const widths=await page.evaluate(()=>({detail:document.querySelector(".detail")!.getBoundingClientRect().width,main:document.querySelector(".detail-main")!.getBoundingClientRect().width}));
+      expect(widths.main).toBeGreaterThan(widths.detail-40);
     }
     await page.setViewportSize(originalViewport);
   }
   await page.goto("/?task=scroll-task");
   const drawer=page.locator(".work-status-drawer"),badge=drawer.locator(".work-status-badge"),panel=drawer.locator(".work-status-panel");
   const viewportWidth=page.viewportSize()?.width??0,phone=viewportWidth<=599,panelDefaultsOpen=viewportWidth>=761;
-  if(viewportWidth>=901)await expect(page.locator(".session-side-rail")).toBeVisible();
-  else await expect(page.locator(".session-side-rail")).toBeHidden();
+  await expect(page.locator(".session-side-rail")).toHaveCount(0);
   await expect(badge).toHaveAttribute("aria-expanded",panelDefaultsOpen?"true":"false");
   if(!panelDefaultsOpen)await badge.click();
   await expect(drawer.locator(".work-event-details")).toBeVisible();

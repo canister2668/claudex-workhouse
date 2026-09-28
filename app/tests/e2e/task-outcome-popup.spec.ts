@@ -1,6 +1,6 @@
 import{expect,test}from"@playwright/test";
 
-test("wide outcome stays in the side rail while compact views use the acknowledged badge",async({page})=>{
+test("wide outcome opens in place from the work-status card and heading menu while compact views use the acknowledged badge",async({page})=>{
   await page.addInitScript(()=>{
     localStorage.setItem("claudex-ui-locale","ko");
     class SilentEventSource{onerror:null|(()=>void)=null;constructor(public url:string){}addEventListener(){}close(){}}
@@ -39,27 +39,35 @@ test("wide outcome stays in the side rail while compact views use the acknowledg
   await page.setViewportSize({width:1200,height:900});
   await page.goto("/?task=outcome-task");
   await page.clock.install();
-  const desktopOutcome=page.locator(".session-side-rail .outcome-rail");
+  // The right rail is gone: the finished work-status card and the heading's
+  // 작업 메뉴 open the full result in place, with Proton upload in its header.
+  await expect(page.locator(".session-side-rail")).toHaveCount(0);
+  const desktopOutcome=page.locator(".outcome-in-place .task-outcome");
+  await expect(desktopOutcome).toHaveCount(0);
+  const cardAction=page.locator(".work-status-drawer").getByRole("button",{name:"전체 결과 보기"});
+  await expect(page.locator(".work-status-drawer")).toContainText("변경 파일 2개");
+  await cardAction.click();
   await expect(desktopOutcome).toBeVisible();
-  await expect(desktopOutcome).toContainText("변경 파일 2");
-  await expect(desktopOutcome).toContainText("검증 결과 1");
-  await expect(desktopOutcome.getByRole("button",{name:"전체 결과 보기"})).toBeVisible();
-  await expect(desktopOutcome).not.toContainText("src/outcome.ts");
-  await desktopOutcome.getByRole("button",{name:"전체 결과 보기"}).click();
   await expect(desktopOutcome).toContainText("src/outcome.ts");
   await expect(desktopOutcome).toContainText("pnpm test");
-  await expect(desktopOutcome.getByRole("button",{name:"결과 접기"})).toBeVisible();
+  await expect(desktopOutcome.locator(".proton-upload-action")).toBeVisible();
   const desktopBadge=page.getByRole("button",{name:"결과 요약 보기"});
   await expect(desktopBadge).toBeHidden();
+  // Opened on purpose, so it does not run the compact auto-close timer.
   await page.clock.fastForward(12_100);
   await expect(desktopOutcome).toBeVisible();
   await expect(desktopBadge).toBeHidden();
+  await desktopOutcome.getByRole("button",{name:"결과 요약 숨기기"}).click();
+  await expect(desktopOutcome).toHaveCount(0);
+  await page.locator(".task-heading").getByRole("button",{name:"작업 메뉴"}).click();
+  await page.getByRole("menuitem",{name:"전체 결과 보기"}).click();
+  await expect(desktopOutcome).toBeVisible();
 
   await page.setViewportSize({width:800,height:1100});
   await page.goto("/?task=outcome-task");
   const badge=page.getByRole("button",{name:"결과 요약 보기"});
   await expect(badge).toBeVisible();
-  await expect(page.locator(".session-side-rail")).toBeHidden();
+  await expect(page.locator(".outcome-in-place")).toHaveCount(0);
   await badge.click();
   const outcome=page.getByRole("dialog",{name:"결과 요약"});
   await expect(outcome).toBeVisible();
@@ -112,7 +120,7 @@ test("a completed session switches to starting feedback as soon as a follow-up i
 
   await page.setViewportSize({width:1200,height:900});
   await page.goto("/?task=followup-old");
-  await expect(page.locator(".session-side-rail .outcome-rail")).toBeVisible();
+  await expect(page.locator(".work-status-drawer").getByRole("button",{name:"전체 결과 보기"})).toBeVisible();
   await page.locator(".composer textarea").fill("두 번째 입력");
   await page.getByRole("button",{name:"보내기"}).click();
   await expect(page.locator(".task-outcome")).toHaveCount(0);

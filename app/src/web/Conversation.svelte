@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Activity, Bot, Check, ChevronDown, ChevronUp, ChevronsDown, ChevronsUp, CircleAlert, Clock3, Copy, ExternalLink, Eye, EyeOff, FileDiff, Image as ImageIcon, LoaderCircle, Pencil, Sparkles, SquareTerminal, Wrench, X } from "@lucide/svelte";
+  import { Activity, Bot, Check, ChevronDown, ChevronUp, ChevronsDown, ChevronsUp, CircleAlert, Clock3, Copy, ExternalLink, Eye, EyeOff, FileDiff, FileText, Image as ImageIcon, LoaderCircle, Pencil, Sparkles, SquareTerminal, Wrench, X } from "@lucide/svelte";
   import { afterUpdate, beforeUpdate, onDestroy, onMount, tick } from "svelte";
   import BuildProgressCard from "./BuildProgressCard.svelte";
   import { activeBuilds, BUILD_HISTORY_VISIBLE, buildDurationLabel, buildEventSet, buildHistory, buildProgressRows } from "./build-progress";
@@ -50,6 +50,9 @@
   export let executionHostId:string|null="local";
   export let workspaceTargets:Array<{id:string;canonicalPath:string;hostId:string}>=[];
   export let sourceTaskId:string|null=null;
+  // Set by the session view once the finished task has a result to show; the
+  // work-status card then offers the full result next to its summary.
+  export let onviewoutcome:(()=>void)|null=null;
   export let onopenfile:((file:{path:string;pathBase:"workspace"|"task-cwd";sourceTaskId?:string;workspaceId?:string;line?:number;initialEdit?:boolean})=>void)|null=null;
   let changedFilesCollapsed=true;
   let changedFileEntries:Array<[string,{add:number;del:number;pathBase:"workspace"|"task-cwd"|"unresolved"}]>=[];
@@ -685,6 +688,7 @@
 
 {#if processRows.length||busy}
   <section class="work-status-drawer" class:open={statusPanelOpen}>
+    <div class="work-status-head">
     <button type="button" class="work-status-badge" aria-expanded={statusPanelOpen} onclick={()=>{restoreStatusPanelAtBottom=false;statusPanelOpen=!statusPanelOpen}}>
       <span class="process-state" class:running={busy}>{#if busy}<i class="process-pulse"></i>{:else}<Check size={15}/>{/if}</span>
       <span class="work-status-copy"><strong>{busy?busyText:$t("conversation.workFinished")}</strong>{#if busy&&statusWarnings}<small>{statusWarnings}</small>{:else if !busy&&completionEvidence}<small>{completionEvidence}</small>{/if}</span>
@@ -696,6 +700,8 @@
       {/if}
       <ChevronDown size={16}/>
     </button>
+    {#if !busy&&onviewoutcome}<button type="button" class="ui-btn ui-btn-sm work-status-outcome" onclick={()=>onviewoutcome?.()}><FileText size={14}/>{$t("outcome.viewDetails")}</button>{/if}
+    </div>
     {#if statusPanelOpen}
       <div class="work-status-panel">
         <code>{busy?(statusVisibility.summary||busyText):$t("conversation.workComplete")}</code>

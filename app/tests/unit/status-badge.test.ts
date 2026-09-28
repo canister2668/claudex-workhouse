@@ -40,10 +40,11 @@ describe("status badge", () => {
     expect((ko as Record<string, string>)["status.badge.delayed"]).toBe("응답 지연");
   });
 
-  it("never pairs a healthy connection label with a red indicator in the session rail", () => {
+  it("never pairs a healthy connection label with a red indicator in the session heading", () => {
     const app = web("App.svelte");
     expect(app).not.toContain('$t("common.normal"):$t("common.unknown")');
-    expect(app).toContain('{#if workerOnline(selected.executionHostId)===false}');
+    // The rail is gone; an offline Worker is flagged on the heading's host line and a healthy one says nothing.
+    expect(app).toContain('{#if workerOnline(selected.executionHostId)===false} · <span class="err-text">{$t("status.offline")}</span>{/if}');
     expect(web("SessionBadges.svelte")).toContain("<StatusBadge");
   });
 

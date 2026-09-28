@@ -10,6 +10,8 @@ export type AgentRecentStatus = {
   title: string;
   updatedAt: string;
   threadId?: string | null;
+  // When the task started, if known; the header shows elapsed time from it.
+  startedAt?: string | null;
 };
 
 export type AgentRecentSession = AgentRecentStatus & { projectId?: string | null };

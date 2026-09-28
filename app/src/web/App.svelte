@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Activity, ArrowRightLeft, Bot, EllipsisVertical, FileText, GitBranch, GitPullRequest, Check, ChevronDown, ChevronLeft, ChevronUp, CircleAlert, Clipboard, Clock3, CloudOff, Gauge, Globe, House, KanbanSquare, Link2, LoaderCircle, MessagesSquare, Pencil, Plus, RefreshCw, Search, Send, Settings, SlidersHorizontal, Square, SquareTerminal, Trash2, X, Zap } from "@lucide/svelte";
+  import { Activity, ArrowRightLeft, Bot, EllipsisVertical, FileText, GitBranch, GitPullRequest, Check, ChevronDown, ChevronLeft, ChevronUp, CircleAlert, Clipboard, Clock3, CloudOff, Gauge, Globe, House, KanbanSquare, Link2, LoaderCircle, MessagesSquare, PanelLeftClose, PanelLeftOpen, Pencil, Plus, RefreshCw, Search, Send, Settings, SlidersHorizontal, Square, SquareTerminal, Trash2, X, Zap } from "@lucide/svelte";
   import { onDestroy, onMount, tick } from "svelte";
   import { type AgentEvent } from "./events";
   import { pageBlock } from "./pager";
@@ -92,6 +92,9 @@
   import { liveWorkRedesignEnabled } from "./ui-feature-flags";
   import { providerDisplayName } from "./provider-display";
   import StatusBadge from "./ui/StatusBadge.svelte";
+  import Menu from "./ui/Menu.svelte";
+  import ChangedFilesChip from "./ChangedFilesChip.svelte";
+  import { collectChangedFiles, readSessionPanelOpen, sessionPanelAvailable, SESSION_PANEL_ROW_LIMIT, writeSessionPanelOpen, type ChangedFileEntry } from "./session-panel";
   import Switch from "./ui/Switch.svelte";
   import ModelPicker from "./ModelPicker.svelte";
   import SettingsView from "./settings/SettingsView.svelte";
@@ -109,7 +112,7 @@
   import CommandPalette from "./CommandPalette.svelte";
   import { isPaletteShortcut, type PaletteCommand } from "./command-palette";
   import { SESSION_VIEW_TABS, groupSessions, viewTabStatusFilter, type SessionViewTab } from "./session-groups";
-  import { taskBadgeState } from "./ui/status-badge";
+  import { BADGE_TONE, badgeLabelKey, taskBadgeState } from "./ui/status-badge";
 
   type Status = "pending" | "queued" | "running" | "waiting" | "completed" | "failed" | "stopped" | "unknown";
   type ProviderId="codex"|"claude"|"deepseek"|"ollama"|"antigravity"|"grok";
@@ -141,10 +144,13 @@
   const defaultHeadingCollapsed=()=>defaultSessionHeadingCollapsed(typeof window==="undefined"?Number.POSITIVE_INFINITY:window.innerWidth);
   let headingCollapsed=defaultHeadingCollapsed();
   let outcomeMobileExpanded=false;let outcomeMobileDismissed=false;let outcomeTaskKey="";
+  // Wide screens lost the rail copy of the result; it now opens in place from
+  // the work-status card or the heading menu, and closes with its own button.
+  let outcomeDesktopOpen=false;
   let pullRequestOpen=false;
   let headingKey="";
   $: {const nextHeadingKey=selected?.threadId??selected?.id??"";if(nextHeadingKey!==headingKey){headingKey=nextHeadingKey;headingCollapsed=defaultHeadingCollapsed();renameEditing=false;}}
-  $: {const nextOutcomeTaskKey=selected?.id??"";if(nextOutcomeTaskKey!==outcomeTaskKey){outcomeTaskKey=nextOutcomeTaskKey;outcomeMobileExpanded=false;outcomeMobileDismissed=false;}}
+  $: {const nextOutcomeTaskKey=selected?.id??"";if(nextOutcomeTaskKey!==outcomeTaskKey){outcomeTaskKey=nextOutcomeTaskKey;outcomeMobileExpanded=false;outcomeMobileDismissed=false;outcomeDesktopOpen=false;}}
   let coarsePointer=typeof window!=="undefined"&&window.matchMedia("(pointer:coarse)").matches;
   let viewportWidth=typeof window==="undefined"?Number.POSITIVE_INFINITY:window.innerWidth;
   let viewportHeight=typeof window==="undefined"?Number.POSITIVE_INFINITY:window.visualViewport?.height??window.innerHeight;
@@ -156,13 +162,25 @@
   $: setChromeBlocking("claude",chromeBlocking);
   $: chromeHidden=immersiveActive&&!$chromeVisible;
   $: bottomChromeHidden=immersiveActive&&$bottomChromeProgress<=0;
-  // At and below this width the header's views give way to a bottom tab bar;
-  // the ambient utilities (usage, settings, search, refresh) and the secondary
-  // views move into one "더보기" sheet.
+  // At and below this width the header's views give way to a bottom tab bar
+  // and the ambient utilities (usage, settings, search, refresh) move behind
+  // the header's ⋮ sheet.
   const MOBILE_NAV_WIDTH=760;
   let overflowOpen=false,overflowStyle="",overflowTrigger:HTMLButtonElement|undefined,overflowMenu:HTMLDivElement|undefined;
   $: compactShell=viewportWidth<=MOBILE_NAV_WIDTH;
   $: if(!compactShell&&overflowOpen)closeOverflow();
+  // Left sessions panel: one click from any open session to another, across
+  // models. The choice is remembered per browser; without one it starts open
+  // only on wide screens. It pushes the content and never shows on phones.
+  let sessionPanelOpen=readSessionPanelOpen(typeof localStorage==="undefined"?null:localStorage,viewportWidth);
+  function toggleSessionPanel(){sessionPanelOpen=!sessionPanelOpen;writeSessionPanelOpen(localStorage,sessionPanelOpen);}
+  $: sessionsListView=!selected&&!selectedCollaboration&&!codexDetailOpen&&!overviewOpen&&!collaborationBoardOpen&&!overlayViewOpen;
+  $: sessionPanelUsable=sessionPanelAvailable({compactShell,settingsOpen:globalOpen,viewerSplit:Boolean(workspaceViewer)&&(workspaceViewerLayout.layout==="columns"||workspaceViewerLayout.layout==="rows"),sessionsListView});
+  $: sessionPanelShown=sessionPanelOpen&&sessionPanelUsable;
+  // A native Codex session renders without `selected`; remember the row that opened it.
+  let sessionPanelCodexKey="";
+  $: if(!codexDetailOpen)sessionPanelCodexKey="";
+  $: sessionPanelCurrent=selected?taskSessionKey(selected):selectedCollaboration?`collaboration:${selectedCollaboration}`:sessionPanelCodexKey;
   function placeSheet(trigger:HTMLElement|undefined,menu:HTMLElement|undefined,maxWidth=260){
     if(!trigger||!menu)return"";
     const band=currentViewportBand(),rect=trigger.getBoundingClientRect();
@@ -184,6 +202,7 @@
       {id:"nav:board",group:navigate,label:$t("collaborationBoard.title"),run:()=>openCollaborationBoard()},
     ];
     commands.push({id:"nav:settings",group:navigate,label:$t("settings.title"),keywords:[$t("a11y.openSettings")],run:openGlobalSettings});
+    commands.push({id:"action:refresh",group:navigate,label:$t("common.refresh"),keywords:["refresh","reload"],run:()=>void refresh()});
     for(const provider of creatableProviders)commands.push({id:`new:${provider}`,group:newTask,label:$t("palette.newTaskWith",{name:providerDisplayName(provider)}),keywords:[provider,$t("task.create")],run:()=>void openOverviewCreate(provider as any)});
     for(const group of SETTINGS_GROUPS)for(const page of group.pages){const label=settingsPageLabel(page,$t,providerDisplayName);commands.push({id:`settings:${page}`,group:settingsGroup,label:$t("palette.openSettingsPage",{name:label}),hint:$t(group.labelKey),keywords:[label,page],run:()=>{globalTab=page;openGlobalSettings();}});}
     for(const task of latestThreadRows(tasks).slice().sort((a,b)=>b.updatedAt.localeCompare(a.updatedAt)).slice(0,8))commands.push({id:`task:${task.id}`,group:recent,label:task.title||$t("task.untitled"),hint:`${providerDisplayName(task.provider)} · ${ago(task.updatedAt)}`,keywords:[task.provider],run:()=>void openTask(task)});
@@ -257,20 +276,10 @@
   let contextUsage:ContextUsage|null=null;
   $: contextUsage=latestContextUsage(events,selected?.metadata?.contextUsage,{provider:selected?.provider,model:selected?.requestedModel??selected?.metadata?.model});
   $: visibleConversationEvents=selected?.provider==="claude"&&active.has(selected.status)?recentRunningConversationEvents(events,showRunningHistory):events;
-  let detailFileEntries:Array<{path:string;add:number;del:number;pathBase:"workspace"|"task-cwd"|"unresolved"}>=[];
-  $: {
-    const files=new Map<string,{add:number;del:number;pathBase:"workspace"|"task-cwd"|"unresolved"}>();
-    for(const event of visibleConversationEvents){
-      if(event.type!=="file_change_started"&&event.type!=="file_change_completed")continue;
-      const path=String(event.metadata?.path??"");if(!path)continue;
-      const rawBase=event.metadata?.pathBase,pathBase=rawBase==="workspace"||rawBase==="task-cwd"?rawBase:"unresolved";
-      const current=files.get(path)??{add:0,del:0,pathBase};
-      current.add+=Number(event.metadata?.additions??0);current.del+=Number(event.metadata?.deletions??0);
-      if(current.pathBase!==pathBase)current.pathBase="unresolved";
-      files.set(path,current);
-    }
-    detailFileEntries=[...files].map(([path,stats])=>({path,...stats}));
-  }
+  // Live with the conversation: every new file event updates the heading chip.
+  $: detailFileEntries=collectChangedFiles(visibleConversationEvents);
+  const detailFileCanOpen=(file:ChangedFileEntry)=>Boolean(selected?.workspaceId&&file.pathBase!=="unresolved"&&(file.pathBase==="workspace"||selected?.id));
+  const openDetailFile=(file:ChangedFileEntry)=>{if(selected&&detailFileCanOpen(file))openConversationFile({path:file.path,pathBase:file.pathBase as "workspace"|"task-cwd",sourceTaskId:selected.id});};
   let codexSessionRecent:AgentRecentStatus|null=null;
   let codexRef:{closeDetail:()=>void;openTaskSession:(task:Task)=>Promise<void>;openSearchResult:(result:any)=>Promise<void>;refreshSessions:()=>Promise<void>}|null=null;
   let codexDetailOpen=false;
@@ -324,7 +333,11 @@
   function openCollaborationBoard(card?:CollaborationBoardCard){if(globalOpen&&!closeGlobalSettings())return;exitTaskBulkMode();exitConversationBulkMode();closeCurrentDetail();closeOverlayView();overviewOpen=false;collaborationBoardInitialCardId=card?.id??null;collaborationBoardOpen=true;resetPageScroll();}
   async function promoteSelectedToBoard(){if(!selected)return;const source=selected;try{const card=await createBoardCard(api,{title:source.title||$t("session.untitled"),description:source.prompt??"",boardStatus:"in_progress",priority:"normal",workspaceId:source.workspaceId??null,targetBranch:"",roles:{implementer:{provider:source.provider,permissionProfile:source.permissionProfile??(source.provider==="codex"?":workspace":":workspace-write")},reviewer:{provider:source.provider==="claude"?"codex":"claude",permissionProfile:":read-only"}},sourceTaskId:source.id});openCollaborationBoard(card)}catch(error){window.alert(error instanceof Error?error.message:String(error))}}
   async function openOrPromoteSelectedBoard(){if(!selected?.workChainId)return promoteSelectedToBoard();try{openCollaborationBoard(await getBoardCard(api,selected.workChainId))}catch{await promoteSelectedToBoard()}}
-  function selectEngine(value:typeof engine){closeOverlayView();overviewOpen=false;if(engine===value)return;exitTaskBulkMode();exitConversationBulkMode();if(value!=="codex"){codexRef?.closeDetail();codexDetailOpen=false;}engine=value;applyCreateDefaultsForTab(value);if(value!=="codex")void refresh();}
+  function setEngine(value:typeof engine,keepCodexDetail=false){if(engine===value)return;exitTaskBulkMode();exitConversationBulkMode();if(value!=="codex"&&!keepCodexDetail){codexRef?.closeDetail();codexDetailOpen=false;}engine=value;applyCreateDefaultsForTab(value);if(value!=="codex")void refresh();}
+  function selectEngine(value:typeof engine){closeOverlayView();overviewOpen=false;setEngine(value);}
+  // The side panel filters in place: switching its tab never navigates away
+  // from the session on screen, including an open native Codex session.
+  const selectPanelEngine=(value:typeof engine)=>setEngine(value,true);
   const codexStatusFor=(value:typeof statusFilter):typeof codexStatus=>value==="active"?"running":value==="done"?"completed":value;
   function statusSelected(value:typeof statusFilter){return engine==="codex"?codexStatus===codexStatusFor(value):statusFilter===value;}
   function selectStatus(value:typeof statusFilter){if(engine==="codex")codexStatus=codexStatusFor(value);else statusFilter=value;}
@@ -332,10 +345,10 @@
   // remaining filters live behind the 필터 popover and show up as chips.
   $: currentStatus=engine==="codex"?(codexStatus==="running"?"active":codexStatus==="completed"?"done":codexStatus):statusFilter;
   $: viewTab=(engine==="collaboration-work"?"collaboration":currentStatus==="active"?"active":currentStatus==="waiting"?"waiting":currentStatus==="failed"?"failed":"all") as SessionViewTab;
-  function selectViewTab(tab:SessionViewTab){
+  function selectViewTab(tab:SessionViewTab,choose:(value:typeof engine)=>void=selectEngine){
     closeFilters();
-    if(tab==="collaboration"){selectEngine("collaboration-work");return;}
-    if(engine==="collaboration-work")selectEngine("all");
+    if(tab==="collaboration"){choose("collaboration-work");return;}
+    if(engine==="collaboration-work")choose("all");
     selectStatus(viewTabStatusFilter(tab));
   }
   type FilterChip={id:string;label:string;clear:()=>void};
@@ -361,6 +374,7 @@
   // activeFilterChips() bare, which never re-ran, so 필터 지우기 looked broken.
   $: filterChips=activeFilterChips(engine,currentStatus,codexProjectFilter,codexSourceFilter,codexOwnershipFilter,codexModelFilter,hostFilter,workspaceFilter,ownershipFilter,sourceFilter,chainFilter,workspaces,projects,hosts,$t);
   function clearAllFilters(){hostFilter="";workspaceFilter="";ownershipFilter="";sourceFilter="";chainFilter="";codexProjectFilter="";codexSourceFilter="";codexOwnershipFilter="";codexModelFilter="";if(currentStatus==="done")selectStatus("");}
+  $: sessionEngineTabs=[["all",$t("nav.all")],["collaboration-work",$t("nav.collaborationWork")],["conversation-linked",$t("nav.linkedSessions")],["codex","Codex"],["claude","Claude"],["grok","Grok"],["antigravity","Gemini"],["deepseek","DeepSeek"],["ollama","Ollama"]] as Array<[typeof engine,string]>;
   const groupBrowserItems=(entries:BrowserListItem[])=>groupSessions(entries.map(entry=>({status:entry.kind==="task"?entry.task.status:entry.collaboration.status,updatedAt:entry.updatedAt,entry})));
   const recentFor=(provider:ProviderId)=>provider==="codex"?codexRecent:provider==="claude"?claudeRecent:provider==="grok"?grokRecent:provider==="antigravity"?antigravityRecent:provider==="deepseek"?deepseekRecent:ollamaRecent;
   const agentStateKey=(recent:AgentRecentStatus|null)=>recent&&(active.has(recent.status)||recent.status==="failed"||recent.status==="completed")?`status.badge.${taskBadgeState(recent.status)}`:"sidebar.agentIdle";
@@ -919,7 +933,7 @@
       error="";
     }catch(value){error=value instanceof Error?value.message:String(value);}finally{conversationDocumentDeleting="";}
   }
-  const taskRecent=(provider:ProviderId,taskRows:Task[]):AgentRecentStatus|null=>{const rows=taskRows.filter(item=>item.provider===provider);const running=rows.filter(item=>active.has(item.status));const task=(running.length?running:rows).sort((a,b)=>b.updatedAt.localeCompare(a.updatedAt))[0];return task?{provider,taskId:task.id,status:task.status,title:task.title,updatedAt:task.updatedAt,threadId:task.threadId}:null;};
+  const taskRecent=(provider:ProviderId,taskRows:Task[]):AgentRecentStatus|null=>{const rows=taskRows.filter(item=>item.provider===provider);const running=rows.filter(item=>active.has(item.status));const task=(running.length?running:rows).sort((a,b)=>b.updatedAt.localeCompare(a.updatedAt))[0];return task?{provider,taskId:task.id,status:task.status,title:task.title,updatedAt:task.updatedAt,threadId:task.threadId,startedAt:task.createdAt}:null;};
   // Pass `tasks` explicitly so Svelte tracks the polling result as a reactive
   // dependency. Reads hidden inside taskRecent() are otherwise evaluated once.
   $: avatarTasks=avatarSessionRows(tasks,collaborationBoardOpen?collaborationBoardCardIds:undefined,sessionClassificationContext);
@@ -1618,8 +1632,11 @@
   async function openTask(task:Task,exact=false) {
     if(globalOpen&&!closeGlobalSettings())return;
     collaborationBoardOpen=false;
-    if(task.provider==="codex"&&task.threadId&&(!task.executionHostId||task.executionHostId==="local")){stopLive();discardLive();selected=null;events=[];engine="codex";await tick();await codexRef?.openTaskSession(task);return;}
-    codexRef?.closeDetail();codexDetailOpen=false;stopLive();discardLive();engine=task.provider;let latest=exact?task:latestThreadMember(tasks,task);if(latest.listProjection)try{const data=await api(`/api/tasks/${latest.provider}/${encodeURIComponent(latest.id)}/snapshot`,{}, {caller:"App.openTask.snapshot"});if(data?.task){latest=data.task;taskState.upsert(latest);}}catch(value){error=value instanceof Error?value.message:String(value);return;}selected=latest;events=[];lastLiveSequence=0;liveIds.clear();startLive();await loadThreadEvents(latest,true,true);
+    // Opening a session keeps the list tab when it already holds the session
+    // (전체 stays 전체), so the side panel still reaches every model in one click.
+    const narrowTab=engine!=="all"&&engine!==task.provider;
+    if(task.provider==="codex"&&task.threadId&&(!task.executionHostId||task.executionHostId==="local")){stopLive();discardLive();selected=null;events=[];if(narrowTab)engine="codex";codexMounted=true;await tick();await codexRef?.openTaskSession(task);return;}
+    codexRef?.closeDetail();codexDetailOpen=false;stopLive();discardLive();if(narrowTab)engine=task.provider;let latest=exact?task:latestThreadMember(tasks,task);if(latest.listProjection)try{const data=await api(`/api/tasks/${latest.provider}/${encodeURIComponent(latest.id)}/snapshot`,{}, {caller:"App.openTask.snapshot"});if(data?.task){latest=data.task;taskState.upsert(latest);}}catch(value){error=value instanceof Error?value.message:String(value);return;}selected=latest;events=[];lastLiveSequence=0;liveIds.clear();startLive();await loadThreadEvents(latest,true,true);
   }
   async function openHistoryResult(result:any){
     searchOpen=false;updateSearchQuery("");
@@ -1853,6 +1870,17 @@
   }
   function openAssist(){if(!selected)return;assistSourceContent=currentAssistSource();const provider=providerDisplayName(selected.provider),activeSession=active.has(selected.status);assistPrompt=$t(activeSession?"assist.defaultActivePrompt":"assist.defaultCompletedPrompt",{provider,content:assistSourceContent});assistTargetProvider=selected.provider==="codex"?"claude":"codex";assistTargetModel="";assistTargetEffort="default";assistTargetTier=null;assistOpen=true;}
   async function createAssist(){if(!selected||!assistTargetModel||!assistPrompt.trim()||!assistSourceContent.trim()||sending)return;sending=true;try{const data=await api(`/api/tasks/${selected.provider}/${encodeURIComponent(selected.id)}/assist`,{method:"POST",headers:{"Idempotency-Key":uuid()},body:JSON.stringify({targetProvider:assistTargetProvider,executionHostId:selected.executionHostId??"local",workspaceId:selected.workspaceId,title:$t("assist.sessionTitle",{title:selected.title}),prompt:assistPrompt,sourceContent:assistSourceContent,model:assistTargetModel,reasoningEffort:assistTargetEffort,serviceTier:assistTargetTier})});selectedAssistId=data.session.id;collaborations=[data.session,...collaborations.filter(item=>item.id!==data.session.id)];assistOpen=false;assistPrompt="";assistSourceContent="";}catch(e){error=e instanceof Error?e.message:String(e)}finally{sending=false;}}
+  // A row always belongs to the panel's current tab, so openTask keeps it.
+  async function openFromSessionPanel(entry:BrowserListItem){
+    if(entry.kind==="collaboration"){await openCollaboration(entry.id);return;}
+    await openTask(entry.task);await tick();
+    if(codexDetailOpen&&!selected)sessionPanelCodexKey=taskSessionKey(entry.task);
+  }
+  const sessionPanelMeta=(entry:BrowserListItem)=>entry.kind==="collaboration"?collaborationModeLabel(entry.collaboration):`${providerDisplayName(entry.task.provider)} · ${entry.task.provider==="claude"?claudeModelName(entry.task.requestedModel):(entry.task.requestedModel??$t("model.default"))}`;
+  // Result details: wide screens open them in place, compact screens use the
+  // existing sheet behind the composer badge.
+  function showTaskOutcome(){if(viewportWidth<=900){outcomeMobileExpanded=true;outcomeMobileDismissed=false;}else outcomeDesktopOpen=true;}
+  $: selectedOutcomeAvailable=Boolean(selected&&!followupStarting&&["completed","failed"].includes(selected.status)&&hasTaskOutcomeDetails(taskOutcomeSummary(selected,visibleConversationEvents)));
   async function openCollaboration(id:string){codexRef?.closeDetail();codexDetailOpen=false;stopLive();discardLive();selected=null;events=[];selectedCollaboration=id;}
   function submitFollowupKey(event:KeyboardEvent){if(!shouldSubmitOnEnter(event,enterToSend)||sending||(!followup.trim()&&!msgAttachments.length))return;event.preventDefault();void sendFollowup();}
   // ⌘Enter / Ctrl+Enter always starts; a bare Enter follows the "Enter to send" preference.
@@ -2077,7 +2105,9 @@
   <button type="button" data-popup-trigger="quota" class="icon-button quota-btn {barClass(quotaPeak())}" class:labelled class:active={quotaOpen} aria-label={$t("quota.title")} title={$t("quota.title")} onclick={()=>{closeOverflow();quotaOpen=!quotaOpen;if(quotaOpen)void loadQuota(true);}}><Gauge size={19}/>{#if labelled}<span>{$t("quota.title")}</span>{/if}</button>
   <button type="button" class="icon-button" class:labelled class:active={globalOpen} aria-label={$t("a11y.openSettings")} title={$t("settings.title")} onclick={()=>{closeOverflow();if(globalOpen)closeGlobalSettings();else openGlobalSettings();}}><Settings size={19}/>{#if labelled}<span>{$t("settings.title")}</span>{/if}</button>
   <button type="button" class="icon-button" class:labelled aria-label={$t("a11y.openSearch")} title={$t("palette.open")} onclick={()=>{closeOverflow();openPalette();}}><Search size={19}/>{#if labelled}<span>{$t("palette.open")}</span>{/if}</button>
-  <button type="button" class="icon-button" class:labelled aria-label={$t("common.refresh")} title={$t("common.refresh")} disabled={refreshRunning} onclick={()=>{closeOverflow();void refresh();}}><RefreshCw size={19} class={refreshRunning?"spin":""}/>{#if labelled}<span>{$t("common.refresh")}</span>{/if}</button>
+  <!-- Lists are live, so the desktop header spends no room on refresh; it stays
+       in the phone sheet and the command palette. -->
+  {#if labelled}<button type="button" class="icon-button" class:labelled aria-label={$t("common.refresh")} title={$t("common.refresh")} disabled={refreshRunning} onclick={()=>{closeOverflow();void refresh();}}><RefreshCw size={19} class={refreshRunning?"spin":""}/><span>{$t("common.refresh")}</span></button>{/if}
 {/snippet}
 
 {#snippet providerConnectionsPending()}
@@ -2242,7 +2272,7 @@
         </div>
       </main>
     {:else}
-    {#if engine!=="codex"||!codexDetailOpen}
+    {#if !codexDetailOpen}
     <div class="sessions-head">
       <div class="sessions-toolbar">
         <label class="sessions-search"><Search size={16}/><input value={query} oninput={(event)=>updateSearchQuery(event.currentTarget.value)} placeholder={$t("sessions.searchPlaceholder")} aria-label={$t("sessions.searchPlaceholder")}/>{#if query}<button type="button" class="icon-button" aria-label={$t("common.clear")} onclick={()=>{updateSearchQuery("");searchOpen=false;}}><X size={15}/></button>{/if}</label>
@@ -2258,8 +2288,8 @@
       {#if engine!=="conversation"}
       <!-- One click to another model's sessions, as before the redesign. -->
       <nav class="filters engine-tabs" aria-label={$t("session.engineFilter")}>
-        {#each [["all",$t("nav.all")],["collaboration-work",$t("nav.collaborationWork")],["conversation-linked",$t("nav.linkedSessions")],["codex","Codex"],["claude","Claude"],["grok","Grok"],["antigravity","Gemini"],["deepseek","DeepSeek"],["ollama","Ollama"]] as item}
-          <button class:active={engine===item[0]} onclick={()=>selectEngine(item[0] as typeof engine)}>{item[1]}</button>
+        {#each sessionEngineTabs as item}
+          <button class:active={engine===item[0]} onclick={()=>selectEngine(item[0])}>{item[1]}</button>
         {/each}
       </nav>
       {/if}
@@ -2293,8 +2323,8 @@
       {/if}
     </div>
     {/if}
-    {#if codexMounted}<div class="codex-session-pane" hidden={engine!=="codex"}><CodexSessions active={engine==="codex"} {api} bind:this={codexRef} bind:status={codexStatus} bind:projectId={codexProjectFilter} bind:source={codexSourceFilter} bind:ownership={codexOwnershipFilter} bind:model={codexModelFilter} sessionScope="regular" classificationContext={sessionClassificationContext} {taskState} {query} {enterToSend} {scrollAutoSwitch} {projects} {workspaces} {hosts} modelOptions={availableCodexModels()} providerQuota={quota?.codex??null} {codexAvatar} onDetail={(o)=>codexDetailOpen=o} onRecentStatus={(recent)=>codexSessionRecent=recent} onOpenTask={(task)=>openTask(task)} onOpenFile={openConversationFile}/></div>{/if}
-    {#if engine!=="codex"}<main class="task-list session-browser-list">
+    {#if codexMounted}<div class="codex-session-pane" hidden={engine!=="codex"&&!codexDetailOpen}><CodexSessions active={engine==="codex"||codexDetailOpen} {api} bind:this={codexRef} bind:status={codexStatus} bind:projectId={codexProjectFilter} bind:source={codexSourceFilter} bind:ownership={codexOwnershipFilter} bind:model={codexModelFilter} sessionScope="regular" classificationContext={sessionClassificationContext} {taskState} {query} {enterToSend} {scrollAutoSwitch} {projects} {workspaces} {hosts} modelOptions={availableCodexModels()} providerQuota={quota?.codex??null} {codexAvatar} onDetail={(o)=>codexDetailOpen=o} onRecentStatus={(recent)=>codexSessionRecent=recent} onOpenTask={(task)=>openTask(task)} onOpenFile={openConversationFile}/></div>{/if}
+    {#if engine!=="codex"&&!codexDetailOpen}<main class="task-list session-browser-list">
       {#if searchOpen&&query.trim()}
         <HistorySearchResults {api} {query} {workspaces} initialProvider={engine==="claude"?"claude":""} onopen={openHistoryResult}/>
       {:else}
@@ -2395,14 +2425,61 @@
     </section>
 {/snippet}
 
+{#snippet sessionActionsMenu(task:Task)}
+  <!-- The former right rail's 작업 메뉴: every action keeps its old condition. -->
+  <Menu label={$t("session.controls")} size="sm" class="task-heading-menu">
+    {#snippet children({close})}
+      {#if selectedOutcomeAvailable}<button type="button" role="menuitem" onclick={()=>{close();showTaskOutcome();}}><FileText size={16}/>{$t("outcome.viewDetails")}</button>{/if}
+      {#if canContinue()}<button type="button" role="menuitem" title={$t("session.fork")} onclick={()=>{close();action("fork");}} disabled={sending}><GitBranch size={16}/>{$t("session.fork")}</button>{/if}
+      {#if task.owned}<button type="button" role="menuitem" title={$t("handoff.newSessionTitle")} onclick={()=>{close();handoffOpen=true;}} disabled={sending}><ArrowRightLeft size={16}/>{$t("handoff.title")}</button>{/if}
+      {#if task.owned}<button type="button" role="menuitem" title={$t(!task.workspaceId?"assist.noWorkspace":active.has(task.status)?"assist.otherRunningTitle":"assist.otherTitle")} onclick={()=>{close();openAssist();}} disabled={sending||!task.workspaceId}><Bot size={16}/>{$t("assist.chooseReviewer")}</button>{/if}
+      {#if task.workChainId}<button type="button" role="menuitem" title={$t("handoff.workChain")} onclick={()=>{close();chainOpen=!chainOpen;}}><Link2 size={16}/>{$t("handoff.workChain")}</button>{/if}
+      <button type="button" role="menuitem" title={$t(task.workChainId?"collaborationBoard.openLinkedCard":"collaborationBoard.promoteBody")} onclick={()=>{close();openOrPromoteSelectedBoard();}} disabled={sending}><KanbanSquare size={16}/>{$t(task.workChainId?"collaborationBoard.openLinkedCard":"collaborationBoard.addToBoard")}</button>
+      {#if task.status==="completed"&&task.workspaceId}<button type="button" role="menuitem" title={$t("pr.title")} onclick={()=>{close();pullRequestOpen=true;}} disabled={sending}><GitPullRequest size={16}/>{$t("pr.action")}</button>{/if}
+    {/snippet}
+  </Menu>
+{/snippet}
+
+{#snippet sessionPanel()}
+  <aside class="session-panel" aria-label={$t("session.panelLabel")}>
+    <div class="session-panel-head">
+      <label class="sessions-search session-panel-search"><Search size={15}/><input value={query} oninput={(event)=>updateSearchQuery(event.currentTarget.value)} placeholder={$t("sessions.searchPlaceholder")} aria-label={$t("sessions.searchPlaceholder")}/>{#if query}<button type="button" class="icon-button" aria-label={$t("common.clear")} onclick={()=>updateSearchQuery("")}><X size={14}/></button>{/if}</label>
+      <nav class="session-panel-engines" aria-label={$t("session.engineFilter")}>
+        {#each sessionEngineTabs as item (item[0])}<button type="button" class:active={engine===item[0]} aria-pressed={engine===item[0]} onclick={()=>selectPanelEngine(item[0])}>{item[1]}</button>{/each}
+      </nav>
+      <nav class="session-panel-views" aria-label={$t("session.statusFilter")}>
+        {#each SESSION_VIEW_TABS as tab (tab)}<button type="button" class:active={viewTab===tab} aria-pressed={viewTab===tab} onclick={()=>selectViewTab(tab,selectPanelEngine)}>{$t(`sessions.viewTab.${tab}`)}</button>{/each}
+      </nav>
+    </div>
+    <div class="session-panel-list">
+      {#if loading&&!browserRows.length}<p class="session-panel-empty"><LoaderCircle class="spin" size={15}/>{$t("task.loading")}</p>
+      {:else if !browserRows.length}<p class="session-panel-empty">{engine==="conversation"?$t("task.emptyConversation"):engine==="collaboration-work"?$t("task.emptyCollaborationWork"):engine==="conversation-linked"?$t("task.emptyLinked"):$t("task.emptyVisible")}</p>
+      {:else}
+        {#each browserRows.slice(0,SESSION_PANEL_ROW_LIMIT) as entry (`${entry.kind}:${entry.id}`)}
+          {@const state=taskBadgeState(entry.kind==="task"?entry.task.status:entry.collaboration.status)}
+          {@const key=entry.kind==="task"?taskSessionKey(entry.task):`collaboration:${entry.id}`}
+          <button type="button" class="session-panel-row" class:current={key===sessionPanelCurrent} aria-current={key===sessionPanelCurrent?"page":undefined} onclick={()=>void openFromSessionPanel(entry)}>
+            <i class="session-panel-dot tone-{BADGE_TONE[state]}" class:running={state==="running"} role="img" aria-label={$t(badgeLabelKey(state))} title={$t(badgeLabelKey(state))}></i>
+            <span class="session-panel-copy">
+              <span class="session-panel-title"><strong>{entry.kind==="task"?entry.task.title||$t("task.untitled"):entry.collaboration.title}</strong><small>{ago(entry.updatedAt)}</small></span>
+              <small class="session-panel-meta">{sessionPanelMeta(entry)}</small>
+            </span>
+          </button>
+        {/each}
+        {#if browserRows.length>SESSION_PANEL_ROW_LIMIT}<button type="button" class="ui-btn ui-btn-ghost ui-btn-sm session-panel-more" onclick={openSessions}>{$t("session.panelShowAll",{count:browserRows.length})}</button>{/if}
+      {/if}
+    </div>
+  </aside>
+{/snippet}
+
 {#snippet sessionDetail()}
     {#if selected}
     <main class="detail">
       <div class="detail-main">
       <section class="task-heading" class:collapsed={headingCollapsed} inert={chromeHidden} use:chromeCollapse>
-        <div class="task-heading-top"><SessionBadges provider={selected.provider} status={selected.status} liveMode={liveStatus} ownership={selected.ownership}/>{#if headingCollapsed}<strong class="collapsed-title">{selected.title}</strong>{/if}<button class="heading-toggle" aria-label={$t(headingCollapsed?"session.expandTitle":"session.collapseTitle")} title={$t(headingCollapsed?"session.expandTitle":"session.collapseTitle")} onclick={()=>headingCollapsed=!headingCollapsed}>{#if headingCollapsed}<ChevronDown size={18}/>{:else}<ChevronUp size={18}/>{/if}</button></div>
+        <div class="task-heading-top"><SessionBadges provider={selected.provider} status={selected.status} liveMode={liveStatus} ownership={selected.ownership}/>{#if headingCollapsed}<strong class="collapsed-title">{selected.title}</strong>{/if}<span class="task-heading-tools"><ChangedFilesChip files={detailFileEntries} canOpen={detailFileCanOpen} onopen={openDetailFile}/>{@render sessionActionsMenu(selected)}</span><button class="heading-toggle" aria-label={$t(headingCollapsed?"session.expandTitle":"session.collapseTitle")} title={$t(headingCollapsed?"session.expandTitle":"session.collapseTitle")} onclick={()=>headingCollapsed=!headingCollapsed}>{#if headingCollapsed}<ChevronDown size={18}/>{:else}<ChevronUp size={18}/>{/if}</button></div>
         {#if !headingCollapsed}<div class="heading-expanded">{#if renameEditing}<div class="session-title-editor"><input bind:value={renameTitle} aria-label={$t("session.rename")} maxlength="100" onkeydown={renameKeydown} use:focusNode/><button type="button" class="save" aria-label={$t("common.save")} title={$t("common.save")} disabled={!renameTitle.trim()||renameSaving} onclick={saveRename}>{#if renameSaving}<LoaderCircle class="spin" size={17}/>{:else}<Check size={17}/>{/if}</button><button type="button" aria-label={$t("common.cancel")} title={$t("common.cancel")} disabled={renameSaving} onclick={cancelRename}><X size={17}/></button></div>{:else}<div class="session-title-row"><h1>{selected.title}</h1><button type="button" class="session-title-edit" aria-label={$t("session.rename")} title={$t("session.rename")} onclick={beginRename}><Pencil size={15}/></button></div>{/if}
-        <p>{hostName(selected.executionHostId)} · {projectLabel(selected)}{#if executionBackendLabel(selected.metadata)} · {executionBackendLabel(selected.metadata)}{/if} · {ago(selected.updatedAt)}</p>
+        <p>{hostName(selected.executionHostId)}{#if workerOnline(selected.executionHostId)===false} · <span class="err-text">{$t("status.offline")}</span>{/if} · {projectLabel(selected)}{#if executionBackendLabel(selected.metadata)} · {executionBackendLabel(selected.metadata)}{/if} · {ago(selected.updatedAt)}</p>
         <div class="id-row"><button onclick={()=>copySelected("task")} title={$t("task.copyId")}><span>{$t("task.label")}</span><code>{shortId(selected.nativeId)}</code><Clipboard size={15}/></button><button onclick={()=>copySelected("thread")} title={$t("session.copyThreadId")}><span>{$t("session.thread")}</span><code>{shortId(selected.threadId)}</code><Clipboard size={15}/></button></div></div>{/if}
         <ContextMeter provider={selected.provider} usage={contextUsage} canCompact={Boolean(selected.owned&&selected.threadId)} busy={active.has(selected.status)} compacting={contextRequestBusy||Boolean(selected.metadata?.operation==="context_compaction"&&active.has(selected.status))} oncompact={compactContext}/>
       </section>
@@ -2420,7 +2497,8 @@
         </div>
       {/if}
       {#if !followupStarting}<TaskOutcomeSummary {api} task={selected} events={visibleConversationEvents} mobileCollapsible={canContinue()&&selected.owned} mobileExpanded={outcomeMobileExpanded} mobileDismissed={outcomeMobileDismissed} hideOnWide onclose={()=>{outcomeMobileExpanded=false;outcomeMobileDismissed=true;}}/>{/if}
-      {#key selected.threadId??selected.id}<Conversation provider={selected.provider} providerModel={selected.effectiveModel??selected.requestedModel??selected.metadata?.model??null} events={visibleConversationEvents} request={selected.prompt} requestTimestamp={selected.createdAt} responseTimestamp={selected.updatedAt} busy={followupStarting||active.has(selected.status) && liveStatus!=="History"} liveMode={followupStarting?"Delayed":liveStatus} rootThreadId={selected.provider==="codex"?selected.threadId??null:null} providerQuota={quota?.[selected.provider]??null} persistedOutputUsage={selected.metadata?.outputUsage} {scrollAutoSwitch} onScrollDirection={handleConversationScroll} onRevealChrome={revealChrome} onScrollActivity={handleScrollActivity} runningHistoryVisible={Boolean(selected.provider==="claude"&&active.has(selected.status)&&selected.threadId)} runningHistoryExpanded={showRunningHistory} ontogglerunninghistory={()=>setShowRunningHistory(!showRunningHistory)} {transcriptTruncated} {transcriptHistoryLoading} transcriptCanLoadMore={transcriptTurns<24} onloadtranscripthistory={loadEarlierTranscript} workspaceId={selected.workspaceId??null} workspacePath={conversationWorkspacePath(selected)} executionHostId={selected.executionHostId??"local"} workspaceTargets={workspaces} sourceTaskId={selected.id} onopenfile={openConversationFile}/>{/key}
+      {#if outcomeDesktopOpen&&selectedOutcomeAvailable}<div class="outcome-in-place"><TaskOutcomeSummary {api} task={selected} events={visibleConversationEvents} onclose={()=>outcomeDesktopOpen=false}/></div>{/if}
+      {#key selected.threadId??selected.id}<Conversation provider={selected.provider} providerModel={selected.effectiveModel??selected.requestedModel??selected.metadata?.model??null} events={visibleConversationEvents} request={selected.prompt} requestTimestamp={selected.createdAt} responseTimestamp={selected.updatedAt} busy={followupStarting||active.has(selected.status) && liveStatus!=="History"} liveMode={followupStarting?"Delayed":liveStatus} rootThreadId={selected.provider==="codex"?selected.threadId??null:null} providerQuota={quota?.[selected.provider]??null} persistedOutputUsage={selected.metadata?.outputUsage} {scrollAutoSwitch} onScrollDirection={handleConversationScroll} onRevealChrome={revealChrome} onScrollActivity={handleScrollActivity} runningHistoryVisible={Boolean(selected.provider==="claude"&&active.has(selected.status)&&selected.threadId)} runningHistoryExpanded={showRunningHistory} ontogglerunninghistory={()=>setShowRunningHistory(!showRunningHistory)} {transcriptTruncated} {transcriptHistoryLoading} transcriptCanLoadMore={transcriptTurns<24} onloadtranscripthistory={loadEarlierTranscript} workspaceId={selected.workspaceId??null} workspacePath={conversationWorkspacePath(selected)} executionHostId={selected.executionHostId??"local"} workspaceTargets={workspaces} sourceTaskId={selected.id} onopenfile={openConversationFile} onviewoutcome={selectedOutcomeAvailable?showTaskOutcome:null}/>{/key}
       {#if selectedAssistId}<CollaborationTimeline collaborationId={selectedAssistId} {api} {codexAvatar} quotaByProvider={quota} {enterToSend} embedded onopen={(task)=>openTask(task)} onclose={()=>selectedAssistId=null}/>{/if}
       <div class="bottom-chrome-drawer" inert={bottomChromeHidden} use:chromeSlide>
       <div bind:this={sessionMenu} class="session-actions-sheet" popover="manual" role="menu" aria-label={$t("nav.moreActions")} style={sessionMenuStyle} use:dismissOnOutside={{onDismiss:closeSessionMenu,triggerSelector:'[data-popup-trigger="session-actions"]'}}>
@@ -2474,44 +2552,6 @@
       {/if}
       </div>
       </div>
-      <aside class="session-side-rail" aria-label={$t("session.current")}>
-        <section>
-          <h2>{$t("session.current")}</h2>
-          <dl>
-            <div><dt>{$t("session.provider")}</dt><dd>{providerDisplayName(selected.provider)}</dd></div>
-            <div><dt>{$t("common.status")}</dt><dd><StatusBadge state={taskBadgeState(selected.status,{delayed:liveStatus==="Delayed"&&active.has(selected.status)})}/></dd></div>
-            <div><dt>{$t("workspace.label")}</dt><dd>{projectLabel(selected)}</dd></div>
-            <div><dt>{$t("conversation.lastEvent",{time:""})}</dt><dd>{ago(selected.updatedAt)}</dd></div>
-            <!-- Connection details only appear when something is wrong; a healthy Worker says nothing. -->
-            {#if workerOnline(selected.executionHostId)===false}<div><dt>{$t("session.worker")}</dt><dd class="err-text">{$t("status.offline")} · {hostName(selected.executionHostId)}</dd></div>{/if}
-          </dl>
-        </section>
-        {#if !followupStarting&&["completed","failed"].includes(selected.status)&&hasTaskOutcomeDetails(taskOutcomeSummary(selected,visibleConversationEvents))}<TaskOutcomeSummary {api} task={selected} events={visibleConversationEvents} rail/>{/if}
-        {#if followupStarting||!["completed","failed"].includes(selected.status)||!hasTaskOutcomeDetails(taskOutcomeSummary(selected,visibleConversationEvents))}
-        <section>
-          <h2>{$t("session.controls")}</h2>
-          <div class="session-side-actions">
-            {#if canContinue()}<button title={$t("session.fork")} onclick={()=>action("fork")} disabled={sending}><GitBranch size={18}/><span>{$t("session.fork")}</span></button>{/if}
-            {#if selected.owned}<button title={$t("handoff.newSessionTitle")} onclick={()=>handoffOpen=true} disabled={sending}><ArrowRightLeft size={18}/><span>{$t("handoff.title")}</span></button>{/if}
-            {#if selected.owned}<button title={$t(!selected.workspaceId?"assist.noWorkspace":active.has(selected.status)?"assist.otherRunningTitle":"assist.otherTitle")} onclick={openAssist} disabled={sending||!selected.workspaceId}><Bot size={18}/><span>{$t("assist.chooseReviewer")}</span></button>{/if}
-            {#if selected.workChainId}<button title={$t("handoff.workChain")} onclick={()=>chainOpen=!chainOpen}><Link2 size={18}/><span>{$t("handoff.workChain")}</span></button>{/if}
-            <button title={$t(selected.workChainId?"collaborationBoard.openLinkedCard":"collaborationBoard.promoteBody")} onclick={openOrPromoteSelectedBoard} disabled={sending}><KanbanSquare size={18}/><span>{$t(selected.workChainId?"collaborationBoard.openLinkedCard":"collaborationBoard.addToBoard")}</span></button>
-            {#if selected.status==="completed"&&selected.workspaceId}<button title={$t("pr.title")} onclick={()=>pullRequestOpen=true} disabled={sending}><GitPullRequest size={18}/><span>{$t("pr.action")}</span></button>{/if}
-          </div>
-        </section>
-        {/if}
-        <section>
-          <h2>{$t("conversation.changedFiles")} <span>{detailFileEntries.length}</span></h2>
-          {#if detailFileEntries.length}
-            <div class="session-side-files">
-              {#each detailFileEntries.slice(0,9) as file}
-                {@const canOpen=Boolean(selected.workspaceId&&file.pathBase!=="unresolved"&&(file.pathBase==="workspace"||selected.id))}
-                <button disabled={!canOpen} onclick={()=>canOpen&&openConversationFile({path:file.path,pathBase:file.pathBase as "workspace"|"task-cwd",sourceTaskId:selected!.id})}><code class="path-tail-ellipsis" title={file.path} dir="rtl"><bdi dir="ltr">{file.path}</bdi></code><span><em>+{file.add}</em><i>-{file.del}</i></span></button>
-              {/each}
-            </div>
-          {:else}<p class="session-side-empty">{$t("workspace.noChanges")}</p>{/if}
-        </section>
-      </aside>
     </main>
     {/if}
 {/snippet}
@@ -2523,14 +2563,14 @@
 {:else if ownerClaimRequired}
 <OwnerClaim {api} initialStatus={ownerClaimInitial} onclaimed={retryOwnerClaimStatus}/>
 {:else}
-<div class="shell" inert={Boolean(workspaceViewer)&&(workspaceViewerLayout.layout==="window"||workspaceViewerLayout.layout==="fullscreen")} class:settings-open={globalOpen} class:detail-open={!globalOpen&&(selected||selectedCollaboration||codexDetailOpen)} class:session-detail-open={!globalOpen&&(selected||codexDetailOpen)} class:chrome-drawer-enabled={immersiveActive} class:chrome-immersive={chromeHidden} style={immersiveActive?`--chrome-progress:${$bottomChromeProgress}`:""} class:overview-open={!globalOpen&&overviewOpen&&!selected&&!selectedCollaboration&&!codexDetailOpen} class:viewer-columns={Boolean(workspaceViewer)&&workspaceViewerLayout.layout==="columns"} class:viewer-rows={Boolean(workspaceViewer)&&workspaceViewerLayout.layout==="rows"} class:viewer-layout-reversed={Boolean(workspaceViewer)&&workspaceViewerLayout.reversed}>
+<div class="shell" class:session-panel-open={sessionPanelShown} inert={Boolean(workspaceViewer)&&(workspaceViewerLayout.layout==="window"||workspaceViewerLayout.layout==="fullscreen")} class:settings-open={globalOpen} class:detail-open={!globalOpen&&(selected||selectedCollaboration||codexDetailOpen)} class:session-detail-open={!globalOpen&&(selected||codexDetailOpen)} class:chrome-drawer-enabled={immersiveActive} class:chrome-immersive={chromeHidden} style={immersiveActive?`--chrome-progress:${$bottomChromeProgress}`:""} class:overview-open={!globalOpen&&overviewOpen&&!selected&&!selectedCollaboration&&!codexDetailOpen} class:viewer-columns={Boolean(workspaceViewer)&&workspaceViewerLayout.layout==="columns"} class:viewer-rows={Boolean(workspaceViewer)&&workspaceViewerLayout.layout==="rows"} class:viewer-layout-reversed={Boolean(workspaceViewer)&&workspaceViewerLayout.reversed}>
 {#snippet brandBlock()}
     <div class="brand" aria-label={$t("brand.name")}>
       <span class="brand-nav-slot">
         {#if globalOpen}<button class="brand-back" aria-label={$t("settings.close")} onclick={()=>closeGlobalSettings()}><ChevronLeft size={22}/></button>
         {:else if selectedCollaboration}<button class="brand-back" aria-label={$t("common.back")} onclick={()=>{selectedCollaboration=null;revealImmersiveChrome();}}><ChevronLeft size={22}/></button>
         {:else if selected}<button class="brand-back" aria-label={$t("common.back")} onclick={()=>{stopLive();discardLive();selected=null;selectedAssistId=null;events=[];liveStatus="History";revealImmersiveChrome();}}><ChevronLeft size={22}/></button>
-        {:else if engine==="codex"&&codexDetailOpen}<button class="brand-back" aria-label={$t("session.title")} onclick={()=>{codexRef?.closeDetail();revealImmersiveChrome();}}><ChevronLeft size={22}/></button>
+        {:else if codexDetailOpen}<button class="brand-back" aria-label={$t("session.title")} onclick={()=>{codexRef?.closeDetail();revealImmersiveChrome();}}><ChevronLeft size={22}/></button>
         {:else}<img class="brand-app-icon" src="/icons/favicon.svg" alt="" aria-hidden="true"/>{/if}
       </span>
       <span class="brand-copy"><strong><span class="brand-full">{$t("brand.name")}</span><span class="brand-short">{$t("brand.shortName")}</span></strong><small>{$t("brand.subtitle")}</small></span>
@@ -2550,10 +2590,11 @@
   <button type="button" class:active={!globalOpen&&(collaborationBoardOpen)} onclick={()=>openCollaborationBoard()} aria-label={$t("collaborationBoard.title")} title={$t("collaborationBoard.title")}><KanbanSquare size={18}/><span class="nav-label">{$t("collaborationBoard.title")}</span></button>
 {/snippet}
 
-  <!-- One header at every width keeps brand, views, the agent dock and the
-       utilities in a single row so sessions get the full width. Phones move
-       the views to a bottom tab bar and the utilities into "더보기". -->
+  <!-- One header at every width keeps brand, views, the agent dock, the
+       utilities and 작업 생성 in a single row so sessions get the full width.
+       Phones move the views to a bottom tab bar and the utilities behind ⋮. -->
   <header class="mobile-topbar app-topbar">
+    {#if !compactShell}<button type="button" class="icon-button session-panel-toggle" class:active={sessionPanelShown} aria-pressed={sessionPanelShown} disabled={!sessionPanelUsable} aria-label={$t(sessionPanelOpen?"session.panelClose":"session.panelOpen")} title={$t(!sessionPanelUsable&&sessionsListView?"session.panelOnListPage":sessionPanelOpen?"session.panelClose":"session.panelOpen")} onclick={toggleSessionPanel}>{#if sessionPanelOpen}<PanelLeftClose size={19}/>{:else}<PanelLeftOpen size={19}/>{/if}</button>{/if}
     {@render brandBlock()}
     {#if !compactShell}<nav class="primary-nav topbar-nav" aria-label={$t("nav.primary")}>{@render primaryNavButtons(true)}</nav>{/if}
     <div class="top-actions">
@@ -2573,20 +2614,20 @@
       <button type="button" bind:this={overflowTrigger} data-popup-trigger="overflow" class="icon-button" class:active={overflowOpen} aria-label={$t("nav.moreActions")} title={$t("nav.moreActions")} aria-haspopup="menu" aria-expanded={overflowOpen} onclick={toggleOverflow}><EllipsisVertical size={19}/></button>
       {:else}
         {@render shellUtilities(false)}
-      <button class="new-button" aria-label={$t("task.create")} onclick={openCreate}>{#if createOpening}<LoaderCircle class="spin" size={19}/>{:else}<Plus size={19}/>{/if}<span>{$t("task.create")}</span></button>
       {/if}
+      <button class="new-button" aria-label={$t("task.create")} title={$t("task.create")} onclick={openCreate}>{#if createOpening}<LoaderCircle class="spin" size={19}/>{:else}<Plus size={19}/>{/if}<span>{$t("task.create")}</span></button>
     </div>
   </header>
+  {#if sessionPanelShown}{@render sessionPanel()}{/if}
   {#if compactShell}
+  <!-- The views only; 작업 생성 lives at the right end of the header. -->
   <nav class="primary-nav mobile-tabbar" aria-label={$t("nav.primary")}>
     <button type="button" class:active={!globalOpen&&(overviewOpen)} onclick={openOverview} aria-label={$t("nav.home")} title={$t("nav.home")}><House size={19}/><span class="nav-label">{$t("nav.home")}</span></button>
+    <button type="button" class:active={!globalOpen&&(collaborationBoardOpen)} onclick={()=>openCollaborationBoard()} aria-label={$t("collaborationBoard.title")} title={$t("collaborationBoard.title")}><KanbanSquare size={19}/><span class="nav-label">{$t("collaborationBoard.title")}</span></button>
     <button type="button" class:active={!globalOpen&&(!overviewOpen&&!collaborationBoardOpen&&!overlayViewOpen&&engine!=="conversation")} onclick={openSessions} aria-label={$t("nav.sessions")} title={$t("nav.sessions")}><SquareTerminal size={19}/><span class="nav-label">{$t("nav.sessions")}</span></button>
-    <button type="button" class="new-button tab-create" aria-label={$t("task.create")} title={$t("task.create")} onclick={openCreate}>{#if createOpening}<LoaderCircle class="spin" size={20}/>{:else}<Plus size={22}/>{/if}</button>
     <button type="button" class:active={!globalOpen&&(!overviewOpen&&!collaborationBoardOpen&&!overlayViewOpen&&engine==="conversation")} onclick={openConversations} aria-label={$t("nav.conversation")} title={$t("nav.conversation")}><MessagesSquare size={19}/><span class="nav-label">{$t("nav.conversation")}</span></button>
-    <button type="button" class:active={overflowOpen||collaborationBoardOpen||overlayViewOpen} aria-label={$t("nav.more")} title={$t("nav.more")} aria-haspopup="menu" aria-expanded={overflowOpen} onclick={toggleOverflow}><EllipsisVertical size={19}/><span class="nav-label">{$t("nav.more")}</span></button>
   </nav>
   <div bind:this={overflowMenu} class="topbar-overflow more-sheet" popover="manual" role="menu" aria-label={$t("nav.moreActions")} style={overflowStyle} use:dismissOnOutside={{onDismiss:closeOverflow,triggerSelector:'[data-popup-trigger="overflow"]'}}>
-    <button type="button" class="icon-button labelled" class:active={collaborationBoardOpen} onclick={()=>{closeOverflow();openCollaborationBoard();}}><KanbanSquare size={19}/><span>{$t("collaborationBoard.title")}</span></button>
     {@render shellUtilities(true)}
   </div>
   {/if}
