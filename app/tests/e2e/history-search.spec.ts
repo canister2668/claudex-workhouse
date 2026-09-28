@@ -31,8 +31,12 @@ test("full history search filters stored rows and opens the exact matched output
     return json({});
   });
   await page.goto("/");
-  if((page.viewportSize()?.width??0)<=599)await page.getByRole("button",{name:"추가 작업"}).click();
-  await page.getByRole("button",{name:"검색 열기"}).click();
+  // The header search now opens the command palette; full-history search lives
+  // in the sessions view behind "전체 기록 검색" once a query is typed.
+  await page.getByRole("navigation",{name:"주요 화면"}).getByRole("button",{name:"세션",exact:true}).click();
+  await page.getByRole("textbox",{name:"세션 검색"}).fill("정확한 최종 출력");
+  await page.getByRole("button",{name:"전체 기록 검색",exact:true}).click();
+  await expect(page.getByRole("button",{name:"전체 기록 검색",exact:true})).toHaveAttribute("aria-pressed","true");
   await page.getByPlaceholder("전체 작업 검색 · 제목·요청·결과·오류").fill("정확한 최종 출력");
   await page.locator(".history-search-filters label").filter({hasText:"Provider"}).locator("select").selectOption("claude");
   await page.locator(".history-search-filters").getByLabel("작업공간").selectOption(workspace.id);

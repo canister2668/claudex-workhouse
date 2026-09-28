@@ -44,6 +44,8 @@ test("changed session file compares its Git change before local draft edits",asy
   await changedFile.click();
   const viewer=page.locator(".viewer-dialog .viewer"),editor=viewer.locator("textarea.editor"),compare=viewer.getByRole("button",{name:"변경 비교",exact:true});
   await expect(editor).toHaveValue(content);
+  // 변경 비교 sits in the file heading's 추가 작업 menu next to the viewer switch.
+  await viewer.locator(".file-more > summary").click();
   await compare.click();
   await expect(viewer.locator("pre.diff")).toContainText("-export const visible = false;");
   await expect(viewer.locator("pre.diff")).toContainText("+export const visible = true;");

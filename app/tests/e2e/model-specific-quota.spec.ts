@@ -28,7 +28,8 @@ test("keeps the Spark five-hour pool out of a Sol task panel",async({page})=>{
   await page.goto("/?task=task-quota-sol");
   const badge=page.locator(".work-status-badge");
   await expect(badge).toBeVisible({timeout:15_000});
-  await badge.click();
+  // The work panel starts open above 760px; only phones need the badge tap.
+  if(await badge.getAttribute("aria-expanded")!=="true")await badge.click();
   const quota=page.locator(".work-status-panel .provider-quota");
   await expect(quota).toContainText(/주간 할당량|Weekly Quota/);
   await expect(quota).toContainText("78%");

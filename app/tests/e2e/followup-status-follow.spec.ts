@@ -1,5 +1,8 @@
 import { expect, test } from "@playwright/test";
 
+// A live turn: running, or running with a delayed stream. Never "completed".
+const RUNNING_BADGE = /^(running|delayed)$/;
+
 // A Claude thread gets one task row per user turn. The task list is served from
 // an in-memory snapshot that a follow-up does not publish into, so the browser
 // can keep polling a list that only knows the finished turn. The open session
@@ -47,8 +50,10 @@ test("a follow-up turn keeps the open session on the running task", async ({ pag
   });
 
   await page.goto("/?task=claude:finished", { waitUntil: "domcontentloaded" });
-  const badge = page.locator(".task-heading .state-text");
-  await expect(badge).toHaveText("완료");
+  // The right rail's status row is gone; the heading badge carries the same state.
+  // It also folds in stream liveness, so a running turn may read "응답 지연" (delayed).
+  const badge = page.locator(".task-heading .task-heading-top .status-badge");
+  await expect(badge).toHaveAttribute("data-state", "completed");
 
   await page.locator(".composer textarea").fill("이어서 보낸 요청");
   await page.locator(".composer .send").click();
@@ -56,8 +61,8 @@ test("a follow-up turn keeps the open session on the running task", async ({ pag
 
   // The follow-up is the turn the worker is running, so the session must show it
   // and must not fall back to the finished row the stale list still reports.
-  await expect(badge).toHaveText("실행 중");
-  await expect(badge).toHaveText("실행 중", { timeout: 12_000 });
+  await expect(badge).toHaveAttribute("data-state", RUNNING_BADGE);
+  await expect(badge).toHaveAttribute("data-state", RUNNING_BADGE, { timeout: 12_000 });
 });
 
 // A turn started by the message queue is not initiated by this browser, so the
@@ -106,7 +111,8 @@ test("a queued turn moves the open session onto the task the queue started", asy
   });
 
   await page.goto("/?task=claude:queue-finished", { waitUntil: "domcontentloaded" });
-  const badge = page.locator(".task-heading .state-text");
-  await expect(badge).toHaveText("완료");
-  await expect(badge).toHaveText("실행 중", { timeout: 20_000 });
+  // The right rail's status row is gone; the heading badge carries the same state.
+  const badge = page.locator(".task-heading .task-heading-top .status-badge");
+  await expect(badge).toHaveAttribute("data-state", "completed");
+  await expect(badge).toHaveAttribute("data-state", RUNNING_BADGE, { timeout: 20_000 });
 });

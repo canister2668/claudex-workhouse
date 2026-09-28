@@ -40,7 +40,9 @@ test("global avatar display switches every provider between localized marks and 
   await expect(marks).toHaveText(["코","클","그","젬","딥","올"]);
   await expect(page.locator(".agent-avatar-dock .agent-avatar-slot img")).toHaveCount(0);
 
-  await page.getByRole("button",{name:"추가 작업"}).click();
+  // Only the phone header folds its utilities behind ⋮ (추가 작업).
+  const more=page.getByRole("button",{name:"추가 작업"});
+  if(await more.isVisible())await more.click();
   await page.getByRole("button",{name:"설정 열기"}).click();
   const settingsDialog=page.getByRole("region",{name:"설정"});
   await settingsDialog.getByRole("button",{name:"일반·화면",exact:true}).click();

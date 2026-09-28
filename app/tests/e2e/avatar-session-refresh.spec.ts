@@ -42,6 +42,9 @@ test("avatar session panel recovers from an empty cache without reloading the pa
   await expect.poll(()=>providerReads).toBe(2);
   await expect(panel.getByRole("button",{name:/아바타에서 복구된 세션/})).toBeVisible();
 
+  // On phones the agent popover is a modal sheet over a backdrop; dismiss it
+  // before switching views (the desktop popover is non-modal and stays open).
+  if(await page.locator(".agent-pop-backdrop").isVisible()){await panel.press("Escape");await expect(panel).toHaveCount(0);}
   await page.getByRole("button",{name:/Collaboration Board|협업 게시판/}).click();
   await expect(page.locator(".board-page")).toBeVisible();
   await page.locator(".agent-avatar-slot.codex").getByRole("button").first().click();

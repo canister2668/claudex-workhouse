@@ -53,6 +53,9 @@ test("keeps Claude classification on the latest turn and restores tabs after lea
   await page.getByRole("group",{name:"필터"}).getByLabel("상태").selectOption("done");
   await expect(page.getByRole("button",{name:/Claude old completed/})).toHaveCount(0);
   await page.getByRole("group",{name:"필터"}).getByLabel("상태").selectOption("");
+  // On phones the open filter popover overlays the engine tabs; close it first.
+  await page.getByRole("button",{name:"필터",exact:true}).click();
+  await expect(page.getByRole("group",{name:"필터"})).toBeHidden();
 
   await page.getByRole("navigation",{name:"엔진 필터"}).getByRole("button",{name:"Codex",exact:true}).click();
   const codexCard=page.getByRole("button",{name:/Codex detail fixture/});

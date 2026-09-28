@@ -27,7 +27,11 @@ test("collaboration board session cards do not overflow the viewport", async ({ 
   await page.route(/\/api\/collaborations(?:\?.*)?$/,route=>route.fulfill({contentType:"application/json",body:JSON.stringify({collaborations:[]})}));
 
   await page.goto("/",{waitUntil:"domcontentloaded"});
-  await page.locator(".board-card").filter({hasText:card.title}).click();
+  // A fresh server first asks to register the owner; complete it when shown.
+  const boardCard=page.locator(".board-card").filter({hasText:card.title}),finishOwnerSetup=page.getByRole("button",{name:"이 PC를 관리자로 등록하고 계속",exact:true});
+  await expect(finishOwnerSetup.or(boardCard)).toBeVisible();
+  if(await finishOwnerSetup.isVisible())await finishOwnerSetup.click();
+  await boardCard.click();
   await expect(page.getByRole("heading",{name:"연결된 세션",exact:true})).toBeVisible();
 
   const layout=await page.evaluate(()=>{

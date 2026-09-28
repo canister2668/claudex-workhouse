@@ -74,14 +74,26 @@ test("work panel follows conversation scrolling while its own scroll stays isola
   await expect.poll(()=>panel.evaluate(element=>element.scrollTop)).toBeGreaterThan(0);
   await expect(badge).toHaveAttribute("aria-expanded","true");
   await expect(badge).toBeVisible();
+  // Phones keep the views in the bottom tab bar under the composer; wider
+  // screens carry them in the single top header (and, from 1280px, an
+  // optional left sessions panel) that the drawer must stay clear of.
+  const compactNav=viewportWidth<=760;
+  await expect(compactNav?page.locator(".mobile-tabbar"):page.locator("header.app-topbar .topbar-nav")).toBeVisible();
   const [drawerBox,navBox,composerBox]=await Promise.all([
     drawer.boundingBox(),
-    ((page.viewportSize()?.width??0)<=760?page.locator(".primary-nav"):page.locator(".app-sidebar")).boundingBox(),
+    (compactNav?page.locator(".mobile-tabbar"):page.locator("header.app-topbar")).boundingBox(),
     page.locator(".composer").boundingBox()
   ]);
   expect(drawerBox!.y+drawerBox!.height).toBeLessThanOrEqual(composerBox!.y);
-  if((page.viewportSize()?.width??0)<=760)expect(composerBox!.y+composerBox!.height).toBeLessThanOrEqual(navBox!.y);
-  else expect(navBox!.x+navBox!.width).toBeLessThanOrEqual(drawerBox!.x);
+  if(compactNav)expect(composerBox!.y+composerBox!.height).toBeLessThanOrEqual(navBox!.y);
+  else{
+    expect(navBox!.y+navBox!.height).toBeLessThanOrEqual(drawerBox!.y);
+    const sessionPanel=page.locator(".session-panel");
+    if(await sessionPanel.isVisible()){
+      const panelBox=(await sessionPanel.boundingBox())!;
+      expect(panelBox.x+panelBox.width).toBeLessThanOrEqual(drawerBox!.x);
+    }
+  }
 
   const conversation=page.locator(".conversation"),heading=page.locator(".task-heading"),composer=page.locator(".composer");
   await expect.poll(()=>conversation.evaluate(element=>element.scrollHeight-element.clientHeight)).toBeGreaterThan(300);

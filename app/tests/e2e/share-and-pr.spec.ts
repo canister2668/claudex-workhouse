@@ -77,7 +77,8 @@ test("new task dialog survives a drag from inside the modal onto its backdrop",a
 test("PR draft shows preflight and requires an explicit final confirmation",async({page})=>{
   const state=await fixture(page,{pr:true});
   await page.goto("/");
-  await page.getByText("Fix mobile sharing").click();
+  // From 1280px the left sessions panel repeats the row; open it from the main list.
+  await page.getByText("Fix mobile sharing").and(page.locator(":not(.session-panel *)")).click();
   await (await sessionAction(page,"PR 만들기")).click();
   const dialog=page.getByRole("dialog",{name:"Pull Request 만들기"});
   await expect(dialog).toContainText("feature/share");

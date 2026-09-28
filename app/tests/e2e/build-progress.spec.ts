@@ -60,7 +60,9 @@ test("shows a Claude build with expandable logs and collapses it into the build 
   });
 
   await page.goto("/?task=build-task");
-  await page.locator(".work-status-badge").click();
+  // The work panel starts open above 760px; only phones need the badge tap.
+  const badge=page.locator(".work-status-badge");
+  if(await badge.getAttribute("aria-expanded")!=="true")await badge.click();
   const card=page.locator(".build-progress");
   await expect(card).toHaveAttribute("data-build-status","running");
   await expect(card).toContainText("빌드 중");

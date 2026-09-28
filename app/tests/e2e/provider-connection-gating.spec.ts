@@ -1,4 +1,8 @@
-import {expect,test} from "@playwright/test";
+import {expect,test,type Page} from "@playwright/test";
+
+// Header avatars are labelled "<agent>: <state> — 진행 중·최근 작업 보기" since the
+// unified agent popover replaced the per-avatar "상태 및 최근 세션" button.
+const avatarButton=(page:Page,provider:string)=>page.getByRole("button",{name:new RegExp(`^${provider}: .+ — 진행 중·최근 작업 보기$`)});
 
 const now=new Date().toISOString();
 const codexModel={id:"gpt-gating",model:"gpt-gating",displayName:"GPT Gating",hidden:false,isDefault:true,defaultReasoningEffort:"medium",supportedReasoningEfforts:[{reasoningEffort:"medium"}],serviceTiers:[],defaultServiceTier:null};
@@ -51,10 +55,10 @@ test("a disconnected provider keeps its sessions but leaves every new-session pa
 
   // The avatar badge follows connection state only: a completed Claude session
   // no longer keeps Claude in the dock.
-  await expect(page.getByRole("button",{name:"Codex 상태 및 최근 세션"})).toBeVisible();
-  await expect(page.getByRole("button",{name:"Claude 상태 및 최근 세션"})).toHaveCount(0);
+  await expect(avatarButton(page,"Codex")).toBeVisible();
+  await expect(avatarButton(page,"Claude")).toHaveCount(0);
   // "unavailable" is not a creatable state either.
-  await expect(page.getByRole("button",{name:"Grok 상태 및 최근 세션"})).toHaveCount(0);
+  await expect(avatarButton(page,"Grok")).toHaveCount(0);
 
   // The home quick-create panel drops the entry point for a disconnected provider.
   const quick=page.locator(".overview-quick-grid");
@@ -116,5 +120,7 @@ test("no connected provider shows connection guidance and blocks creation",async
   expect(submissions.tasks).toBe(0);
   expect(submissions.collaborations).toBe(0);
   await dialog.getByRole("button",{name:"연결 설정 열기",exact:true}).click();
-  await expect(page.getByRole("heading",{name:"공급자 연결"})).toBeVisible();
+  // Full-page settings replaced the "공급자 연결" tab: the guidance opens the
+  // provider page on its 계정·연결 section.
+  await expect(page.getByRole("heading",{name:"계정·연결",exact:true})).toBeVisible();
 });

@@ -1,4 +1,8 @@
-import {expect,test} from "@playwright/test";
+import {expect,test,type Page} from "@playwright/test";
+
+// Header avatars are labelled "<agent>: <state> — 진행 중·최근 작업 보기" since the
+// unified agent popover replaced the per-avatar "상태 및 최근 세션" button.
+const avatarButton=(page:Page,provider:string)=>page.getByRole("button",{name:new RegExp(`^${provider}: .+ — 진행 중·최근 작업 보기$`)});
 
 test("provider OAuth code inputs appear without reopening settings",async({page})=>{
   await page.addInitScript(()=>{
@@ -57,28 +61,30 @@ test("provider OAuth code inputs appear without reopening settings",async({page}
   });
 
   await page.goto("/",{waitUntil:"domcontentloaded"});
-  await expect(page.getByRole("button",{name:"Codex 상태 및 최근 세션"})).toBeVisible();
-  await expect(page.getByRole("button",{name:"Gemini 상태 및 최근 세션"})).toHaveCount(0);
-  await expect(page.getByRole("button",{name:"DeepSeek 상태 및 최근 세션"})).toHaveCount(0);
-  await expect(page.getByRole("button",{name:"Ollama 상태 및 최근 세션"})).toHaveCount(0);
+  await expect(avatarButton(page,"Codex")).toBeVisible();
+  await expect(avatarButton(page,"Gemini")).toHaveCount(0);
+  await expect(avatarButton(page,"DeepSeek")).toHaveCount(0);
+  await expect(avatarButton(page,"Ollama")).toHaveCount(0);
   const more=page.getByRole("button",{name:"추가 작업",exact:true});
   if(await more.isVisible())await more.click();
   await page.getByRole("button",{name:"설정 열기"}).click();
   const settings=page.getByRole("region",{name:"설정"});
   const settingsNav=settings.getByRole("navigation",{name:"설정"});
+  // The agent pages share one nav entry; the agent is picked from its chip row.
+  const openAgent=async(provider:string)=>{await settingsNav.getByRole("button",{name:"에이전트별 설정",exact:true}).click();await settings.getByRole("navigation",{name:"에이전트별 설정"}).getByRole("button",{name:provider,exact:true}).click();};
   await settingsNav.getByRole("button",{name:"실행 정책",exact:true}).click();
   await expect(settingsNav.getByRole("button",{name:"실행 정책",exact:true})).toHaveAttribute("aria-current","page");
   for(const provider of ["Codex","Claude","Gemini","DeepSeek","Ollama"]){
-    await settingsNav.getByRole("button",{name:provider,exact:true}).click();
+    await openAgent(provider);
     await expect(settings.getByRole("heading",{name:`${provider} 기본값`,exact:true})).toBeVisible();
   }
   for(const [provider,count] of [["Gemini",4],["DeepSeek",6],["Ollama",6]] as const){
-    await settingsNav.getByRole("button",{name:provider,exact:true}).click();
+    await openAgent(provider);
     const effort=settings.getByRole("combobox",{name:"추론 강도",exact:true});
     await expect(effort).toBeVisible();await expect(effort.locator("option")).toHaveCount(count);
   }
   // Each agent page carries its own connection card under 계정·연결.
-  const openAccount=async(provider:string)=>{await settingsNav.getByRole("button",{name:provider,exact:true}).click();await settings.getByRole("button",{name:"계정·연결",exact:true}).click();return settings.locator(".provider-connection-card");};
+  const openAccount=async(provider:string)=>{await openAgent(provider);await settings.getByRole("button",{name:"계정·연결",exact:true}).click();return settings.locator(".provider-connection-card");};
   const deepseekCard=await openAccount("DeepSeek");
   await expect(deepseekCard.getByLabel("DeepSeek API 주소")).toHaveValue("https://api.deepseek.com/anthropic");
   await expect(deepseekCard.getByLabel("DeepSeek API 키")).toHaveAttribute("type","password");
@@ -107,19 +113,19 @@ test("provider OAuth code inputs appear without reopening settings",async({page}
   tasks.push({id:"antigravity:test-session",provider:"antigravity",threadId:"antigravity-thread",projectId:"claudex-workhouse",status:"completed",title:"Gemini 실제 세션",prompt:"까꿍",result:"정상 응답",error:null,log:"",owned:true,createdAt:now,updatedAt:now,metadata:{}});
   await settings.getByRole("button",{name:"상태 새로고침"}).click();
   await settings.getByRole("button",{name:"대화상자 닫기"}).click();
-  await expect(page.getByRole("button",{name:"Gemini 상태 및 최근 세션"})).toBeVisible();
-  await expect(page.getByRole("button",{name:"Claude 상태 및 최근 세션"})).toBeVisible();
-  await expect(page.getByRole("button",{name:"DeepSeek 상태 및 최근 세션"})).toBeVisible();
-  await expect(page.getByRole("button",{name:"Ollama 상태 및 최근 세션"})).toBeVisible();
-  await expect(page.locator(".agent-avatar-dock .avatar-pop")).toHaveCount(0);
-  await page.getByRole("button",{name:"Claude 상태 및 최근 세션"}).click();
+  await expect(avatarButton(page,"Gemini")).toBeVisible();
+  await expect(avatarButton(page,"Claude")).toBeVisible();
+  await expect(avatarButton(page,"DeepSeek")).toBeVisible();
+  await expect(avatarButton(page,"Ollama")).toBeVisible();
+  await expect(page.locator(".agent-avatar-dock .agent-popover")).toHaveCount(0);
+  await avatarButton(page,"Claude").click();
   const claudeDialog=page.getByRole("dialog",{name:"Claude 아바타 및 세션"});
   await claudeDialog.getByRole("button",{name:"아바타 설정"}).click();
   await expect(claudeDialog.locator(".avatar-choice")).toHaveCount(2);
   await expect(claudeDialog.locator(".avatar-choice")).toHaveText(["capy","normal"]);
-  await page.getByRole("button",{name:"Claude 상태 및 최근 세션"}).click();
+  await avatarButton(page,"Claude").click();
   for(const provider of ["Gemini","DeepSeek","Ollama"]){
-    await page.getByRole("button",{name:`${provider} 상태 및 최근 세션`}).click();
+    await avatarButton(page,provider).click();
     const dialog=page.getByRole("dialog",{name:`${provider} 아바타 및 세션`});
     await expect(dialog.locator("header strong")).toHaveText(`${provider} 세션`);
     const asset=provider==="Gemini"?"Antigravity":provider;
@@ -145,7 +151,7 @@ test("provider OAuth code inputs appear without reopening settings",async({page}
       }
     }
     if(provider==="Gemini")await expect(dialog.getByRole("button",{name:/Gemini 실제 세션/})).toBeVisible();
-    await page.getByRole("button",{name:`${provider} 상태 및 최근 세션`}).click();
+    await avatarButton(page,provider).click();
     await expect(dialog).toHaveCount(0);
   }
   const usageButton=page.getByRole("button",{name:"사용량",exact:true});
@@ -161,7 +167,7 @@ test("provider OAuth code inputs appear without reopening settings",async({page}
   expect(providerChipStyles["Ollama Cloud"]?.shadow).not.toBe(providerChipStyles.Codex?.shadow);
   await page.keyboard.press("Escape");
   await expect(usage).toHaveCount(0);
-  await page.getByRole("button",{name:"Gemini 상태 및 최근 세션"}).click();
+  await avatarButton(page,"Gemini").click();
   await page.getByRole("dialog",{name:"Gemini 아바타 및 세션"}).getByRole("button",{name:/Gemini 실제 세션/}).click();
   await expect(page.locator(".task-heading .engine.antigravity")).toHaveText("Gemini");
   await expect(page.locator(".tray-item.pinned.provider-antigravity")).toBeVisible();
