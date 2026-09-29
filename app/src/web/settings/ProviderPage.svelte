@@ -40,6 +40,7 @@
   export let accountStatusLabel: (provider: ConnectionAuthProvider, attempt: any, account: ProviderAccount | undefined) => string;
   export let runningAttempt: any = null;
   export let onreconnect: (provider: ProviderId) => void;
+  export let onrefreshaccounts: () => void = () => {};
   // Defaults tab — shared.
   export let globalModelSettings: GlobalModelSettings;
   export let globalModelCandidates: Record<ProviderId, GlobalModelEntry[]>;
@@ -238,6 +239,7 @@
 
 {:else if tab === "account"}
   <SettingsSection title={$t("settings.providerTab.account")}>
+    <svelte:fragment slot="actions"><button type="button" disabled={providerAccountsLoading} onclick={onrefreshaccounts}><RefreshCw size={14} class={providerAccountsLoading ? "spin" : ""}/>{$t(providerAccountsLoading ? "status.checking" : "common.refreshStatus")}</button></svelte:fragment>
     <div class="provider-connections single">
       <ProviderConnectionCard {provider} {account} {providerAccountsLoading} attempt={authAttempts[provider]} {runningAttempt} feedback={authFeedback[provider]} authCode={authCodes[provider] ?? ""} {antigravityUsesVertex} {providerName} {accountStatusLabel} {planLabel} {authErrorLabel} {startProviderLogin} {submitAuthCode} {cancelProviderLogin} {logoutProvider} {copy} {onauthcode}
         compatibleSettings={provider === "deepseek" || provider === "ollama" ? compatibleProviderSettings[provider] : undefined} compatibleSecret={provider === "deepseek" || provider === "ollama" ? compatibleProviderSecrets[provider] : ""} {compatibleProviderSaving} {updateCompatibleBaseUrl} {updateCompatibleSecret} {saveCompatibleProvider} {loadProviderAccounts}/>

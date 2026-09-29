@@ -393,6 +393,9 @@ button{cursor:pointer}
 .agent-pop-profile>summary{padding:4px;color:var(--muted);font-size:.7rem;font-weight:700;cursor:pointer}
 .agent-pop-profile[open]>summary{margin-bottom:6px}
 .agent-pop-backdrop{position:fixed;inset:0;z-index:47;background:var(--overlay-strong,rgba(0,0,0,.4))}
+/* The phone sheet drops from the header, so the backdrop starts below it and
+   the header's avatars, ⋮ and ＋ stay tappable (switch agent, close, create). */
+.mobile-topbar .agent-pop-backdrop{top:calc(var(--topbar-height) + var(--viewport-top,0px))}
 /* Phones: the same popover drops down from the header, right under the
    avatar that was tapped, instead of rising from the bottom edge. The header
    is its own stacking context, so it rises above the backdrop while open. */
@@ -965,6 +968,10 @@ button{cursor:pointer}
 .work-event-details{border:1px solid var(--line);border-radius:12px;background:var(--surface);overflow:hidden}.work-event-details>summary{min-height:42px;padding:7px 10px;display:flex;align-items:center;gap:7px;cursor:pointer;list-style:none;color:var(--text);font-size:.72rem;font-weight:750}.work-event-details>summary::-webkit-details-marker{display:none}.work-event-details>summary>span{margin-left:auto;padding:2px 6px;border-radius:999px;background:var(--surface-2);color:var(--muted);font-size:.64rem}.work-event-details>summary>svg{transition:transform .15s}.work-event-details[open]>summary{position:sticky;top:0;z-index:7;background:color-mix(in srgb,var(--surface) 96%,transparent);box-shadow:0 1px 0 var(--line)}.work-event-details[open]>summary>svg{transform:rotate(180deg)}.work-event-details>.process-events{border-top:1px solid var(--line)}
 .work-status-drawer{flex:none;margin:10px 14px 0;border:1px solid var(--line);border-radius:var(--radius-lg);background:var(--surface);overflow:hidden}
 .work-status-drawer.open{--work-drawer-max:min(62dvh,680px);min-height:0;max-height:var(--work-drawer-max);display:flex;flex-direction:column;border-color:var(--line-strong)}
+/* Desktop: the open work panel used to be flex:none, so at 1440x900 it took
+   427px and left the conversation 14px. Keep a readable conversation and let
+   the panel give way, scrolling inside itself (phones keep their own rules). */
+@media(min-width:761px){.shell.session-detail-open .conv-wrap{min-height:min(30dvh,320px)}.shell.session-detail-open .work-status-drawer.open{flex:0 1 auto;min-height:64px}}
 .work-status-badge{width:100%;min-height:56px;padding:9px 12px;display:flex;align-items:center;gap:10px;flex:none;border:0;background:transparent;color:var(--text);text-align:left}
 .work-status-badge:hover{background:color-mix(in srgb,var(--accent) 6%,transparent)}
 .work-status-copy{min-width:0;flex:1;display:grid;gap:2px}

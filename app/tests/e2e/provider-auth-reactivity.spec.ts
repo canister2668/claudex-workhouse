@@ -2,6 +2,13 @@ import {expect,test,type Page} from "@playwright/test";
 
 // Header avatars are labelled "<agent>: <state> — 진행 중·최근 작업 보기" since the
 // unified agent popover replaced the per-avatar "상태 및 최근 세션" button.
+// The agent popover keeps avatar controls in a collapsed "아바타 설정" section;
+// the outfit choices sit behind the avatar's own settings button inside it.
+const openAvatarSettings=async(dialog:ReturnType<Page["getByRole"]>)=>{
+  const section=dialog.locator("details.agent-pop-profile");
+  if(!(await section.evaluate(el=>(el as HTMLDetailsElement).open)))await section.locator("summary").click();
+  if(!(await dialog.locator(".avatar-choice").first().isVisible()))await dialog.getByRole("button",{name:"아바타 설정"}).click();
+};
 const avatarButton=(page:Page,provider:string)=>page.getByRole("button",{name:new RegExp(`^${provider}: .+ — 진행 중·최근 작업 보기$`)});
 
 test("provider OAuth code inputs appear without reopening settings",async({page})=>{
@@ -112,7 +119,7 @@ test("provider OAuth code inputs appear without reopening settings",async({page}
   );
   tasks.push({id:"antigravity:test-session",provider:"antigravity",threadId:"antigravity-thread",projectId:"claudex-workhouse",status:"completed",title:"Gemini 실제 세션",prompt:"까꿍",result:"정상 응답",error:null,log:"",owned:true,createdAt:now,updatedAt:now,metadata:{}});
   await settings.getByRole("button",{name:"상태 새로고침"}).click();
-  await settings.getByRole("button",{name:"대화상자 닫기"}).click();
+  await page.getByRole("button",{name:"설정 닫기"}).first().click();
   await expect(avatarButton(page,"Gemini")).toBeVisible();
   await expect(avatarButton(page,"Claude")).toBeVisible();
   await expect(avatarButton(page,"DeepSeek")).toBeVisible();
@@ -120,7 +127,7 @@ test("provider OAuth code inputs appear without reopening settings",async({page}
   await expect(page.locator(".agent-avatar-dock .agent-popover")).toHaveCount(0);
   await avatarButton(page,"Claude").click();
   const claudeDialog=page.getByRole("dialog",{name:"Claude 아바타 및 세션"});
-  await claudeDialog.getByRole("button",{name:"아바타 설정"}).click();
+  await openAvatarSettings(claudeDialog);
   await expect(claudeDialog.locator(".avatar-choice")).toHaveCount(2);
   await expect(claudeDialog.locator(".avatar-choice")).toHaveText(["capy","normal"]);
   await avatarButton(page,"Claude").click();
@@ -131,14 +138,14 @@ test("provider OAuth code inputs appear without reopening settings",async({page}
     const asset=provider==="Gemini"?"Antigravity":provider;
     const emotion=provider==="Gemini"?"happy":"neutral";
     await expect(dialog.locator(".recent-avatar-profile img").first()).toHaveAttribute("src",new RegExp(`/emoticons/${asset}/${emotion}\\.webp$`));
-    await dialog.getByRole("button",{name:"아바타 설정"}).click();
+    await openAvatarSettings(dialog);
     const expectedOutfits=provider==="Gemini"?["Antigravity","Gemma-e4b"]:provider==="DeepSeek"?["DeepSeek","Ollama"]:["Antigravity","DeepSeek","Gemma-e4b","Ollama"];
     await expect(dialog.locator(".avatar-choice")).toHaveText(expectedOutfits);
     if(provider==="Gemini"){
       await dialog.locator(".avatar-choice").filter({hasText:"Gemma-e4b"}).click();
       expect(outfitWrites).toBe(1);
       await expect(dialog.locator(".recent-avatar-profile img").first()).toHaveAttribute("src",/\/emoticons\/Gemma-e4b\/happy\.webp$/);
-      await dialog.getByRole("button",{name:"아바타 설정"}).click();
+      await openAvatarSettings(dialog);
       await dialog.getByRole("button",{name:/플로팅/}).click();
     }else if(provider==="DeepSeek"){
       await dialog.locator(".avatar-choice").filter({hasText:"Ollama"}).click();
@@ -147,7 +154,7 @@ test("provider OAuth code inputs appear without reopening settings",async({page}
       for(const outfit of ["DeepSeek","Antigravity","Gemma-e4b"]){
         await dialog.locator(".avatar-choice").filter({hasText:outfit}).click();
         await expect(dialog.locator(".recent-avatar-profile img").first()).toHaveAttribute("src",new RegExp(`/emoticons/${outfit}/neutral\\.webp$`));
-        if(outfit!=="Gemma-e4b")await dialog.getByRole("button",{name:"아바타 설정"}).click();
+        if(outfit!=="Gemma-e4b")await openAvatarSettings(dialog);
       }
     }
     if(provider==="Gemini")await expect(dialog.getByRole("button",{name:/Gemini 실제 세션/})).toBeVisible();

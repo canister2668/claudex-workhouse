@@ -68,6 +68,12 @@ describe("settings information architecture", () => {
     expect(app).not.toContain('class="modal global-settings"');
     expect(app).toContain("<SettingsView bind:page={globalTab}");
     expect(app).toContain("<ProviderPage provider={settingsProvider} bind:tab={providerSettingsTab}");
+    // 계정·연결 keeps the pre-redesign status refresh, and the page reads live
+    // account/attempt state instead of a closure-bound helper call.
+    expect(app).toContain("onrefreshaccounts={()=>loadProviderAccounts()}");
+    expect(app).toContain("account={accountIn(providerAccounts,settingsProvider as ConnectionAuthProvider)}");
+    expect(app).toContain("runningAttempt={isConnectionAuthProvider(settingsProvider)?attemptIn(authAttempts,settingsProvider):null}");
+    expect(web("settings/ProviderPage.svelte")).toContain("onclick={onrefreshaccounts}");
     expect(app).toContain('<InfrastructureSettings {api} showAccessActivity={false} showParticipants={false} showExternalAccess={false}');
     expect(app).toContain("<AccessSecurityPage {api}/>");
     expect(app).toContain("<ExternalParticipantSettings {api}/>");
