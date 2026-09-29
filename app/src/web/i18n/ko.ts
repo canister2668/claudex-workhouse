@@ -493,6 +493,7 @@ export const ko = {
 ,"error.PROMPT_PRESETS_STALE":"다른 기기에서 프리셋이 변경되었습니다. 새로고침한 뒤 병합된 값을 확인하세요."
 ,"error.SNAPSHOT_CONFIRMATION_MISMATCH":"영구 삭제 확인 문구가 일치하지 않습니다."
 ,"error.WINDOWS_PROVIDER_LOGIN_EXTERNAL":"공식 CLI에서 Provider 로그인을 완료한 뒤 상태를 새로고침하세요."
+,"error.PROVIDER_PLATFORM_UNSUPPORTED":"{provider} Provider는 아직 Windows 서버에서 실행할 수 없습니다."
 ,"error.SHARE_TARGET_EXPIRED":"공유된 내용이 만료되었거나 이미 열렸습니다."
 ,"error.PLATFORM_UNSUPPORTED":"Provider 실행 파일 선택은 Windows 또는 원격 Worker 호스트가 필요합니다."
 ,"error.GITHUB_LOGIN_ON_HOST_REQUIRED":"Desktop Worker 호스트에서 직접 GitHub CLI 로그인을 시작한 뒤 연결을 다시 확인하세요."

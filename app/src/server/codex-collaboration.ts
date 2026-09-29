@@ -20,8 +20,13 @@ Claudex Workhouse targets behavioral parity with the VS Code Codex client.
 - For an exact, verifiable Workspace-local edit, retry without permission expansion by using Python to replace a uniquely matched byte/text sequence through a private same-directory temporary file and os.replace(), then inspect the diff. A simple sed replacement is acceptable only when the match is unambiguous.
 - Never retry a failed patch in danger-full-access and never request full access merely to run apply_patch. If the safe fallback fails, preserve the input and report the classified error.`;
 
-export function claudexWorkhouseCollaborationInstructions(value:unknown=DEFAULT_DELEGATION_SETTINGS){
-  return `${CLAUDEX_WORKHOUSE_NATIVE_COLLABORATION_INSTRUCTIONS}\n\n${delegationDeveloperInstructions(normalizeDelegationSettings(value),"codex")}`;
+// A Windows host usually has no Python, so the patch fallback above names the
+// PowerShell equivalent there.
+export const WINDOWS_PATCH_FALLBACK_INSTRUCTIONS=`- On this Windows host Python may be absent. Use PowerShell instead: read with [IO.File]::ReadAllText, replace the uniquely matched text, write a same-directory temporary file with [IO.File]::WriteAllText, then Move-Item -Force it over the original and inspect the diff.`;
+
+export function claudexWorkhouseCollaborationInstructions(value:unknown=DEFAULT_DELEGATION_SETTINGS,platform:NodeJS.Platform=process.platform){
+  const base=platform==="win32"?`${CLAUDEX_WORKHOUSE_NATIVE_COLLABORATION_INSTRUCTIONS}\n${WINDOWS_PATCH_FALLBACK_INSTRUCTIONS}`:CLAUDEX_WORKHOUSE_NATIVE_COLLABORATION_INSTRUCTIONS;
+  return `${base}\n\n${delegationDeveloperInstructions(normalizeDelegationSettings(value),"codex")}`;
 }
 
 export function turnLifecycleEvent(rootThreadId:string|null,eventThreadId:string|null,status?:string):{type:AgentEventKind;terminal:boolean;isRoot:boolean}{

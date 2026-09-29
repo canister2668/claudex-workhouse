@@ -3,8 +3,9 @@
 [가이드북](../guide.ko.md) · [English](index.en.md) · [日本語](index.ja.md)
 
 **메인 서버는 Linux 또는 Linux 기반 NAS의 Docker로 설치합니다.** 현재 배포하는
-경로는 이것뿐입니다. **Windows 대상은 모두 개발 중이며 배포하지 않습니다** —
-포터블 서버, 네이티브 Worker, Docker Desktop + Worker 구성 모두 해당합니다.
+경로는 이것뿐입니다. **Windows 포터블 서버는 출시 후보**로, Worker 없이
+Claude Code·Codex를 직접 실행하지만 Windows 11 인수 테스트 전이라 아직 배포하지
+않습니다. 네이티브 Worker와 Docker Desktop + Worker 구성은 개발 중입니다. 지금
 Windows에서는 Linux 호스트나 NAS에 메인 서버를 두고 브라우저(PWA)로 접속하세요.
 
 | 대상 | 메인 서버 | Worker | 기본 방식 |
@@ -12,7 +13,7 @@ Windows에서는 Linux 호스트나 NAS에 메인 서버를 두고 브라우저(
 | Synology DSM 7 | 지원 | 선택 | Docker Compose |
 | 일반 Linux x64·arm64 | 지원 | 지원 | Docker Compose·current-user Worker |
 | QNAP·기타 Docker NAS | 일반 Docker 흐름 | 선택 | Docker Compose |
-| Windows 11 x64 | **개발 중** | **개발 중** | 배포하지 않음 · 브라우저로 접속 |
+| Windows 11 x64 | **포터블 ZIP 출시 후보** | **개발 중** | 인수 테스트 대기 · 소스 빌드 |
 
 Windows에 남은 과제는 [Windows 지원 정책](../windows-support-policy.md)에
 정리되어 있습니다.
@@ -43,7 +44,7 @@ Windows에 남은 과제는 [Windows 지원 정책](../windows-support-policy.md
 - [Synology NAS](./synology.md)
 - [일반 Linux](./linux.md)
 - [Node 설치(npm)](./node.md)
-- [Windows 포터블 서버](./windows.md) — 개발 중, 배포하지 않음
+- [Windows 포터블 서버](./windows.md) — 출시 후보, Worker 없이 직접 실행, Windows 11 인수 테스트 대기
 - [Windows PC를 Worker로 연결](./windows-worker.md) — 개발 중, 배포하지 않음
 - [로컬 네트워크](./local-network.md)
 - [Tailscale](./tailscale.md)

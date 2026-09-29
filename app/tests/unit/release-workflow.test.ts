@@ -177,7 +177,7 @@ describe("unsigned Windows test build workflow contract",()=>{
     expect(windowsLauncher).toContain("try{verifyPayloadManifest(manifest,target,version);targetReady=true;}catch(...){}");
     expect(windowsLauncher).toContain('throw std::runtime_error("container replace")');
     expect(windowsLauncher).toContain("if(!replaced.empty())MoveFileExW");
-    expect(windowsLauncher).toContain("recursive_directory_iterator(extendedPath(payload))");
+    expect(windowsLauncher).toContain("enumeratePayload(extendedPath(payload).wstring(),L\"\",actual,0)");
     expect(windowsLauncher).toContain("MoveFileExW(extendedPath(staging).c_str(),targetPath.c_str(),MOVEFILE_WRITE_THROUGH)");
     expect(windowsLauncher).not.toContain("FlushFileBuffers(output)");
   });

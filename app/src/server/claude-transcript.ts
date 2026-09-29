@@ -20,7 +20,10 @@ export type ClaudeTranscriptTruncation={before:true;droppedTurns:number|null;dro
 export type ClaudeTranscriptResult={events:any[];truncated?:ClaudeTranscriptTruncation;windowBytes:number;turns:number};
 const transcriptCache=new Map<string,{dev:number;ino:number;size:number;mtimeMs:number;result:ClaudeTranscriptResult;usedAt:number}>();
 
-export function projectSlug(realPath: string) { return realPath.replaceAll("/", "-"); }
+// Claude Code names a project folder after its working directory. On Windows
+// every character outside [A-Za-z0-9] becomes `-` (`C:\Users\me\proj` ->
+// `C--Users-me-proj`); the Linux form only ever differed at `/`.
+export function projectSlug(realPath: string, platform: NodeJS.Platform = process.platform) { return platform === "win32" ? realPath.replace(/[^a-zA-Z0-9]/g, "-") : realPath.replaceAll("/", "-"); }
 export function transcriptFile(realPath: string, sessionId: string) {
   const home=process.env.HOME || os.homedir();
   return path.join(home, ".claude", "projects", projectSlug(realPath), `${sessionId}.jsonl`);

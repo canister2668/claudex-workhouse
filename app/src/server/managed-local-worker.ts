@@ -5,7 +5,11 @@ import{loadWorkerConfig,saveWorkerConfig,type WorkerConfig,type WorkerRoot,type 
 import type{Workspace,WorkspaceRoot}from"./types.js";
 
 export const MANAGED_LOCAL_WORKER_HOST_ID="local";
-export function managedLocalWorkerEnabled(platform:NodeJS.Platform=process.platform){return platform==="win32";}
+// The Windows server used to route every local task through a loopback Worker.
+// It now runs Claude Code and Codex directly, as the Linux server does (see
+// worker-liveness.ts and windows/direct-providers.ts), so no platform needs the
+// managed local Worker. The module stays for remote Worker pairing.
+export function managedLocalWorkerEnabled(_platform:NodeJS.Platform=process.platform){return false;}
 export function executionHostUsesWorker(hostId:string,platform:NodeJS.Platform=process.platform){return hostId!==MANAGED_LOCAL_WORKER_HOST_ID||managedLocalWorkerEnabled(platform);}
 
 const digest=(value:string)=>crypto.createHash("sha256").update(value).digest("hex");

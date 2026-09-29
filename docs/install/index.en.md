@@ -3,17 +3,18 @@
 [Guidebook](../guide.en.md) · [한국어](index.md) · [日本語](index.ja.md)
 
 **Install the main server on a Linux or Linux-based NAS Docker host.** That is
-the only released path. **Every Windows target is in development and is not
-released** — the portable server, the native Worker, and Docker Desktop plus a
-Worker alike. On Windows, run the main server on a Linux host or NAS and reach
-it from the browser (PWA).
+the only released path. **The Windows portable server is a release candidate**:
+it runs Claude Code and Codex directly, without a Worker, but is not released
+until the Windows 11 acceptance run passes. The native Worker and Docker Desktop
+plus a Worker remain in development. On Windows today, run the main server on a
+Linux host or NAS and reach it from the browser (PWA).
 
 | Target | Main server | Worker | Recommended path |
 |---|---|---|---|
 | Synology DSM 7 | Supported | Optional | Docker Compose |
 | Linux x64/arm64 | Supported | Supported | Docker Compose or current-user Worker |
 | Other Docker NAS | General Docker path | Optional | Docker Compose |
-| Windows 11 x64 | **In development** | **In development** | Not released; use the browser |
+| Windows 11 x64 | **Portable ZIP release candidate** | **In development** | Awaiting acceptance run; build from source |
 
 The [Windows support policy](../windows-support-policy.md) records what is
 still outstanding for Windows.
@@ -36,7 +37,7 @@ is displayed as a separate operator action.
 - [Docker](../docker.en.md)
 - [Deployment and NAS auto-start](../deployment.en.md)
 - [Desktop Worker](../desktop-worker.en.md)
-- Detailed Korean guides: [Synology](synology.md), [Linux](linux.md), [Node install (npm)](node.md), [Windows Docker Desktop + Worker](windows.md) (in development), [Windows Worker](windows-worker.md) (in development), [local network](local-network.md)
+- Detailed Korean guides: [Synology](synology.md), [Linux](linux.md), [Node install (npm)](node.md), [Windows portable server](windows.md) (release candidate, runs without a Worker), [Windows Worker](windows-worker.md) (in development), [local network](local-network.md)
 
 Release packages are selected by the signed manifest, not by an unpinned
 `latest` tag. Installation stops on signature, expiry, or downgrade failure.

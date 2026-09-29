@@ -81,6 +81,8 @@ import {SnapshotStore} from "./snapshot-store.js";
 import {osExecutionIdentity,trustedHostSettingKey} from "./execution-policy.js";
 import {applyPathDisplayPolicy} from "./path-display.js";
 import{buildWindowsBootstrapStatus}from"./windows/bootstrap-status.js";
+import{refreshWindowsDirectProviders}from"./windows/direct-providers.js";
+import{codexRuntimeSelection}from"./codex/app-server.js";
 import{localHostDisplayName}from"./platform.js";
 import {ManagedProviderBridge,registerManagedProviderMcp} from "./managed-provider-mcp.js";
 import {ClaudeModelCatalog} from "./claude-model-catalog.js";
@@ -150,6 +152,7 @@ import {
   type VerifiedRelease
 } from "./deployment/index.js";
 import { WORKER_PROTOCOL_VERSION } from "./worker-protocol.js";
+import{screenHelperCommand}from"./pty-helpers/command.js";
 import{legalNoticeMetadata}from"./legal-notices.js";
 import{ApplicationUpdateCoordinator,applicationUpdateBlockers as collectApplicationUpdateBlockers,compareApplicationVersions,normalizeApplicationInstallMetadata,writeApplicationUpdateRequest,type ApplicationUpdateBlocker,type ApplicationUpdateStatus}from"./application-updates.js";
 import{createApplicationUpdateSnapshot}from"./application-update-snapshot.js";
@@ -258,6 +261,14 @@ function readTrustedJson(configuredPath:string|undefined,root:string,kind:"relea
 // created by the server; every provider task receives a fresh scoped identity.
 for(const name of["CLAUDEX_WORKHOUSE_CURRENT_TASK_ID","CLAUDEX_WORKHOUSE_MANAGED_PROVIDER_MCP_URL","CLAUDEX_WORKHOUSE_MANAGED_PROVIDER_TOKEN","CLAUDEX_WORKHOUSE_EXTERNAL_MCP_BUNDLE_FILE"])delete process.env[name];
 const config = loadConfig();
+// Windows runs Claude Code and Codex directly, like Linux. Find the official
+// CLIs before anything can launch a task, bounded so a hung `--version` probe
+// cannot hold the server back, and pick up later installs periodically.
+const refreshWindowsProviders=()=>refreshWindowsDirectProviders({dataRoot:config.dataRoot,config}).catch(()=>({}));
+if(process.platform==="win32"){
+  await Promise.race([refreshWindowsProviders(),new Promise(resolve=>setTimeout(resolve,20_000).unref())]);
+  setInterval(()=>void refreshWindowsProviders(),5*60_000).unref();
+}
 const managedLocalWorkerRequired=managedLocalWorkerEnabled();
 const executionHostUsesWorker=(hostId:string)=>platformExecutionHostUsesWorker(hostId);
 /**
@@ -1316,9 +1327,16 @@ app.get("/api/health/live", async () => ({ ok: true, status: "live" }));
 app.get("/api/about",async()=>legalNoticeMetadata({root:config.appRoot,version:packageVersion(config.appRoot)}));
 registerLocalEntryRoutes(app,{auth:localEntry,externalOrigin:config.externalOrigin,snapshot:async()=>{
   const base={product:"claudex-workhouse",platform:process.platform,architecture:process.arch,server:{status:"running",origin:config.externalOrigin,host:config.host,port:config.port},ownerClaim:{claimed:ownerClaim.isClaimed()},health:{live:"/api/health/live",ready:"/api/health/ready"},defaults:{codexAutomation:platformAutomationDefault("codex",process.platform)}};
-  if(!managedLocalWorkerRequired)return base;
-  const readiness=await managedProviderReadiness(),providerStates=Object.fromEntries((["codex","claude"] as const).flatMap(provider=>typeof readiness?.[provider]?.state==="string"?[[provider,readiness[provider].state]]:[]));
-  return{...base,launcher:buildWindowsBootstrapStatus({payloadReady:fs.existsSync(path.join(config.appRoot,"dist-server","index.js")),dataReady:fs.existsSync(config.dataRoot),databaseReady:true,serverReady:true,workerStatus:workerHub.isOnline(LOCAL_HOST_ID)?"online":managedLocalWorkerConfig?"connecting":"failed",providers:providerStates,workspaceCount:managedLocalWorkerConfig?.workspaces.length??0,internalUrl:`http://127.0.0.1:${config.port}`,externalUrl:configuredExternalUrl()})};
+  if(process.platform!=="win32")return base;
+  // The Windows launcher's status window reads this. Providers run directly in
+  // this server, so readiness is the CLI this server would launch plus the
+  // account state it last read — no Worker stage.
+  const accounts=providerAuth.getCached(),providerStates=Object.fromEntries((["codex","claude"] as const).map(provider=>{
+    const binary=provider==="claude"?fs.existsSync(config.claudeBinary):Boolean(codexRuntimeSelection(config.appRoot).binary),account=accounts.find(item=>item.provider===provider)?.state??"unknown";
+    return[provider,!binary?"not-found":account==="connected"?"ready":account==="unknown"?"diagnostic-required":"login-required"] as const;
+  }));
+  const workspaceCount=(await db.listWorkspaces({hostId:LOCAL_HOST_ID}).catch(()=>[])).length;
+  return{...base,launcher:buildWindowsBootstrapStatus({payloadReady:fs.existsSync(path.join(config.appRoot,"app","dist-server","index.js")),dataReady:fs.existsSync(config.dataRoot),databaseReady:true,serverReady:true,providers:providerStates,workspaceCount,internalUrl:`http://127.0.0.1:${config.port}`,externalUrl:configuredExternalUrl()})};
 }});
 const readinessDirectories=[
   path.join(config.dataRoot,"config"),
@@ -1768,7 +1786,9 @@ async function providerConnectionAccounts(){
   return[...(["codex","claude"] as const).map(provider=>({provider,state:status?.accounts?.[provider]?.state??"unknown",accountType:status?.accounts?.[provider]?.accountType??null,planType:status?.accounts?.[provider]?.planType??null,emailMasked:null,errorCategory:status?.accounts?.[provider]?.errorCategory??null,checkedAt,readiness:status?.readiness?.[provider]??null})),{provider:"antigravity" as const,state:"unavailable" as const,accountType:"google-oauth",planType:null,emailMasked:null,errorCategory:"local-runtime-required",checkedAt},{provider:"grok"as const,state:"unavailable"as const,accountType:"grok-oauth",planType:null,emailMasked:null,errorCategory:"local-runtime-required",checkedAt},...await compatibleAccounts()];
 }
 function assertManagedWindowsProviderLoginUnavailable(provider:AuthProvider){
-  if(managedLocalWorkerRequired&&!(["codex","claude"] as string[]).includes(provider))throw Object.assign(new Error("Complete Provider login in the official CLI, then refresh its status."),{statusCode:409,code:"WINDOWS_PROVIDER_LOGIN_EXTERNAL"});
+  // Only the Claude Code and Codex logins have a Windows route; the others
+  // drive a POSIX pseudo-terminal through python3.
+  if(process.platform==="win32"&&!(["codex","claude"] as string[]).includes(provider))throw Object.assign(new Error("Complete Provider login in the official CLI, then refresh its status."),{statusCode:409,code:"WINDOWS_PROVIDER_LOGIN_EXTERNAL"});
 }
 app.get("/api/provider-connections",{config:{rateLimit:{max:20,timeWindow:"10 minutes"}}},async(request)=>({accounts:await providerConnectionAccounts(),attempts:providerAuth.listRecent((request as any).actor),singleUser:true}));
 app.get("/api/provider-connections/attempts",{config:{rateLimit:{max:90,timeWindow:"1 minute"}}},async(request)=>({attempts:providerAuth.listRecent((request as any).actor)}));
@@ -2065,9 +2085,9 @@ async function claudeQuota(): Promise<QuotaResult> {
   if(claudeQuotaCooldownUntil>Date.now())return claudeQuotaRateLimited(claudeQuotaCooldownUntil);
   try {
     const result = await new Promise<string>((resolve,reject)=>{
-      const helper=path.join(config.appRoot,"bin","claude-usage.py");
       const probeDir=path.join(config.dataDir,"claude-usage-probe");
-      const child=spawn("python3",[helper,config.claudeBinary,probeDir],{cwd:config.appRoot,shell:false,windowsHide:true,env:{...process.env,DISABLE_AUTOUPDATER:"1"},stdio:["ignore","pipe","pipe"]});
+      const helper=screenHelperCommand(config.appRoot,"claude-usage",[config.claudeBinary,probeDir]);
+      const child=spawn(helper.command,helper.args,{cwd:config.appRoot,shell:false,windowsHide:true,env:{...process.env,DISABLE_AUTOUPDATER:"1"},stdio:["ignore","pipe","pipe"]});
       let stdout="",stderr="";
       let settled=false;
       const finish=(error?:Error)=>{if(settled)return;settled=true;clearTimeout(timer);error?reject(error):resolve(stdout);};
@@ -2726,6 +2746,9 @@ async function createTaskFromBody(body:CreateTaskBody,requestedNativeId?:string,
     let character=await isolatedCharacterPrompt(body.provider,false),taskRuntimeProfile:"default"|"browser"="default";
     let characterDirective=character.directive,characterSnapshot:Record<string,unknown>=character.snapshot,taskMetadataExtension:Record<string,unknown>={};
     const providerPrompt=promptWithWorkspaceInstructions(body.prompt,workspaceInstructionSnapshot,{characterDirective}),taskTitle=workspaceInstructionTaskTitle(body.prompt,body.title);
+    // Antigravity and Grok workers depend on a POSIX pseudo-terminal and a
+    // Unix socket; the Windows server cannot run them locally.
+    if(process.platform==="win32"&&selection.hostId===LOCAL_HOST_ID&&(body.provider==="antigravity"||body.provider==="grok"))throw Object.assign(new Error(`${body.provider} does not run on the Windows server yet.`),{statusCode:409,code:"PROVIDER_PLATFORM_UNSUPPORTED",errorParams:{provider:body.provider}});
     if((body.provider==="deepseek"||body.provider==="ollama"||body.provider==="antigravity")&&(selection.hostId!==LOCAL_HOST_ID||executionHostUsesWorker(selection.hostId)))throw Object.assign(new Error(`${body.provider} currently runs on the local Workhouse server only.`),{statusCode:409,code:"REMOTE_PROVIDER_UNAVAILABLE"});
     const targetProjectId=selection.workspace.projectId;
     const requestedTaskId=requestedNativeId?(selection.hostId===LOCAL_HOST_ID?(managedLocalWorkerRequired?`${body.provider}:worker:${requestedNativeId}`:(body.provider==="codex"?`codex:deck:${requestedNativeId}`:`${body.provider}:${requestedNativeId}`)):`${body.provider}:remote:${requestedNativeId}`):null;

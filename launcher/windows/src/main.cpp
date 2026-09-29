@@ -117,13 +117,6 @@ bool safeRelative(const std::wstring& value){
   if(value.empty()||value.size()>4096||value.front()==L'/'||value.front()==L'\\'||value.find(L"//")!=std::wstring::npos||value.find(L':')!=std::wstring::npos||value.find(L'\\')!=std::wstring::npos)return false;const std::wregex reserved(LR"(^(?:con|prn|aux|nul|conin\$|conout\$|com[1-9]|lpt[1-9])(?:\.|$))",std::regex_constants::icase);std::filesystem::path item(value);
   for(const auto& part:item){const auto segment=part.wstring();if(segment.empty()||segment==L"."||segment==L".."||segment.back()==L'.'||segment.back()==L' '||std::regex_search(segment,reserved))return false;for(const auto ch:segment)if(ch<32||ch==L'<'||ch==L'>'||ch==L'"'||ch==L'|'||ch==L'?'||ch==L'*')return false;}return !item.is_absolute();
 }
-std::string sha256(const std::filesystem::path& file){
-  BCRYPT_ALG_HANDLE algorithm=nullptr;BCRYPT_HASH_HANDLE hash=nullptr;DWORD objectSize=0,resultSize=0;std::vector<unsigned char> object,digest(32),buffer(1024*1024);std::ifstream stream(file,std::ios::binary);if(!stream)throw std::runtime_error("payload file");
-  if(BCryptOpenAlgorithmProvider(&algorithm,BCRYPT_SHA256_ALGORITHM,nullptr,0)!=0||BCryptGetProperty(algorithm,BCRYPT_OBJECT_LENGTH,reinterpret_cast<PUCHAR>(&objectSize),sizeof(objectSize),&resultSize,0)!=0)throw std::runtime_error("sha256 init");object.resize(objectSize);
-  if(BCryptCreateHash(algorithm,&hash,object.data(),objectSize,nullptr,0,0)!=0)throw std::runtime_error("sha256 hash");
-  try{while(stream){stream.read(reinterpret_cast<char*>(buffer.data()),static_cast<std::streamsize>(buffer.size()));const auto count=stream.gcount();if(count>0&&BCryptHashData(hash,buffer.data(),static_cast<ULONG>(count),0)!=0)throw std::runtime_error("sha256 data");}if(BCryptFinishHash(hash,digest.data(),static_cast<ULONG>(digest.size()),0)!=0)throw std::runtime_error("sha256 finish");}catch(...){BCryptDestroyHash(hash);BCryptCloseAlgorithmProvider(algorithm,0);throw;}
-  BCryptDestroyHash(hash);BCryptCloseAlgorithmProvider(algorithm,0);const char hex[]="0123456789abcdef";std::string out;out.reserve(64);for(auto byte:digest){out.push_back(hex[byte>>4]);out.push_back(hex[byte&15]);}return out;
-}
 std::string extractHashed(std::ifstream& stream,HANDLE output,unsigned long long size,unsigned long long& position){
   BCRYPT_ALG_HANDLE algorithm=nullptr;BCRYPT_HASH_HANDLE hash=nullptr;DWORD objectSize=0,resultSize=0;std::vector<unsigned char> object,digest(32);std::vector<char> buffer(1024*1024);
   if(BCryptOpenAlgorithmProvider(&algorithm,BCRYPT_SHA256_ALGORITHM,nullptr,0)!=0||BCryptGetProperty(algorithm,BCRYPT_OBJECT_LENGTH,reinterpret_cast<PUCHAR>(&objectSize),sizeof(objectSize),&resultSize,0)!=0)throw std::runtime_error("extract hash init");object.resize(objectSize);
@@ -139,25 +132,73 @@ std::array<unsigned char,32> sha256Ranges(const std::filesystem::path& file,cons
   BCryptDestroyHash(hash);BCryptCloseAlgorithmProvider(algorithm,0);return digest;
 }
 std::string narrow(const std::wstring& value);
-struct VerifiedPayloadFile{unsigned long long size;DWORD attributes;};
+// Payload verification is pure Win32 on extended-length paths. The previous
+// check counted files with std::filesystem::recursive_directory_iterator and
+// is_regular_file(), whose status probe goes through the CRT on MinGW and does
+// not resolve every `\\?\` path, so a file the Win32 open found could be
+// missing from the count. Removing that one entry from payload-manifest.json
+// was then the only way the portable folder started. Every file is now opened,
+// sized, hashed and enumerated through the same Win32 calls, and the two sides
+// are compared as sets so a failure names the file.
+//
+// Only name-surrogate reparse points (symbolic links, junctions, mount points)
+// are rejected: they can redirect a payload path outside the folder. OneDrive
+// Files On-Demand, WOF-compressed and deduplicated files are also reparse
+// points, but their tags are not name surrogates and their bytes are the file.
+bool nameSurrogateReparse(DWORD attributes,DWORD tag){return(attributes&FILE_ATTRIBUTE_REPARSE_POINT)!=0&&(tag&0x20000000)!=0;}
+std::wstring payloadKey(std::wstring value){for(auto& ch:value){if(ch==L'\\')ch=L'/';else ch=static_cast<wchar_t>(towlower(ch));}return value;}
+void enumeratePayload(const std::wstring& directory,const std::wstring& relative,std::vector<std::wstring>& files,unsigned depth){
+  if(depth>128)throw std::runtime_error("payload depth: "+narrow(relative));
+  WIN32_FIND_DATAW entry{};HANDLE find=FindFirstFileExW((directory+L"\\*").c_str(),FindExInfoBasic,&entry,FindExSearchNameMatch,nullptr,FIND_FIRST_EX_LARGE_FETCH);
+  if(find==INVALID_HANDLE_VALUE){const DWORD error=GetLastError();if(error==ERROR_FILE_NOT_FOUND)return;throw std::runtime_error("payload list: "+narrow(relative)+"; win32="+std::to_string(error));}
+  try{
+    do{
+      const std::wstring name=entry.cFileName;if(name==L"."||name==L"..")continue;
+      const auto child=relative.empty()?name:relative+L"/"+name;
+      if(nameSurrogateReparse(entry.dwFileAttributes,entry.dwReserved0))throw std::runtime_error("payload link: "+narrow(child));
+      if(entry.dwFileAttributes&FILE_ATTRIBUTE_DIRECTORY)enumeratePayload(directory+L"\\"+name,child,files,depth+1);else files.push_back(child);
+      if(files.size()>200000)throw std::runtime_error("payload file limit");
+    }while(FindNextFileW(find,&entry));
+    const DWORD error=GetLastError();if(error!=ERROR_NO_MORE_FILES)throw std::runtime_error("payload list: "+narrow(relative)+"; win32="+std::to_string(error));
+  }catch(...){FindClose(find);throw;}
+  FindClose(find);
+}
+struct VerifiedPayloadFile{unsigned long long size;std::string sha256;};
 VerifiedPayloadFile verifyPayloadFile(const std::filesystem::path& file,const std::wstring& relative){
-  const auto extended=extendedPath(file);HANDLE handle=CreateFileW(extended.c_str(),GENERIC_READ,FILE_SHARE_READ|FILE_SHARE_WRITE|FILE_SHARE_DELETE,nullptr,OPEN_EXISTING,FILE_ATTRIBUTE_NORMAL|FILE_FLAG_OPEN_REPARSE_POINT,nullptr);
-  if(handle==INVALID_HANDLE_VALUE)throw std::runtime_error("payload open: "+narrow(relative)+"; win32="+std::to_string(GetLastError()));
-  BY_HANDLE_FILE_INFORMATION information{};const BOOL inspected=GetFileInformationByHandle(handle,&information);const DWORD inspectError=inspected?ERROR_SUCCESS:GetLastError();CloseHandle(handle);
-  if(!inspected)throw std::runtime_error("payload inspect: "+narrow(relative)+"; win32="+std::to_string(inspectError));
-  if(information.dwFileAttributes&(FILE_ATTRIBUTE_DIRECTORY|FILE_ATTRIBUTE_REPARSE_POINT))throw std::runtime_error("payload type: "+narrow(relative)+"; attributes="+std::to_string(information.dwFileAttributes));
-  return{(static_cast<unsigned long long>(information.nFileSizeHigh)<<32)|information.nFileSizeLow,information.dwFileAttributes};
+  const auto extended=extendedPath(file);
+  HANDLE probe=CreateFileW(extended.c_str(),FILE_READ_ATTRIBUTES,FILE_SHARE_READ|FILE_SHARE_WRITE|FILE_SHARE_DELETE,nullptr,OPEN_EXISTING,FILE_FLAG_OPEN_REPARSE_POINT,nullptr);
+  if(probe==INVALID_HANDLE_VALUE)throw std::runtime_error("payload open: "+narrow(relative)+"; win32="+std::to_string(GetLastError()));
+  FILE_ATTRIBUTE_TAG_INFO tag{};const BOOL tagged=GetFileInformationByHandleEx(probe,FileAttributeTagInfo,&tag,sizeof(tag));const DWORD tagError=tagged?ERROR_SUCCESS:GetLastError();CloseHandle(probe);
+  if(!tagged)throw std::runtime_error("payload inspect: "+narrow(relative)+"; win32="+std::to_string(tagError));
+  if((tag.FileAttributes&FILE_ATTRIBUTE_DIRECTORY)||nameSurrogateReparse(tag.FileAttributes,tag.ReparseTag))throw std::runtime_error("payload type: "+narrow(relative)+"; attributes="+std::to_string(tag.FileAttributes)+"; tag="+std::to_string(tag.ReparseTag));
+  HANDLE handle=CreateFileW(extended.c_str(),GENERIC_READ,FILE_SHARE_READ|FILE_SHARE_DELETE,nullptr,OPEN_EXISTING,FILE_FLAG_SEQUENTIAL_SCAN,nullptr);
+  if(handle==INVALID_HANDLE_VALUE)throw std::runtime_error("payload read: "+narrow(relative)+"; win32="+std::to_string(GetLastError()));
+  BCRYPT_ALG_HANDLE algorithm=nullptr;BCRYPT_HASH_HANDLE hash=nullptr;VerifiedPayloadFile out{0,{}};
+  try{
+    LARGE_INTEGER size{};if(!GetFileSizeEx(handle,&size))throw std::runtime_error("payload size: "+narrow(relative)+"; win32="+std::to_string(GetLastError()));out.size=static_cast<unsigned long long>(size.QuadPart);
+    DWORD objectSize=0,resultSize=0;std::vector<unsigned char> object,digest(32),buffer(1024*1024);
+    if(BCryptOpenAlgorithmProvider(&algorithm,BCRYPT_SHA256_ALGORITHM,nullptr,0)!=0||BCryptGetProperty(algorithm,BCRYPT_OBJECT_LENGTH,reinterpret_cast<PUCHAR>(&objectSize),sizeof(objectSize),&resultSize,0)!=0)throw std::runtime_error("sha256 init");object.resize(objectSize);
+    if(BCryptCreateHash(algorithm,&hash,object.data(),objectSize,nullptr,0,0)!=0)throw std::runtime_error("sha256 hash");
+    unsigned long long total=0;for(;;){DWORD read=0;if(!ReadFile(handle,buffer.data(),static_cast<DWORD>(buffer.size()),&read,nullptr))throw std::runtime_error("payload read: "+narrow(relative)+"; win32="+std::to_string(GetLastError()));if(!read)break;total+=read;if(BCryptHashData(hash,buffer.data(),read,0)!=0)throw std::runtime_error("sha256 data");}
+    if(total!=out.size)throw std::runtime_error("payload changed: "+narrow(relative));
+    if(BCryptFinishHash(hash,digest.data(),static_cast<ULONG>(digest.size()),0)!=0)throw std::runtime_error("sha256 finish");
+    const char hex[]="0123456789abcdef";out.sha256.reserve(64);for(auto byte:digest){out.sha256.push_back(hex[byte>>4]);out.sha256.push_back(hex[byte&15]);}
+  }catch(...){if(hash)BCryptDestroyHash(hash);if(algorithm)BCryptCloseAlgorithmProvider(algorithm,0);CloseHandle(handle);throw;}
+  BCryptDestroyHash(hash);BCryptCloseAlgorithmProvider(algorithm,0);CloseHandle(handle);return out;
 }
 void verifyPayloadManifest(const std::string& manifest,const std::filesystem::path& payload,const std::string& version){
   if(jsonString(manifest,"version")!=version)throw std::runtime_error("payload version");
-  const std::regex entry(R"json(\{\s*"path"\s*:\s*"([^"]+)"\s*,\s*"size"\s*:\s*([0-9]+)\s*,\s*"sha256"\s*:\s*"([a-f0-9]{64})"\s*\})json");size_t verified=0;
+  const std::regex entry(R"json(\{\s*"path"\s*:\s*"([^"]+)"\s*,\s*"size"\s*:\s*([0-9]+)\s*,\s*"sha256"\s*:\s*"([a-f0-9]{64})"\s*\})json");std::set<std::wstring> expected;
   for(std::sregex_iterator item(manifest.begin(),manifest.end(),entry),end;item!=end;++item){
     const auto relative=utf8((*item)[1].str());if(!safeRelative(relative)||relative.find(L'\\')!=std::wstring::npos)throw std::runtime_error("unsafe manifest path");
-    const auto file=payload/std::filesystem::path(relative);const auto information=verifyPayloadFile(file,relative);
-    const auto wantedSize=std::stoull((*item)[2].str());if(information.size!=wantedSize||sha256(extendedPath(file))!=(*item)[3].str())throw std::runtime_error("payload hash: "+narrow(relative));++verified;
+    if(!expected.insert(payloadKey(relative)).second)throw std::runtime_error("duplicate manifest path: "+narrow(relative));
+    const auto information=verifyPayloadFile(payload/std::filesystem::path(relative),relative);
+    const auto wantedSize=std::stoull((*item)[2].str());if(information.size!=wantedSize)throw std::runtime_error("payload size: "+narrow(relative));if(information.sha256!=(*item)[3].str())throw std::runtime_error("payload hash: "+narrow(relative));
   }
-  size_t actual=0;for(const auto& item:std::filesystem::recursive_directory_iterator(extendedPath(payload))){const DWORD attributes=GetFileAttributesW(item.path().c_str());if(attributes!=INVALID_FILE_ATTRIBUTES&&(attributes&FILE_ATTRIBUTE_REPARSE_POINT))throw std::runtime_error("payload reparse");if(item.is_regular_file())++actual;}
-  if(!verified||verified!=actual)throw std::runtime_error("payload file count");
+  if(expected.empty())throw std::runtime_error("payload manifest empty");
+  std::vector<std::wstring> actual;enumeratePayload(extendedPath(payload).wstring(),L"",actual,0);
+  for(const auto& relative:actual)if(!expected.count(payloadKey(relative)))throw std::runtime_error("payload unexpected file: "+narrow(relative));
+  if(actual.size()!=expected.size())throw std::runtime_error("payload file count: manifest="+std::to_string(expected.size())+" actual="+std::to_string(actual.size()));
 }
 void verifyPayload(const std::filesystem::path& base,const std::filesystem::path& payload,const std::string& version,const std::string& current){
   auto manifest=base/L"payload-manifest.json";

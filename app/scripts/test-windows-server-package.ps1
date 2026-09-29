@@ -61,6 +61,24 @@ function Assert-PortablePayloadManifest([string]$PortableFolder) {
 
 Assert-PortablePayloadManifest -PortableFolder $portableLauncher.DirectoryName
 
+# The usage, model-picker, cloud and login helpers depend on the ConPTY bridge
+# giving a program a real console. Prove it on this runner: `cmd /c` only
+# reports a console window size when its std handles are console handles.
+function Assert-ConptyBridge([string]$PortableFolder) {
+  $current = Get-Content -LiteralPath (Join-Path $PortableFolder 'current.json') -Raw | ConvertFrom-Json
+  $payload = Join-Path $PortableFolder ([string]$current.payloadDirectory)
+  $bridge = Join-Path $payload 'bin\claudex-conpty-bridge.exe'
+  if (-not (Test-Path -LiteralPath $bridge -PathType Leaf)) { throw "Portable payload does not contain the ConPTY bridge: $bridge" }
+  $cmd = Join-Path $env:SystemRoot 'System32\cmd.exe'
+  $output = & $bridge --cols 97 --rows 31 -- $cmd /d /c 'mode con & echo claudex-conpty-ok'
+  if ($LASTEXITCODE -ne 0) { throw "ConPTY bridge exited with $LASTEXITCODE" }
+  $text = ($output -join "`n") -replace "`e\[[0-9;?]*[ -/]*[@-~]", ''
+  if ($text -notmatch 'claudex-conpty-ok') { throw "ConPTY bridge did not relay program output: $text" }
+  if ($text -notmatch '97') { throw "ConPTY bridge program did not see the pseudo console size: $text" }
+  Write-Host 'ConPTY bridge relays a real console program.'
+}
+Assert-ConptyBridge -PortableFolder $portableLauncher.DirectoryName
+
 function Wait-ServerStopped {
   $deadline = (Get-Date).AddSeconds(30)
   while ((Get-Date) -lt $deadline) {

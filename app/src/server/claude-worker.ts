@@ -15,6 +15,7 @@ import {ProviderOutputBlockTracker} from "./provider-output-block.js";
 import {persistProviderSystemEvent} from "./provider-system-events.js";
 import {EXTERNAL_MCP_BUNDLE_ENV,externalMcpForClaude,readExternalMcpBundle} from "./external-mcp-bundle.js";
 import {CONVERSATION_EMOTION_INSTRUCTION,EMOTION_MCP_PROFILE_HEADER,EMOTION_MCP_SERVER_ID,EMOTION_MCP_SESSION_HEADER,EMOTION_MCP_TASK_HEADER,EMOTION_MCP_TOOL_NAME,validatedEmotionMcpUrl,type EmotionMcpProvider} from "./emotion-mcp-policy.js";
+import{holdWorkerLiveness,terminateWindowsProcessTree,usesWindowsWorkerLiveness,watchStopRequest}from"./worker-liveness.js";
 
 const [, , statePath, taskId, claudeBinary, mode, cwd, marker, permissionProfile = ":read-only", model = "default", ...workerArgs] = process.argv;
 const EFFORTS = new Set(["default", "low", "medium", "high", "xhigh", "max"]);
@@ -108,6 +109,10 @@ function recordOutputUsage(callId:string|null,usage:ProviderOutputUsage){
   },inputTokens=sum("inputTokens"),outputTokens=values.reduce((total,value)=>total+value.outputTokens,0);
   state.outputUsage={totalTokens:inputTokens===null?null:inputTokens+outputTokens,inputTokens,cachedInputTokens:sum("cachedInputTokens"),cacheWriteInputTokens:sum("cacheWriteInputTokens"),outputTokens,reasoningTokens:sum("reasoningTokens"),requestCount:values.length,updatedAt:usage.updatedAt};
 }
+// Windows: the server cannot signal this process, so it proves liveness by the
+// exclusive lock taken before the first state write, and asks for a stop
+// through a request file (see worker-liveness.ts).
+holdWorkerLiveness(statePath);
 atomicWrite(state);
 spool.append({ type:"task_started", content:`Claudex Workhouse ${providerLabel} worker started.`, threadId:state.sessionId });
 
@@ -182,6 +187,7 @@ function emitToolUse(part: any) {
 beginWorkerEmotion(root,providerId,prompt,state.sessionId);
 const childEnvironment={...process.env,...externalMcp.environment};
 const child = spawn(claudeBinary, args, { cwd, shell: false, windowsHide:true, stdio: ["ignore", "pipe", "pipe"],env:childEnvironment });
+let stopRequested=false;
 const lines = readline.createInterface({ input: child.stdout });
 let sawCompactionBoundary=false;
 let currentOutputCallId:string|null=null;
@@ -265,7 +271,7 @@ child.once("close", async(code, signal) => {
   if(postResultFinalization)await postResultFinalization;
   const transitioned=["pending","queued","running","waiting"].includes(state.status);
   if (transitioned) {
-    state.status = signal ? "stopped" : code === 0&&!pendingResultError ? "completed" : "failed";
+    state.status = signal||stopRequested ? "stopped" : code === 0&&!pendingResultError ? "completed" : "failed";
     state.result=pendingResult;
     state.error=state.status==="failed"?(code!==0?`${providerLabel} exited with code ${code}`:pendingResult??`${providerLabel} task failed.`):null;
     updateWorkerEmotion(root,providerId,state.status==="completed"?"done":state.status==="failed"?"disappointed":"neutral",state.sessionId);
@@ -276,5 +282,8 @@ child.once("close", async(code, signal) => {
 });
 
 for (const signal of ["SIGTERM", "SIGINT"] as const) {
-  process.on(signal, () => { child.kill("SIGTERM"); setTimeout(() => child.kill("SIGKILL"), 3000).unref(); });
+  process.on(signal, () => { stopRequested=true; child.kill("SIGTERM"); setTimeout(() => child.kill("SIGKILL"), 3000).unref(); });
 }
+// On Windows child.kill() ends only the CLI itself; its tool and MCP processes
+// would outlive the task, so a stop ends the whole tree it started.
+watchStopRequest(statePath,()=>{stopRequested=true;if(usesWindowsWorkerLiveness()&&child.pid)terminateWindowsProcessTree(child.pid);else child.kill("SIGTERM");});

@@ -493,6 +493,7 @@ export const ja = {
 ,"error.PROMPT_PRESETS_STALE":"他のデバイスでプリセットが変更されました。再読み込みして統合された値を確認してください。"
 ,"error.SNAPSHOT_CONFIRMATION_MISMATCH":"完全削除の確認文字列が一致しませんでした。"
 ,"error.WINDOWS_PROVIDER_LOGIN_EXTERNAL":"公式CLIでプロバイダーのログインを完了してから状態を更新してください。"
+,"error.PROVIDER_PLATFORM_UNSUPPORTED":"{provider} プロバイダーはまだ Windows サーバーでは実行できません。"
 ,"error.SHARE_TARGET_EXPIRED":"共有された内容は期限切れか、すでに開かれています。"
 ,"error.PLATFORM_UNSUPPORTED":"プロバイダー実行ファイルの選択にはWindowsまたはリモートWorkerホストが必要です。"
 ,"error.GITHUB_LOGIN_ON_HOST_REQUIRED":"Desktop WorkerホストでGitHub CLIのログインを直接開始してから、接続を再確認してください。"

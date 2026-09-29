@@ -10,7 +10,8 @@ Worker의 조합이 기본 경로입니다. 설치 페이지의 **Windows + Dock
 Desktop** 탭에서 서명된 manifest와 정확한 image digest가 내장된 PowerShell
 스크립트를 받으세요. 컨테이너는 웹·DB를 실행하고 Worker는 Windows 사용자의
 Claude Code·Codex 로그인과 로컬 Workspace 접근을 유지합니다. 자세한 순서는
-[Windows 설치](install/windows.md)를 참고하세요.
+[Windows Worker 연결](install/windows-worker.md)을 참고하세요.
+Worker 없이 실행하는 [Windows 포터블 서버](install/windows.md)는 별도의 출시 후보입니다.
 
 1. `.env.example`을 `.env`로 복사하고 외부 주소를 설정합니다.
 2. `docker compose up -d --build`로 시작합니다.

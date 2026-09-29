@@ -41,7 +41,8 @@ const POSIX_ONLY:Record<string,number>={
   "desktop-worker/service.ts":6,   // systemctl (4) + launchctl (2)
   "desktop-worker/ui.ts":4,        // osascript, zenity, open, xdg-open
   "desktop-worker/updater.ts":5,   // systemctl (2) + tar (2) + the POSIX worker-ui relaunch
-  "emotion.ts":1                   // /bin/flock, behind the non-win32 branch
+  "emotion.ts":1,                  // /bin/flock, behind the non-win32 branch
+  "pty-helpers/terminal.ts":1      // util-linux script; Windows takes the ConPTY bridge branch
 };
 
 describe("Windows hidden process contract",()=>{

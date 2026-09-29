@@ -65,6 +65,6 @@ below that root.
 - [Docker](docker.en.md)
 - [Desktop Worker](desktop-worker.en.md)
 - [Multi-host architecture](multi-host.en.md)
-- Detailed Korean operator notes: [Synology](install/synology.md), [Linux](install/linux.md), [Windows Docker Desktop + Worker](install/windows.md), [Windows Worker](install/windows-worker.md), and [local network](install/local-network.md)
+- Detailed Korean operator notes: [Synology](install/synology.md), [Linux](install/linux.md), [Windows portable server](install/windows.md) (release candidate, runs without a Worker), [Windows Worker](install/windows-worker.md), and [local network](install/local-network.md)
 
 Next: [Introduction →](introduction.en.md)

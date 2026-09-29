@@ -21,6 +21,17 @@ Start menu or desktop shortcut, no Windows Installed apps entry and no
 removes the program. Code verification and the browser first-run setup are
 ordinary product setup and still apply.
 
+Payload verification is Win32 end to end. Every manifest entry is opened with
+`CreateFileW` on an extended-length path, checked for a name-surrogate reparse
+point (symbolic link, junction), sized and hashed with `ReadFile`; the folder is
+enumerated with `FindFirstFileExW` and compared to the manifest by name, so a
+missing or extra file is reported by path. Non-surrogate reparse points such as
+OneDrive Files On-Demand or WOF-compressed files verify normally. The portable
+ZIP itself is written by `app/scripts/package-windows-server.mjs`
+(`app/src/server/windows/portable-zip.ts`) under one `Claudex Workhouse` root
+folder, with printable-ASCII names no longer than 150 characters so Explorer's
+built-in extractor can unpack it.
+
 The single EXE opens a native three-stage installer wizard before touching the
 payload. The welcome screen shows the per-user install location and lets the
 user choose a different current-user-writable folder. The selected location is
@@ -53,6 +64,14 @@ English, Korean, and Japanese columns. The locale is resolved from the
 language button rewrites the whole window in place. The wizard owner-draws
 its own chrome so it follows the system light/dark theme and the per-monitor
 DPI of the display it is on.
+
+The same CMake project builds `claudex-conpty-bridge.exe`
+(`src/conpty-bridge.cpp`), a console helper the server uses to run Claude
+Code's interactive screens (usage, model picker, cloud session, login) inside
+a Windows pseudo console. It starts the program through a second stage that
+opens `CONIN$`/`CONOUT$` explicitly, so the program sees a terminal whatever
+the host does with redirected std handles, and runs it in a kill-on-close job
+tied to `--parent-pid`, so nothing outlives the helper that asked for it.
 
 Build on a supported Windows x64 runner:
 

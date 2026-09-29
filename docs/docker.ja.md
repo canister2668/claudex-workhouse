@@ -10,7 +10,8 @@ current-user Windows Worker の組み合わせです。インストールペー�
 **Windows + Docker Desktop** から、署名済み manifest と正確な image
 digest に固定された PowerShell を取得します。コンテナは Web UI と DB を
 実行し、Worker は Windows ユーザーの Claude Code・Codex ログインとローカル
-Workspace アクセスを保持します。[Windows 手順](install/windows.md)も参照してください。
+Workspace アクセスを保持します。[Windows Worker 手順](install/windows-worker.md)も参照してください。
+Worker を使わない [Windows ポータブルサーバー](install/windows.md)は別のリリース候補です。
 
 1. `.env.example` を `.env` にコピーし、外部 URL を設定します。
 2. `docker compose up -d --build` で起動します。

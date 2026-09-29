@@ -3,9 +3,10 @@
 [ガイドブック](../guide.ja.md) · [English](index.en.md) · [한국어](index.md)
 
 **メインサーバーは Linux または Linux ベース NAS の Docker で構成します。**
-現在リリースしている経路はこれだけです。**Windows 対象はすべて開発中であり、
-リリースしていません** — portable サーバー、ネイティブ Worker、Docker Desktop +
-Worker のいずれもです。Windows では Linux host または NAS にメインサーバーを置き、
+現在リリースしている経路はこれだけです。**Windows ポータブルサーバーはリリース候補**
+で、Worker なしで Claude Code・Codex を直接実行しますが、Windows 11 受け入れテスト
+前のためまだリリースしていません。ネイティブ Worker と Docker Desktop + Worker は
+開発中です。現時点の Windows では Linux host または NAS にメインサーバーを置き、
 ブラウザー（PWA）から利用してください。
 
 | 対象 | メインサーバー | Worker | 推奨方式 |
@@ -13,7 +14,7 @@ Worker のいずれもです。Windows では Linux host または NAS にメイ
 | Synology DSM 7 | 対応 | 任意 | Docker Compose |
 | Linux x64/arm64 | 対応 | 対応 | Docker Compose または current-user Worker |
 | その他の Docker NAS | 一般 Docker 手順 | 任意 | Docker Compose |
-| Windows 11 x64 | **開発中** | **開発中** | 未リリース・ブラウザーから利用 |
+| Windows 11 x64 | **ポータブル ZIP リリース候補** | **開発中** | 受け入れテスト待ち・ソースからビルド |
 
 Windows に残る課題は
 [Windows サポート方針](../windows-support-policy.md)にまとめています。
@@ -35,7 +36,7 @@ Docker socket 権限を要求しません。権限が必要な作業は管理者
 - [Docker](../docker.ja.md)
 - [デプロイと NAS 自動起動](../deployment.ja.md)
 - [Desktop Worker](../desktop-worker.ja.md)
-- 韓国語の詳細手順: [Synology](synology.md)、[Linux](linux.md)、[Node インストール (npm)](node.md)、[Windows Docker Desktop + Worker](windows.md)（開発中）、[Windows Worker](windows-worker.md)（開発中）、[ローカルネットワーク](local-network.md)
+- 韓国語の詳細手順: [Synology](synology.md)、[Linux](linux.md)、[Node インストール (npm)](node.md)、[Windows ポータブルサーバー](windows.md)（リリース候補、Worker なしで直接実行）、[Windows Worker](windows-worker.md)（開発中）、[ローカルネットワーク](local-network.md)
 
 リリースは固定されていない `latest` tag ではなく署名済み manifest から
 選択します。署名、期限、downgrade の検証失敗時はインストールを停止します。

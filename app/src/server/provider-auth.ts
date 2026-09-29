@@ -2,13 +2,14 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import readline from "node:readline";
-import { spawn, type ChildProcess, type ChildProcessWithoutNullStreams } from "node:child_process";
+import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import type { AppConfig } from "./config.js";
 import { runCommand } from "./process.js";
 import { CodexAppServerClient, AppServerError, withCodexAppServer } from "./codex/app-server.js";
 import {antigravityBinary,antigravityEnvironment,antigravityHome} from "./antigravity-environment.js";
 import {DEFAULT_ANTIGRAVITY_EXECUTION,usesVertexCredentials,type AntigravityExecutionSettings} from "./antigravity-execution-settings.js";
 import {vertexCredentialInfo} from "./vertex-ai.js";
+import{screenHelperCommand}from"./pty-helpers/command.js";
 
 export type AuthProvider = "codex" | "claude" | "antigravity"|"grok";
 export type AccountState = "unavailable" | "disconnected" | "unknown" | "connected";
@@ -71,8 +72,6 @@ type InternalAttempt = {
   codexClient?: CodexAppServerClient;
   loginId?: string;
   child?: ChildProcessWithoutNullStreams;
-  windowsChild?:ChildProcess;
-  windowsPoll?:NodeJS.Timeout;
   pid?: number;
   pgid?: number;
   processStart?: string | null;
@@ -125,10 +124,6 @@ export function validateClaudeAuthUrl(value:unknown){ return safeUrl(value,CLAUD
 export function validateCodexAuthUrl(value:unknown){ return safeUrl(value,OPENAI_AUTH_HOSTS); }
 export function validateAntigravityAuthUrl(value:unknown){ return safeUrl(value,ANTIGRAVITY_AUTH_HOSTS); }
 export function validateGrokAuthUrl(value:unknown){return safeUrl(value,GROK_AUTH_HOSTS);}
-export function windowsClaudeLoginCommand(binary:string,method:LoginMethod){
-  const escaped=binary.replaceAll("'","''"),flag=method==="console"?"--console":method==="sso"?"--sso":"--claudeai";
-  return`& '${escaped}' auth login ${flag}`;
-}
 
 export function parseClaudeAuthStatus(stdout:string, exitCode=0):ProviderAccount{
   const checkedAt=now();
@@ -161,6 +156,9 @@ function procIdentity(pid:number){
 }
 
 function processMatches(attempt:InternalAttempt){
+  // Windows has no /proc; the server holds the helper's own process handle,
+  // which a reused PID cannot impersonate.
+  if(process.platform==="win32")return Boolean(attempt.child&&attempt.child.pid===attempt.pid&&attempt.child.exitCode===null&&attempt.child.signalCode===null);
   if(!attempt.pid||!attempt.pgid||!attempt.marker)return false;
   try{
     const stat=fs.readFileSync(`/proc/${attempt.pid}/stat`,"utf8").split(" ");
@@ -206,8 +204,6 @@ export class ProviderAuthManager {
     const eventType=state==="completed"?"auth/completed":state==="cancelled"?"auth/cancelled":state==="timeout"?"auth/timeout":"auth/failed";
     this.emit(attempt,eventType,{...(category?{errorCategory:category}:{})});
     void attempt.codexClient?.close().catch(()=>{});attempt.codexClient=undefined;
-    if(attempt.windowsPoll)clearInterval(attempt.windowsPoll);
-    if(attempt.windowsChild&&!attempt.windowsChild.killed)attempt.windowsChild.kill();
     if(attempt.child&&!attempt.child.killed&&!attempt.child.stdin.destroyed&&!attempt.child.stdin.writableEnded){try{attempt.child.stdin.write(`${JSON.stringify({type:"cancel"})}\n`);}catch{}}
     if(attempt.workDir)setTimeout(()=>{try{fs.rmSync(attempt.workDir!,{recursive:true,force:true});}catch{}},2000).unref?.();
     void this.record({actor:attempt.actor,provider:attempt.provider,method:attempt.method,outcome:state,category,startedAt:attempt.createdAt,finishedAt:now()});
@@ -316,15 +312,11 @@ export class ProviderAuthManager {
   private async startClaude(method:LoginMethod,actor:string){
     if(!["subscription","console","sso"].includes(method))throw new ProviderAuthError("This Claude login method is not supported.","CLAUDE_LOGIN_METHOD_UNSUPPORTED");
     const attempt=this.create("claude",method,actor);const marker=`claudex-workhouse-auth:${attempt.id}`;attempt.marker=marker;attempt.workDir=this.attemptDir(attempt.id);
-    if(process.platform==="win32"){
-      const child=spawn("powershell.exe",["-NoLogo","-ExecutionPolicy","Bypass","-Command",windowsClaudeLoginCommand(this.config.claudeBinary,method)],{cwd:attempt.workDir,shell:false,detached:false,windowsHide:false,env:{...process.env,DISABLE_AUTOUPDATER:"1"},stdio:"ignore"});
-      attempt.windowsChild=child;attempt.pid=child.pid;attempt.state="waiting";this.emit(attempt,"auth/start");
-      const verify=async()=>{if(!active(attempt))return;const status=await this.readClaude();if(status.state==="connected"){this.accounts.set("claude",status);this.finish(attempt,"completed",null);}};
-      attempt.windowsPoll=setInterval(()=>void verify(),2000);attempt.windowsPoll.unref?.();child.once("error",()=>this.finish(attempt,"failed","runtime_unavailable"));child.once("exit",()=>setTimeout(()=>void this.verifyClaude(attempt,"login_process_exited"),200).unref?.());
-      return this.toPublic(attempt);
-    }
-    const appRoot=this.appRoot(),helper=path.join(appRoot,"bin","claude-auth-pty.py");
-    const child=spawn("python3",[helper,this.config.claudeBinary,attempt.workDir,method,attempt.id,marker],{cwd:appRoot,shell:false,windowsHide:true,detached:true,env:process.env,stdio:["pipe","pipe","pipe"]});
+    // Linux runs bin/claude-auth-pty.py; Windows runs its Node port over the
+    // bundled ConPTY bridge. Same protocol, so the web UI's paste-the-code
+    // login works on both, including from another device.
+    const appRoot=this.appRoot(),helper=screenHelperCommand(appRoot,"claude-auth-pty",[this.config.claudeBinary,attempt.workDir,method,attempt.id,marker]);
+    const child=spawn(helper.command,helper.args,{cwd:appRoot,shell:false,windowsHide:true,detached:true,env:process.env,stdio:["pipe","pipe","pipe"]});
     attempt.child=child;attempt.pid=child.pid;const identity=child.pid?procIdentity(child.pid):{start:null,pgid:0};attempt.processStart=identity.start;attempt.pgid=identity.pgid;
     child.stdin.on("error",()=>{/* a terminal helper may close before cleanup writes */});
     child.stderr.on("data",()=>{/* deliberately discarded: PTY helper diagnostics may contain auth material */});
@@ -339,7 +331,7 @@ export class ProviderAuthManager {
   private async handleClaudeHelper(attempt:InternalAttempt,message:any){
     if(!active(attempt)||message?.attemptId&&message.attemptId!==attempt.id)return;
     if(message.event==="helper/start"){
-      attempt.helperReady=true;attempt.environmentMatch=message.uid===process.getuid?.()&&message.gid===process.getgid?.()&&message.home===(process.env.HOME??"")&&message.marker===attempt.marker;
+      attempt.helperReady=true;attempt.environmentMatch=(process.platform==="win32"||message.uid===process.getuid?.()&&message.gid===process.getgid?.())&&message.home===(process.env.HOME??"")&&message.marker===attempt.marker;
       if(!attempt.environmentMatch||!processMatches(attempt)){this.stopAuthProcess(attempt);this.finish(attempt,"failed","process_identity_mismatch");return;}
       attempt.state="waiting";this.emit(attempt,"auth/start");return;
     }
@@ -440,7 +432,7 @@ export class ProviderAuthManager {
 
   private stopAuthProcess(attempt:InternalAttempt){
     if(attempt.child&&!attempt.child.killed&&!attempt.child.stdin.destroyed&&!attempt.child.stdin.writableEnded){try{attempt.child.stdin.write(`${JSON.stringify({type:"cancel"})}\n`);}catch{}}
-    setTimeout(()=>{if(processMatches(attempt)&&attempt.pgid){try{process.kill(-attempt.pgid,"SIGTERM");}catch{}}},500).unref?.();
+    setTimeout(()=>{if(!processMatches(attempt))return;if(process.platform==="win32"){try{attempt.child?.kill();}catch{}return;}if(attempt.pgid){try{process.kill(-attempt.pgid,"SIGTERM");}catch{}}},500).unref?.();
   }
 
   async logout(provider:AuthProvider){

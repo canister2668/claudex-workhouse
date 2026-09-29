@@ -61,7 +61,7 @@ Proton Drive는 글로벌 설정에서 한 번 구성합니다. 기능을 켜고
 - [Synology NAS](install/synology.md)
 - [일반 Linux](install/linux.md)
 - [Node 설치(npm)](install/node.md)
-- [Windows Docker Desktop 메인 서버 + Worker](install/windows.md) — 개발 중, 배포하지 않음
+- [Windows 포터블 서버](install/windows.md) — 출시 후보, Worker 없이 직접 실행, Windows 11 인수 테스트 대기
 - [Windows Desktop Worker](install/windows-worker.md) — 개발 중, 배포하지 않음
 - [Docker](docker.ko.md)
 - [로컬 네트워크](install/local-network.md)

@@ -940,6 +940,7 @@ export const en = {
 ,"error.PROMPT_PRESETS_STALE":"Prompt presets changed on another device. Reload and review the merged values."
 ,"error.SNAPSHOT_CONFIRMATION_MISMATCH":"Permanent deletion confirmation did not match."
 ,"error.WINDOWS_PROVIDER_LOGIN_EXTERNAL":"Complete Provider login in the official CLI, then refresh its status."
+,"error.PROVIDER_PLATFORM_UNSUPPORTED":"Provider {provider} does not run on the Windows server yet."
 ,"error.SHARE_TARGET_EXPIRED":"Shared content expired or was already opened."
 ,"error.PLATFORM_UNSUPPORTED":"Provider binary selection requires a Windows or remote Worker host."
 ,"error.GITHUB_LOGIN_ON_HOST_REQUIRED":"Start GitHub CLI login directly on the Desktop Worker host, then recheck the connection."

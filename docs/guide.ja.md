@@ -65,6 +65,6 @@ Proton Drive はグローバル設定で一度構成します。有効にして�
 - [Docker](docker.ja.md)
 - [Desktop Worker](desktop-worker.ja.md)
 - [マルチホスト構成](multi-host.ja.md)
-- 韓国語の詳細運用手順: [Synology](install/synology.md)、[Linux](install/linux.md)、[Windows Docker Desktop + Worker](install/windows.md)、[Windows Worker](install/windows-worker.md)、[ローカルネットワーク](install/local-network.md)
+- 韓国語の詳細運用手順: [Synology](install/synology.md)、[Linux](install/linux.md)、[Windows ポータブルサーバー](install/windows.md)（リリース候補、Worker なしで直接実行）、[Windows Worker](install/windows-worker.md)、[ローカルネットワーク](install/local-network.md)
 
 次へ: [概要 →](introduction.ja.md)

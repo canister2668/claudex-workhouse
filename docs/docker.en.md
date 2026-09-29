@@ -11,7 +11,8 @@ a current-user Windows Worker. Use **Windows + Docker Desktop** on the installer
 page to obtain a PowerShell bootstrap bound to the signed manifest and exact
 image digest. The container runs the web UI and database; the Worker retains
 the Windows user's Claude Code and Codex logins plus local Workspace access.
-See the [detailed Windows guide](install/windows.md).
+See the [Windows Worker guide](install/windows-worker.md); the Worker-free
+[Windows portable server](install/windows.md) is a separate release candidate.
 
 1. Copy `.env.example` to `.env` and configure the external URL.
 2. Start the service with `docker compose up -d --build`.

@@ -17,6 +17,7 @@ import {mergePersistedImageOutputs} from "./image-outputs.js";
 import {conversationAttachmentInstruction,parseConversationAttachments} from "./conversation-attachments.js";
 import{CONVERSATION_EMOTION_INSTRUCTION}from"./emotion-mcp-policy.js";
 import {captureTaskImageOutput} from "./task-image-output.js";
+import{holdWorkerLiveness,watchStopRequest}from"./worker-liveness.js";
 
 const [stateFile, taskId, mode, cwd, marker, sourceThreadId, prompt, settingsJson] = process.argv.slice(2);
 if (!stateFile || !taskId || !mode || !cwd || !marker || !prompt) process.exit(2);
@@ -208,6 +209,10 @@ async function stop() {
 }
 process.once("SIGTERM", () => { void stop(); });
 process.once("SIGINT", () => { void stop(); });
+// Windows: liveness is this exclusive lock, and a stop arrives as a request
+// file because the server cannot deliver SIGTERM to run stop() above.
+holdWorkerLiveness(stateFile);
+watchStopRequest(stateFile,()=>{void stop();});
 
 try {
   write({ status: "running", activity:"runtime_initializing", modelTurnStarted:false, createdAt: startedAt, log: "Claudex Workhouse Codex worker started." });
