@@ -6,7 +6,15 @@ import{validateWindowsPayloadPath,verifyWindowsPayload,type WindowsPayloadManife
 const MAGIC=Buffer.from("CWHSPAYLOADV2\0\0\0","ascii");
 const FOOTER_SIZE=112;
 const FORMAT_VERSION=2;
-const MAX_SINGLE_EXE_BYTES=200*1024*1024;
+// The program budget covers everything that runs: launcher, Node runtime,
+// server/web bundle, native modules, notices and bootstrap files. The avatar
+// art under app/dist/emoticons is static WebP that does not compress further
+// and grows with every outfit, so it is held to its own ceiling instead of
+// silently consuming the program budget.
+export const WINDOWS_PROGRAM_BUDGET_BYTES=200*1024*1024;
+export const WINDOWS_AVATAR_ART_BUDGET_BYTES=256*1024*1024;
+export const WINDOWS_AVATAR_ART_PREFIX="app/dist/emoticons/";
+const MAX_SINGLE_EXE_BYTES=WINDOWS_PROGRAM_BUDGET_BYTES+WINDOWS_AVATAR_ART_BUDGET_BYTES;
 
 export type WindowsSingleExeInfo={
   launcherSize:number;

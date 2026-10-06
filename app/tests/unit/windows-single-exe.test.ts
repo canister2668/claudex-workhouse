@@ -2,7 +2,7 @@ import fs from"node:fs";
 import os from"node:os";
 import path from"node:path";
 import{afterEach,describe,expect,it}from"vitest";
-import{buildWindowsSingleExe,extractWindowsSingleExe,inspectWindowsSingleExe}from"../../src/server/windows/single-exe.js";
+import{buildWindowsSingleExe,extractWindowsSingleExe,inspectWindowsSingleExe,WINDOWS_AVATAR_ART_BUDGET_BYTES,WINDOWS_AVATAR_ART_PREFIX,WINDOWS_PROGRAM_BUDGET_BYTES}from"../../src/server/windows/single-exe.js";
 import{buildWindowsPayloadManifest}from"../../src/server/windows/payload.js";
 
 const roots:string[]=[];
@@ -44,6 +44,9 @@ describe("Windows single EXE payload contract",()=>{
   it("enforces the complete artifact size gate and exclusive staging",()=>{
     const value=fixture();
     expect(()=>buildWindowsSingleExe({...value,maximumBytes:200})).toThrow(/exceeds/);
+    expect(WINDOWS_PROGRAM_BUDGET_BYTES).toBe(200*1024*1024);
+    expect(WINDOWS_AVATAR_ART_BUDGET_BYTES).toBe(256*1024*1024);
+    expect(WINDOWS_AVATAR_ART_PREFIX).toBe("app/dist/emoticons/");
     buildWindowsSingleExe(value);
     const staging=path.join(value.root,"occupied");fs.mkdirSync(staging);
     expect(()=>extractWindowsSingleExe({file:value.output,stagingRoot:staging})).toThrow(/already exists/);

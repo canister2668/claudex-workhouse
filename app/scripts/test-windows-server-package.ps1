@@ -11,6 +11,11 @@ param(
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
+# The payload installs under versions\<package version>; read it instead of
+# assuming one, so a version bump cannot fail the launch test.
+$ExpectedVersion = [string](Get-Content -LiteralPath (Join-Path $PSScriptRoot '..\package.json') -Raw | ConvertFrom-Json).version
+if ($ExpectedVersion -notmatch '^[0-9]+\.[0-9]+\.[0-9]+') { throw "app/package.json version is not a release version: $ExpectedVersion" }
+
 if ($ExpectedCommit -notmatch '^[a-fA-F0-9]{7,64}$') {
   throw 'ExpectedCommit must be a hexadecimal commit identifier.'
 }
@@ -194,7 +199,7 @@ function Test-Launcher([string]$Label, [string]$Launcher, [bool]$ExpectInstalled
   $staleMarker = ''
   if ($StaleSameVersionPayloadFixture) {
     if (-not $InstallRoot) { throw 'The stale same-version payload fixture requires an install root.' }
-    $stalePayload = Join-Path $InstallRoot 'versions\1.0.0'
+    $stalePayload = Join-Path $InstallRoot "versions\$ExpectedVersion"
     $staleMarker = Join-Path $stalePayload 'stale-payload.txt'
     New-Item -ItemType Directory -Path (Join-Path $stalePayload 'app') -Force | Out-Null
     'stale-node' | Set-Content -LiteralPath (Join-Path $stalePayload 'node.exe') -Encoding ascii
@@ -261,8 +266,8 @@ function Test-Launcher([string]$Label, [string]$Launcher, [bool]$ExpectInstalled
         throw 'Single EXE did not install and activate its embedded payload.'
       }
       $current = Get-Content -LiteralPath $currentFile -Raw | ConvertFrom-Json
-      if ([string]$current.version -ne '1.0.0') {
-        throw "Installed payload version $($current.version) did not match 1.0.0."
+      if ([string]$current.version -ne $ExpectedVersion) {
+        throw "Installed payload version $($current.version) did not match $ExpectedVersion."
       }
       if ($staleMarker -and (Test-Path -LiteralPath $staleMarker)) {
         throw 'Single EXE retained the stale same-version payload instead of replacing it.'
@@ -603,7 +608,7 @@ try {
   # the payload's deeply nested dependency paths exceed it.
   $longInstallRoot = Join-Path $testRoot ('custom-install-' + ('long-segment-' * 6))
   $payloadManifest = Get-Content -LiteralPath (Join-Path $portableLauncher.DirectoryName 'payload-manifest.json') -Raw | ConvertFrom-Json
-  $longestPayloadPath = ($payloadManifest.files | ForEach-Object { (Join-Path (Join-Path $longInstallRoot 'versions\1.0.0') ([string]$_.path)).Length } | Measure-Object -Maximum).Maximum
+  $longestPayloadPath = ($payloadManifest.files | ForEach-Object { (Join-Path (Join-Path $longInstallRoot "versions\$ExpectedVersion") ([string]$_.path)).Length } | Measure-Object -Maximum).Maximum
   if ($longestPayloadPath -le 260) { throw "Long-path smoke fixture reached only $longestPayloadPath characters." }
   Test-Launcher -Label 'single-exe' -Launcher $singleExePath -ExpectInstalledPayload $true -InstallRoot $longInstallRoot -LegacyAclFixture $true -StaleSameVersionPayloadFixture $true
   $singleExeDataRoot = Join-Path $testRoot 'single-exe-local-app-data\Claudex Workhouse'

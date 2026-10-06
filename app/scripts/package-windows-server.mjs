@@ -5,7 +5,7 @@ import fs from"node:fs";
 import path from"node:path";
 import{fileURLToPath}from"node:url";
 import{buildWindowsPayloadManifest,verifyWindowsPayload}from"../dist-server/windows/payload.js";
-import{buildWindowsSingleExe}from"../dist-server/windows/single-exe.js";
+import{buildWindowsSingleExe,WINDOWS_AVATAR_ART_BUDGET_BYTES,WINDOWS_AVATAR_ART_PREFIX,WINDOWS_PROGRAM_BUDGET_BYTES}from"../dist-server/windows/single-exe.js";
 import{createPortableZip}from"../dist-server/windows/portable-zip.js";
 import crypto from"node:crypto";
 
@@ -89,7 +89,9 @@ fs.writeFileSync(path.join(packageRoot,...versionedManifest.split("/")),manifest
 fs.writeFileSync(path.join(packageRoot,"current.json"),`${JSON.stringify({schemaVersion:1,version,payloadDirectory:`payload/${version}`,payloadManifest:versionedManifest,previousVersion:null},null,2)}\n`);
 fs.copyFileSync(path.resolve(launcherSource),path.join(packageRoot,"Claudex Workhouse.exe"));
 const total=manifest.files.reduce((sum,item)=>sum+item.size,0)+fs.statSync(path.join(packageRoot,"Claudex Workhouse.exe")).size;
-if(total>200*1024*1024)throw new Error(`Windows server folder exceeds the 200 MiB policy (${total} bytes).`);
+const avatarArtBytes=manifest.files.filter(item=>item.path.startsWith(WINDOWS_AVATAR_ART_PREFIX)).reduce((sum,item)=>sum+item.size,0),programBytes=total-avatarArtBytes;
+if(programBytes>WINDOWS_PROGRAM_BUDGET_BYTES)throw new Error(`Windows server program payload exceeds the ${WINDOWS_PROGRAM_BUDGET_BYTES/1048576} MiB policy (${programBytes} bytes, avatar art excluded).`);
+if(avatarArtBytes>WINDOWS_AVATAR_ART_BUDGET_BYTES)throw new Error(`Windows server avatar art exceeds the ${WINDOWS_AVATAR_ART_BUDGET_BYTES/1048576} MiB policy (${avatarArtBytes} bytes).`);
 const singleExe=path.join(repoRoot,"packages","claudex-workhouse-server-windows-x64.exe"),single=buildWindowsSingleExe({launcher:path.resolve(launcherSource),payloadRoot,manifest,output:singleExe});
 // The portable ZIP is the folder above under one root folder. It is written
 // here rather than by the host archiver so every build machine produces the
@@ -100,4 +102,4 @@ const portableZip=path.join(repoRoot,"packages","claudex-workhouse-server-window
 const zip=createPortableZip({sourceRoot:packageRoot,rootName:"Claudex Workhouse",output:portableZip,date:Number.isSafeInteger(sourceDateEpoch)&&sourceDateEpoch>0?new Date(sourceDateEpoch*1000):undefined});
 const zipSha=crypto.createHash("sha256").update(fs.readFileSync(portableZip)).digest("hex");
 fs.writeFileSync(`${portableZip}.sha256`,`${zipSha}  ${path.basename(portableZip)}\n`);
-process.stdout.write(`${packageRoot}\n${singleExe}\n${portableZip}\nfiles=${manifest.files.length}\nfolderBytes=${total}\nsingleExeBytes=${single.totalSize}\nportableZipBytes=${zip.bytes}\nportableZipSha256=${zipSha}\nportableZipLongestPath=${zip.longestPath}\n`);
+process.stdout.write(`${packageRoot}\n${singleExe}\n${portableZip}\nfiles=${manifest.files.length}\nfolderBytes=${total}\nprogramBytes=${programBytes}\navatarArtBytes=${avatarArtBytes}\nsingleExeBytes=${single.totalSize}\nportableZipBytes=${zip.bytes}\nportableZipSha256=${zipSha}\nportableZipLongestPath=${zip.longestPath}\n`);

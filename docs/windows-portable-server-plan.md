@@ -422,8 +422,9 @@ Provider와 기본 Workspace가 선택된 새 요청 화면을 연다. 사용자
 - 기존 Linux/Docker와 Worker의 Node 22 기준선은 별도 업그레이드 전
   유지한다. Windows SQLite contract는 release script를 실행한 임의의
   Node가 아니라 실제 번들할 Node 24 바이너리로 실행해야 한다.
-- 단일 EXE 상한은 200 MiB이고 Provider CLI와 사용자 데이터는 포함하지
-  않는다. `private: true`인 동안 버전 상한 `1.0.0`을 유지한다.
+- 프로그램 payload 상한은 200 MiB, `app/dist/emoticons` 아바타 그림은 별도
+  256 MiB 상한이며 단일 EXE 상한은 두 값의 합이다. Provider CLI와 사용자
+  데이터는 포함하지 않는다. `private: true`인 동안 버전 상한 `1.0.0`을 유지한다.
 - SHA-256 Authenticode, SHA-256 RFC 3161 timestamp, Windows 검증,
   SBOM·attestation·Defender와 signed manifest 결속을 stable 승격의
   필수 gate로 정했다. 다만 실제 인증서 또는 managed-signing 서비스와
@@ -738,7 +739,7 @@ Windows 실기 릴리스 게이트 전이므로 지원 완료는 아님.
 - 패키징 스크립트는 외부에서 전달한 Windows `node.exe`, production
   `node_modules`, Windows native `better_sqlite3.node`, 런처 EXE와 현재
   서버·웹 자산을 묶는다. 웹 자산 의존성은 재귀적으로 닫고 누락 시
-  실패하며, 200 MiB 제한과 payload manifest를 적용한다. 진단용 폴더와
+  실패하며, 프로그램 200 MiB·아바타 그림 256 MiB 제한과 payload manifest를 적용한다. 진단용 폴더와
   단일 EXE를 함께 생성한다.
 - 단일 EXE 포맷 v2는 canonical launcher SHA-256, manifest SHA-256과
   파일별 SHA-256을 결속한다. Authenticode가 바꾸는 PE checksum과

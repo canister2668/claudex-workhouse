@@ -117,10 +117,15 @@ compatibility.
 
 - The public Windows server artifact is
   `claudex-workhouse-server-windows-x64-portable.zip`.
-- The portable payload must be no larger than 200 MiB before compression.
-- The size gate includes the launcher, compressed Node runtime, server/web
-  payload, native SQLite module, notices, and bootstrap assets. Provider CLIs
-  and user data are not embedded.
+- The program payload must be no larger than 200 MiB before compression.
+  It includes the launcher, Node runtime, server/web payload, native SQLite
+  module, notices, and bootstrap assets. Provider CLIs and user data are not
+  embedded.
+- The avatar art under `app/dist/emoticons` is measured separately and must
+  be no larger than 256 MiB. It is static WebP that does not compress further
+  and grows with every outfit (136 MiB across 130 outfits in 1.0.4), so it is
+  not allowed to consume the program budget. The single EXE is therefore
+  capped at the sum of both budgets.
 - Exceeding the budget blocks promotion; it is not bypassed by an installer
   that downloads an unsigned secondary payload.
 
