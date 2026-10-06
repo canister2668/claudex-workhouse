@@ -27,6 +27,7 @@ const EMOTIONS = [
   "reading", "reading_2", "reading_3",
   "searching", "searching_2", "searching_3"
 ] as const;
+export const EMOTION_NAMES: readonly string[] = EMOTIONS;
 const EXTS = [".webp", ".png", ".gif"];
 const EXPRESSION_HOLD_MS = 120000;
 

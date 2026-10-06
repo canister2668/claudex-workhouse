@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import {effectiveDelegationSettings} from "../execution-defaults.js";
 import fs from "node:fs";
 import path from "node:path";
 import {spawn} from "node:child_process";
@@ -62,7 +63,7 @@ export class AntigravityProvider implements AgentProvider{
       :vertex?(mode==="resume"?sourceSessionId:`vertex:${crypto.randomUUID()}`)
       :(mode==="new"?null:sourceSessionId);
     const workerLabel=vertexAgent?"Gemini CLI (Vertex Agent)":vertex?"Gemini Vertex":"Gemini Antigravity",modelBackend=vertexAgent?"gemini-cli-vertex":vertex?"vertex-api":"antigravity-cli";
-    const managedProviderToken=runtimeProfile==="conversation"?undefined:crypto.randomBytes(32).toString("base64url"),managedProviderCapabilityHash=managedProviderToken?crypto.createHash("sha256").update(managedProviderToken).digest("hex"):null,delegationSettings=(await this.db.getSystemSetting("delegation.launch-modes").catch(()=>null))?.value??null;
+    const managedProviderToken=runtimeProfile==="conversation"?undefined:crypto.randomBytes(32).toString("base64url"),managedProviderCapabilityHash=managedProviderToken?crypto.createHash("sha256").update(managedProviderToken).digest("hex"):null,delegationSettings=await effectiveDelegationSettings(this.db);
     if(vertexAgent&&runtimeProfile!=="default")throw Object.assign(new Error("The Gemini CLI backend runs coding tasks only. Switch to Antigravity or Vertex API for conversation and browser profiles."),{statusCode:409,code:"GEMINI_CLI_PROFILE_UNSUPPORTED"});
     let task:DeckTask={id,provider:this.id,nativeId,threadId:assignedSessionId,providerSessionId:assignedSessionId,projectId:input.project.id,cwd:input.project.realPath,title:input.title??input.prompt.replace(/\s+/g," ").slice(0,80),prompt:input.prompt,status:"pending",createdAt,updatedAt:createdAt,result:null,error:null,log:`${workerLabel} worker starting.`,owned:true,pid:null,pgid:null,processStart:null,commandMarker:marker,parentThreadId,permissionProfile:profile,requestedModel:model,requestedReasoningEffort:effort==="default"?null:effort,settingsUpdatedAt:createdAt,executionHostId:"local",workspaceId:input.workspaceId??null,workChainId:input.workChainId??null,metadata:{...(input.boardRole?{boardRole:input.boardRole}:{}),workMode:input.workMode??"default",runtimeProfile,automationLevel:level,modelBackend,googleSearchMode,antigravityExecution:execution,...(managedProviderCapabilityHash?{managedProviderCapabilityHash}:{}),tempDirectory:taskTempDir}};
     task=await this.db.upsertTask(task);this.snapshot.applyAll([task]);const appRoot=this.config.appRoot??this.config.root,dataRoot=this.config.dataRoot??this.config.root;

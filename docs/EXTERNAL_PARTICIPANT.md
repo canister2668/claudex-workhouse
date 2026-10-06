@@ -4,8 +4,9 @@ This private bridge lets a ChatGPT plugin or another external model work on a
 registered **local** Workhouse workspace, or several registered workspaces through
 a virtual collaboration folder, without a browser extension or an idle
 model watcher. The server answers requests only when the participant calls a
-tool. It does not start provider sessions, edit Cloudflare/nginx, or grant shell
-access.
+tool. File-only grants do not start provider sessions. An optional, separate
+execution grant can submit actual Workhouse provider tasks; it does not expose
+an arbitrary-shell tool or edit Cloudflare/nginx.
 
 ## Current connection boundary
 
@@ -48,8 +49,8 @@ The authenticated owner API manages grants:
 
 - `GET /api/external-participants/grants` lists grant metadata without secrets.
 - `POST /api/external-participants/grants` accepts `workspaceId`, `readPaths`,
-  `writePaths`, optional `mounts`, and optional ISO `expiresAt`. It returns the
-  token **once**.
+  `writePaths`, optional `mounts`, optional `execution`, and optional ISO
+  `expiresAt`. It returns the token **once**.
 - `POST /api/external-participants/grants/:id/revoke` revokes a grant.
 
 For a virtual collaboration folder, each mount has an `alias`, a registered
@@ -76,7 +77,72 @@ directory, read UTF-8 files up to 256 KiB, create new Markdown/HTML, and edit
 existing text using an expected SHA-256 revision. A mismatch returns conflict
 without overwriting the newer content. It can attach a note, review, or handoff
 to a board card; these reports are events, not automatic commands to another
-model. The owner remains responsible for approving or starting subsequent work.
+model. With a file-only grant, the owner starts subsequent work separately.
+
+## Actual execution from dot
+
+The existing private connection can also submit implementation and test work.
+In **Settings → External participants**, select the Board Workspace and enable
+**Allow dot or another external model to submit execution tasks** before creating
+the grant. Choose Codex or Claude Code and either file/command execution (`auto`)
+or read/review (`read`). This is permission to execute in the **whole selected
+workspace**, independently of the narrower file mounts. It does not grant
+execution in other mounted workspaces. Existing grants remain file-only; create
+a new grant explicitly rather than silently upgrading one.
+
+The owner API's optional `execution` object is:
+
+```json
+{"provider":"codex","automationLevel":"auto","maxActiveTasks":1}
+```
+
+The provider uses the owner's global delegation model, reasoning, and Codex
+service-tier settings. The participant cannot choose a model, change provider,
+change workspace, request full access, or bypass existing paid-credit gates.
+Revocation prevents further API access and new turns; already running provider
+tasks remain running and must be managed in Workhouse if they need to stop.
+
+The additional MCP tools are:
+
+| Tool | Behavior |
+| --- | --- |
+| `get_capabilities` | Read workspace and optional execution grant |
+| `create_task` | Submit a prompt/title and UUID idempotency key |
+| `list_tasks` | List up to 50 recent tasks created by this grant |
+| `get_task` | Refresh status and read a bounded, redacted result |
+| `resume_task` | Submit a follow-up to a terminal task with a confirmed thread |
+
+The corresponding bearer-authenticated routes are `GET capabilities`,
+`GET/POST tasks`, `GET tasks/:taskId`, and `POST tasks/:taskId/messages` under
+`/external-participants/v1/`. Creation and follow-up bodies contain an
+`idempotencyKey` UUID. Task results expose task/thread/provider/workspace identity,
+status, model, timestamps, and up to 60,000 result characters, but never internal
+metadata, capabilities, or raw execution logs. These are provider reports;
+the bridge does not independently certify every reported test or deployment.
+
+Keep the original request key on retries. A key/body mismatch is a conflict.
+An unresolved submission is never automatically repeated or taken over after a
+timeout: inspect `list_tasks` and Workhouse before submitting anything new.
+The existing database idempotency retention policy still applies. The default
+limit is one active task per grant (owner API supports one through four), and
+follow-ups reject running tasks or changed workspace/access identity. A provider
+execution request uses Workhouse's existing task, worker, workspace instruction,
+model validation, and thread-turn gate paths; no detached CLI session is created.
+
+Suggested dot instruction:
+
+> Use the connected Workhouse MCP. Check get_capabilities, then submit my task
+> with create_task. Keep the returned task ID and original request UUID. While
+> work is active, use get_task to check progress; do not create a replacement.
+> Read the terminal result, distinguish changes, tests and deployment, and use
+> resume_task only when further work is within my request. Report blockers and
+> unresolved submissions instead of claiming completion.
+
+This remains a separately connected MCP server. Installing or updating a
+skills-only plugin does not register a tunnel or authorize execution. A dot's
+local-computer access is another supported execution surface, but is not
+required by this bridge. Account rollout, app connection, and a real dot-side
+tool invocation must be verified separately; local MCP tests do not prove them.
 
 The bearer token is a high-entropy secret stored server-side as a hash. The
 bridge denies `.git`, symlink traversal in file reads and edits, and common

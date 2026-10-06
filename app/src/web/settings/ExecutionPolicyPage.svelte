@@ -6,7 +6,6 @@
   import { t } from "../i18n";
   import { providerDisplayName } from "../provider-display";
   import { effortLabel } from "../session-ui";
-  import ModelPicker from "../ModelPicker.svelte";
   import AutomationLevelChips from "../AutomationLevelChips.svelte";
   import type { AutomationLevel } from "../automation-level";
   import SettingRow from "../ui/SettingRow.svelte";
@@ -23,6 +22,9 @@
   export let creditUsageLoading = false;
   // Effort and automation of the default agent. The page edits the same
   // per-provider values the agent pages own, scoped to the chosen default.
+  export let globalCodexModel = "";
+  export let globalClaudeModel = "";
+  export let globalCodexTier:string|null = null;
   export let globalCodexEffort = "";
   export let globalClaudeEffort = "medium";
   export let globalCompatibleEfforts: Record<CompatibleProvider, string>;
@@ -40,11 +42,6 @@
   export let delegationSettings: DelegationSettings;
   export let delegationLoading = false;
   export let delegationLoaded = false;
-  export let claudeModels: Array<{ id: string; displayName: string }> = [];
-  export let codexModels: Array<any> = [];
-  export let delegationCodexEfforts: Array<{ reasoningEffort: string }> = [];
-  export let delegationCodexHasPriority = false;
-  export let setDelegationCodexModel: (model: string | null) => void;
 
   const isCompatible = (provider: ProviderId): provider is CompatibleProvider => provider !== "codex" && provider !== "claude";
   $: defaultAutomation = globalDefaultProvider === "codex" ? globalCodexAutomation : globalDefaultProvider === "claude" ? globalClaudeAutomation : globalCompatibleAutomation[globalDefaultProvider as CompatibleProvider];
@@ -86,7 +83,7 @@
     <SettingRow label={$t("delegation.launchMode")}>
       <div class="segments"><button type="button" disabled={delegationLoading} class:active={delegationSettings.claude.launchMode === "managed"} onclick={() => delegationSettings = { ...delegationSettings, claude: { ...delegationSettings.claude, launchMode: "managed" } }}>{$t("delegation.managed")}</button><button type="button" disabled={delegationLoading} class:active={delegationSettings.claude.launchMode === "direct"} onclick={() => delegationSettings = { ...delegationSettings, claude: { ...delegationSettings.claude, launchMode: "direct" } }}>{$t("delegation.directCli")}</button></div>
     </SettingRow>
-    <ModelPicker fields={["model","effort"]} layout="stack" provider="claude" models={claudeModels} efforts={claudeEfforts} model={delegationSettings.claude.model} effort={delegationSettings.claude.reasoningEffort} idPrefix="delegation-claude" onmodel={(value) => delegationSettings = { ...delegationSettings, claude: { ...delegationSettings.claude, model: value } }} oneffort={(value) => delegationSettings = { ...delegationSettings, claude: { ...delegationSettings.claude, reasoningEffort: value } }}/>
+    <p class="settings-note">{$t("settings.provider.delegationCompatible", { name: providerDisplayName("claude") })}<br/><strong>{globalClaudeModel} · {globalClaudeEffort}</strong></p>
     <small class="field-help">{$t("delegation.managedBody")}</small>
   </section>
   <section class="delegation-card">
@@ -94,7 +91,7 @@
     <SettingRow label={$t("delegation.launchMode")}>
       <div class="segments"><button type="button" disabled={delegationLoading} class:active={delegationSettings.codex.launchMode === "managed"} onclick={() => delegationSettings = { ...delegationSettings, codex: { ...delegationSettings.codex, launchMode: "managed" } }}>{$t("delegation.managed")}</button><button type="button" disabled={delegationLoading} class:active={delegationSettings.codex.launchMode === "direct"} onclick={() => delegationSettings = { ...delegationSettings, codex: { ...delegationSettings.codex, launchMode: "direct" } }}>{$t("delegation.directCli")}</button></div>
     </SettingRow>
-    <ModelPicker fields={["model","effort","tier"]} layout="stack" provider="codex" models={codexModels} efforts={delegationCodexEfforts} effortEmptyLabel={$t("model.selectedDefault")} hasPriority={delegationCodexHasPriority} model={delegationSettings.codex.model ?? ""} effort={delegationSettings.codex.reasoningEffort ?? ""} tier={delegationSettings.codex.serviceTier} idPrefix="delegation-codex" onmodel={(value) => setDelegationCodexModel(value || null)} oneffort={(value) => delegationSettings = { ...delegationSettings, codex: { ...delegationSettings.codex, reasoningEffort: value || null } }} ontier={(value) => delegationSettings = { ...delegationSettings, codex: { ...delegationSettings.codex, serviceTier: value === "priority" ? "priority" : null } }}/>
+    <p class="settings-note">{$t("settings.provider.delegationCompatible", { name: providerDisplayName("codex") })}<br/><strong>{globalCodexModel} · {globalCodexEffort} · {$t(globalCodexTier === "priority" ? "model.fast" : "model.standard")}</strong></p>
     <small class="field-help">{$t("delegation.codexBody")}</small>
   </section>
 </SettingsSection>

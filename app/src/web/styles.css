@@ -5,22 +5,23 @@
    ============================================================ */
 /* ---------- design tokens ----------
    One neutral zinc surface stack, one accent, three status hues, one hue per
-   provider. Palettes only move the accent; skins only move card geometry.
+   provider. Palettes move the accent and tint the surfaces; skins only move card geometry.
    Dark is the base; light overrides via [data-theme="light"] or the system
    preference when no explicit choice was made. */
 :root{
   font-family:Inter,ui-sans-serif,system-ui,-apple-system,"Noto Sans KR",sans-serif;
   font-size:16px;font-synthesis:none;letter-spacing:0;
   color-scheme:dark;
-  /* surfaces */
-  --bg:#0f0f11;
-  --surface:#151518;
-  --surface-2:#1b1b1f;
-  --surface-3:#232328;
-  --line:#26262c;
-  --line-strong:#36363e;
-  --text:#e8e8ec;
-  --muted:#8f8f9a;
+  /* surfaces: a neutral zinc stack washed with the palette's --tint hue */
+  --tint:#5ad38a;
+  --bg:color-mix(in srgb,var(--tint) 3%,#0f0f11);
+  --surface:color-mix(in srgb,var(--tint) 4%,#151518);
+  --surface-2:color-mix(in srgb,var(--tint) 5%,#1b1b1f);
+  --surface-3:color-mix(in srgb,var(--tint) 6%,#232328);
+  --line:color-mix(in srgb,var(--tint) 8%,#26262c);
+  --line-strong:color-mix(in srgb,var(--tint) 11%,#36363e);
+  --text:color-mix(in srgb,var(--tint) 3%,#e8e8ec);
+  --muted:color-mix(in srgb,var(--tint) 9%,#8f8f9a);
   /* accent */
   --accent:#5ad38a;
   --accent-strong:#7fe3a6;
@@ -83,9 +84,9 @@
 }
 :root[data-theme="light"]{
   color-scheme:light;
-  --bg:#f5f5f7;--surface:#ffffff;--surface-2:#f0f0f3;--surface-3:#e6e6ea;
-  --line:#e3e3e8;--line-strong:#cbcbd3;
-  --text:#1b1b20;--muted:#6b6b77;
+  --bg:color-mix(in srgb,var(--tint) 5%,#f5f5f7);--surface:color-mix(in srgb,var(--tint) 1.5%,#ffffff);--surface-2:color-mix(in srgb,var(--tint) 5%,#f0f0f3);--surface-3:color-mix(in srgb,var(--tint) 7%,#e6e6ea);
+  --line:color-mix(in srgb,var(--tint) 10%,#e3e3e8);--line-strong:color-mix(in srgb,var(--tint) 13%,#cbcbd3);
+  --text:color-mix(in srgb,var(--tint) 4%,#1b1b20);--muted:color-mix(in srgb,var(--tint) 8%,#5a5a66);
   --accent:#15803d;--accent-strong:#116632;--on-accent:#ffffff;--on-warn:#ffffff;
   --ok:#1f8f57;--warn:#b45309;--err:#c2413e;
   --cyan:#0e7490;--blue:#3b62c4;
@@ -106,9 +107,9 @@
 @media(prefers-color-scheme:light){
   :root:not([data-theme="dark"]):not([data-theme="light"]){
     color-scheme:light;
-    --bg:#f5f5f7;--surface:#ffffff;--surface-2:#f0f0f3;--surface-3:#e6e6ea;
-    --line:#e3e3e8;--line-strong:#cbcbd3;
-    --text:#1b1b20;--muted:#6b6b77;
+    --bg:color-mix(in srgb,var(--tint) 5%,#f5f5f7);--surface:color-mix(in srgb,var(--tint) 1.5%,#ffffff);--surface-2:color-mix(in srgb,var(--tint) 5%,#f0f0f3);--surface-3:color-mix(in srgb,var(--tint) 7%,#e6e6ea);
+    --line:color-mix(in srgb,var(--tint) 10%,#e3e3e8);--line-strong:color-mix(in srgb,var(--tint) 13%,#cbcbd3);
+    --text:color-mix(in srgb,var(--tint) 4%,#1b1b20);--muted:color-mix(in srgb,var(--tint) 8%,#5a5a66);
     --accent:#15803d;--accent-strong:#116632;--on-accent:#ffffff;--on-warn:#ffffff;
     --ok:#1f8f57;--warn:#b45309;--err:#c2413e;
     --cyan:#0e7490;--blue:#3b62c4;
@@ -127,14 +128,15 @@
     --result-tint:6%;--result-tint-soft:3%;--result-shadow-tint:0%;
   }
 }
-/* Palettes are the "강조 색" setting: each one moves the accent and nothing
-   else, so the neutral surface stack stays identical across choices. The
+/* Palettes are the "테마 색상" setting: each one moves the accent and sets
+   --tint, which washes the surface stack in the same hue so the choice reads
+   across the whole screen. Status and provider hues are untouched. The
    stored keys (deck-palette values) are unchanged. */
-:root[data-palette="ocean"]{--accent:#55b8ff;--accent-strong:#80caff;--on-accent:#071923;--cyan:#55d6d0;--blue:#82aaff}
-:root[data-palette="violet"]{--accent:#b69cff;--accent-strong:#cbbaff;--on-accent:#1b1038;--cyan:#75c8ff;--blue:#8eacff}
-:root[data-palette="sunset"]{--accent:#ff9b68;--accent-strong:#ffb18a;--on-accent:#321407;--cyan:#65ced0;--blue:#8fb5ff}
-:root[data-palette="rose"]{--accent:#f08bb4;--accent-strong:#f7a8c8;--on-accent:#35101f;--cyan:#76ced1;--blue:#a8b4ff}
-:root[data-palette="mono"]{--accent:#d4d8dc;--accent-strong:#f0f2f4;--on-accent:#17191b;--cyan:#8fcbd0;--blue:#9eb8dd}
+:root[data-palette="ocean"]{--tint:#55b8ff;--accent:#55b8ff;--accent-strong:#80caff;--on-accent:#071923;--cyan:#55d6d0;--blue:#82aaff}
+:root[data-palette="violet"]{--tint:#b69cff;--accent:#b69cff;--accent-strong:#cbbaff;--on-accent:#1b1038;--cyan:#75c8ff;--blue:#8eacff}
+:root[data-palette="sunset"]{--tint:#ff9b68;--accent:#ff9b68;--accent-strong:#ffb18a;--on-accent:#321407;--cyan:#65ced0;--blue:#8fb5ff}
+:root[data-palette="rose"]{--tint:#f08bb4;--accent:#f08bb4;--accent-strong:#f7a8c8;--on-accent:#35101f;--cyan:#76ced1;--blue:#a8b4ff}
+:root[data-palette="mono"]{--tint:#8a9096;--accent:#d4d8dc;--accent-strong:#f0f2f4;--on-accent:#17191b;--cyan:#8fcbd0;--blue:#9eb8dd}
 :root[data-theme="light"][data-palette="ocean"]{--accent:#0969a8;--accent-strong:#075887;--on-accent:#fff;--cyan:#087c7a;--blue:#315fae}
 :root[data-theme="light"][data-palette="violet"]{--accent:#6d3fb1;--accent-strong:#57318e;--on-accent:#fff;--cyan:#14758f;--blue:#445db0}
 :root[data-theme="light"][data-palette="sunset"]{--accent:#b54c17;--accent-strong:#923b12;--on-accent:#fff;--cyan:#11777a;--blue:#3d5fae}
@@ -223,8 +225,10 @@ button{cursor:pointer}
 .brand{display:flex;align-items:center;gap:9px;min-width:0;color:var(--accent)}
 .brand-nav-slot{position:relative;width:22px;height:22px;min-width:22px;display:inline-flex;align-items:center;justify-content:center}
 .brand-app-icon{display:block;width:28px;height:28px;border-radius:6px}
-.brand-back{position:absolute;left:-10px;top:-10px;width:42px;height:42px;padding:0;border:0;border-radius:var(--radius-control-lg);background:transparent;color:var(--text);display:inline-flex;align-items:center;justify-content:center}
-.brand-back:hover{background:var(--surface-2)}
+/* The back button wears the same tray as the primary views beside it. */
+.brand-nav-slot:has(>.brand-back){width:40px;height:40px;min-width:40px}
+.brand-back{width:40px;height:40px;padding:0;border:0;border-radius:12px;background:color-mix(in srgb,var(--surface-2) 78%,transparent);color:var(--muted);display:inline-flex;align-items:center;justify-content:center;transition:background .15s,color .15s}
+.brand-back:hover,.brand-back:focus-visible{background:var(--surface-3);color:var(--text)}
 .brand strong{font-size:1.04rem;color:var(--text);letter-spacing:-.01em}
 .brand-short{display:none}
 .brand-copy{display:flex;min-width:0;flex-direction:column;line-height:1.05}.brand-copy small{max-width:260px;margin-top:3px;color:var(--muted);font-size:.65rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.language-setting{display:flex!important;align-items:center;justify-content:space-between;gap:16px;flex-direction:row!important}.modal .language-setting>span{min-width:max-content;flex:1 0 auto;white-space:nowrap;overflow-wrap:normal}.modal .language-setting>select{width:min(180px,55%);min-width:0;margin:0;flex:0 1 180px}.locale-notice{margin:0;color:var(--muted);font-size:.75rem}.locale-notice.error{color:var(--danger)}
@@ -261,7 +265,7 @@ button{cursor:pointer}
 /* Header agents: an active row (left, activation order) beside a pile of
    resting agents (right, half-overlapping, desaturated). Sizes are variables
    because AgentAvatarDock reads them to decide pill -> circle -> "+N". */
-.agent-avatar-dock{--slot:42px;--avatar:38px;--pill:216px;--row-gap:6px;--pile-gap:10px;display:flex;align-items:center;min-width:0}
+.agent-avatar-dock{--slot:42px;--avatar:38px;--pill:216px;--pill-max:340px;--pile-pill:184px;--row-gap:6px;--pile-gap:10px;display:flex;align-items:center;min-width:0}
 .agent-avatar-dock.header-size-0{--slot:36px;--avatar:32px}
 .agent-avatar-dock.header-size-2{--slot:50px;--avatar:46px}
 .agent-zone{flex:1 1 0;min-width:0;height:var(--topbar-height,58px);display:flex;align-items:center;justify-content:flex-end;gap:var(--pile-gap);overflow:clip;overflow-clip-margin:4px}
@@ -270,6 +274,12 @@ button{cursor:pointer}
 .agent-avatar-slot{position:relative;flex:none;width:var(--slot);height:var(--slot);display:flex;align-items:center;justify-content:center;border-radius:var(--radius-pill)}
 .agent-avatar-slot .avatar-mini{position:relative;z-index:1;width:var(--avatar);height:var(--avatar);min-width:var(--avatar)}
 .agent-pile .agent-avatar-slot+.agent-avatar-slot{margin-left:calc(var(--slot) * -.5)}
+/* With room to spare the resting agents unstack into quieter pills. */
+.agent-pile.as-pills{gap:var(--row-gap)}
+.agent-pile.as-pills .agent-avatar-slot+.agent-avatar-slot{margin-left:0}
+.agent-pile.as-pills .agent-avatar-slot.pill{width:var(--pile-pill);background:transparent}
+.agent-pile.as-pills .agent-pill-body{color:var(--muted)}
+.agent-pile.as-pills .agent-avatar-slot:hover .agent-pill-body{color:var(--text)}
 .agent-pile .avatar-mini{box-shadow:0 0 0 2px var(--surface);filter:saturate(.3);opacity:.72;transition:filter .15s,opacity .15s}
 .agent-pile .agent-avatar-slot:hover,.agent-pile .agent-avatar-slot:focus-within{z-index:2}
 .agent-pile .agent-avatar-slot:hover .avatar-mini,.agent-pile .agent-avatar-slot:focus-within .avatar-mini{filter:none;opacity:1}
@@ -286,7 +296,7 @@ button{cursor:pointer}
 .agent-overflow-chip{flex:none;min-width:var(--slot);height:calc(var(--slot) - 8px);padding:0 8px;border:1px solid var(--line);border-radius:var(--radius-pill);background:var(--surface-2);color:var(--text);font-size:var(--text-xs);font-weight:800}
 .agent-overflow-chip:hover,.agent-overflow-chip:focus-visible{border-color:var(--accent)}
 /* Wide screens: each working agent as a pill with what it is doing. */
-.agent-avatar-slot.pill{width:var(--pill);justify-content:flex-start;gap:8px;padding:0 10px 0 calc((var(--slot) - var(--avatar)) / 2);background:var(--surface-2);box-shadow:inset 0 0 0 1px var(--line)}
+.agent-avatar-slot.pill{width:var(--pill-live,var(--pill));justify-content:flex-start;gap:8px;padding:0 10px 0 calc((var(--slot) - var(--avatar)) / 2);background:var(--surface-2);box-shadow:inset 0 0 0 1px var(--line)}
 .agent-avatar-slot.pill .avatar-ring{left:calc((var(--slot) - var(--avatar)) / 2 + var(--avatar) / 2)}
 .agent-avatar-slot.pill.phase-waiting{box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--warn) 55%,var(--line))}
 .agent-avatar-slot.pill.phase-failed{box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--err) 55%,var(--line))}
@@ -419,7 +429,11 @@ button{cursor:pointer}
 .recent-avatar-profile .avatar-texts{max-width:none;opacity:1;flex:1;align-self:center}
 .recent-avatar-profile .avatar-panel .avatar-line,.recent-avatar-profile .avatar-panel .avatar-status{white-space:normal}
 .recent-avatar-profile .avatar-settings{top:7px;right:7px;width:34px;height:34px}
-.recent-avatar-profile .avatar-menu{top:calc(100% + 5px);right:0;bottom:auto;left:auto;justify-content:flex-end;min-width:min(310px,calc(100vw - 40px));z-index:3}
+/* Inside the agent popover the settings menu flows under the profile card; the
+   popover clips overflow, so an absolutely placed menu was cut off at its edge. */
+.recent-avatar-profile .avatar-menu{position:static;margin-top:var(--space-2);justify-content:flex-start;min-width:0}
+.recent-avatar-profile .avatar-menu button{box-shadow:none}
+.recent-avatar-profile .avatar-menu .outfit-picker{width:100%;max-height:none;overflow:visible;box-shadow:none;background:var(--bg)}
 @keyframes recent-pulse{50%{opacity:.45;transform:scale(.82)}}
 .avatar-pop{position:fixed;top:calc(64px + var(--viewport-top));right:max(10px,env(safe-area-inset-right));z-index:40;width:180px;background:var(--surface);border:1px solid var(--line);border-radius:16px;padding:12px;box-shadow:var(--shadow-lg);text-align:center}
 .avatar-pop img{width:120px;height:120px;object-fit:contain}
@@ -457,8 +471,36 @@ button{cursor:pointer}
 .avatar-menu button{display:inline-flex;align-items:center;gap:6px;height:34px;padding:0 14px;border-radius:var(--radius-pill);border:1px solid var(--line);background:var(--surface);color:var(--muted);font-size:.8rem;font-weight:650;box-shadow:var(--shadow-lg)}
 .avatar-menu button:hover{color:var(--text);border-color:var(--line-strong)}
 .avatar-menu button.on{background:var(--accent);color:var(--on-accent);border-color:var(--accent)}
-.avatar-menu button.avatar-choice{height:40px;padding-left:5px}
-.avatar-menu .avatar-choice img{width:30px;height:30px;border-radius:50%;object-fit:cover}
+/* avatar outfit picker: picture grid shared by the avatar menu and Provider settings */
+.outfit-picker{display:grid;gap:var(--space-2);min-width:0}
+.outfit-picker .outfit-group-title{margin:0;color:var(--muted);font-size:var(--text-xs);font-weight:750;letter-spacing:.04em}
+.outfit-picker .outfit-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(84px,1fr));gap:var(--space-2)}
+.outfit-picker .outfit-tile{position:relative;display:grid;grid-template-rows:auto auto;justify-items:center;gap:var(--space-1);min-width:0;height:auto;min-height:0;padding:var(--space-1) var(--space-1) var(--space-2);border:1px solid var(--line);border-radius:var(--radius-md);background:var(--surface-2);color:var(--muted);font-size:var(--text-xs);font-weight:650;line-height:1.2;box-shadow:none;cursor:pointer}
+.outfit-picker .outfit-tile:hover{color:var(--text);border-color:var(--line-strong)}
+.outfit-picker .outfit-tile:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+.outfit-picker .outfit-tile.on{border-color:var(--accent);background:var(--accent-soft);color:var(--text)}
+.outfit-picker .outfit-tile.flash{animation:outfit-picked .45s ease-out}
+@keyframes outfit-picked{0%{transform:scale(.94)}60%{transform:scale(1.04)}100%{transform:scale(1)}}
+@media (prefers-reduced-motion:reduce){.outfit-picker .outfit-tile.flash{animation:none}}
+.outfit-picker .outfit-tile img{display:block;width:100%;aspect-ratio:1;border-radius:var(--radius-sm);object-fit:cover;background:var(--surface-3)}
+.outfit-picker .outfit-name{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.outfit-picker .outfit-variant{position:absolute;top:var(--space-1);right:var(--space-1);padding:0 var(--space-1);border-radius:var(--radius-pill);background:var(--surface);border:1px solid var(--line);color:var(--muted);font-size:var(--text-xs);font-weight:750;line-height:1.5}
+.outfit-picker .outfit-tile.on .outfit-variant{border-color:var(--accent);color:var(--accent-strong)}
+.outfit-picker .outfit-more{position:absolute;top:var(--space-1);left:var(--space-1);display:inline-flex;align-items:center;gap:2px;padding:0 var(--space-2);border-radius:var(--radius-pill);background:var(--accent);color:var(--on-accent);font-size:var(--text-xs);font-weight:750;line-height:1.6;white-space:nowrap}
+.outfit-picker .outfit-sheet{display:grid;gap:var(--space-2);padding:var(--space-2);border:1px solid var(--line-strong);border-radius:var(--radius-lg);background:var(--surface);box-shadow:var(--shadow-lg);outline:0}
+.outfit-picker .outfit-sheet-head{display:flex;align-items:center;gap:var(--space-2);min-width:0}
+.outfit-picker .outfit-sheet-head img{width:var(--space-6);height:var(--space-6);border-radius:var(--radius-sm);object-fit:cover;background:var(--surface-3)}
+.outfit-picker .outfit-sheet-head strong{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text);font-size:var(--text-sm)}
+.outfit-picker .outfit-sheet-close{display:inline-flex;align-items:center;justify-content:center;width:var(--space-6);height:var(--space-6);min-height:0;padding:0;border:1px solid var(--line);border-radius:var(--radius-pill);background:var(--surface-2);color:var(--muted);box-shadow:none}
+.outfit-picker .outfit-sheet-close:hover{color:var(--text);border-color:var(--line-strong)}
+.outfit-picker .outfit-variant-switch{display:inline-flex;gap:var(--space-1);padding:var(--space-1);border:1px solid var(--line);border-radius:var(--radius-pill);background:var(--surface-2);justify-self:start}
+.outfit-picker .outfit-variant-switch button{height:auto;min-height:0;padding:var(--space-1) var(--space-3);border:0;border-radius:var(--radius-pill);background:transparent;color:var(--muted);font-size:var(--text-xs);font-weight:750;box-shadow:none}
+.outfit-picker .outfit-variant-switch button.on{background:var(--accent);color:var(--on-accent)}
+.outfit-picker .outfit-costumes{grid-template-columns:repeat(5,minmax(0,1fr));gap:var(--space-1)}
+.outfit-picker.compact .outfit-grid{grid-template-columns:repeat(auto-fill,minmax(64px,1fr));gap:var(--space-1)}
+.outfit-picker.compact .outfit-name{font-size:var(--text-xs)}
+.avatar-menu .outfit-picker{flex-basis:100%;width:min(360px,calc(100vw - 32px));max-height:min(320px,52vh);overflow-y:auto;overscroll-behavior:contain;padding:var(--space-2);border:1px solid var(--line);border-radius:var(--radius-lg);background:var(--surface);box-shadow:var(--shadow-lg)}
+.setting-row-control>.outfit-picker{width:100%}
 .emotion-side.collapsed{max-width:48px}
 .emotion-side.collapsed .avatar-panel{width:48px;height:48px;max-width:48px;padding:3px;gap:0;border-radius:50%;overflow:hidden}
 .emotion-side.collapsed .avatar-panel img{display:block;width:40px!important;height:40px!important;border-radius:50%}
@@ -969,9 +1011,15 @@ button{cursor:pointer}
 .work-status-drawer{flex:none;margin:10px 14px 0;border:1px solid var(--line);border-radius:var(--radius-lg);background:var(--surface);overflow:hidden}
 .work-status-drawer.open{--work-drawer-max:min(62dvh,680px);min-height:0;max-height:var(--work-drawer-max);display:flex;flex-direction:column;border-color:var(--line-strong)}
 /* Desktop: the open work panel used to be flex:none, so at 1440x900 it took
-   427px and left the conversation 14px. Keep a readable conversation and let
-   the panel give way, scrolling inside itself (phones keep their own rules). */
-@media(min-width:761px){.shell.session-detail-open .conv-wrap{min-height:min(30dvh,320px)}.shell.session-detail-open .work-status-drawer.open{flex:0 1 auto;min-height:64px}}
+   427px and left the conversation 14px; the fix that followed reserved 30dvh
+   for the conversation and squeezed the panel to ~40px at 1280x800. The panel
+   and the conversation now split the free height 3:2 in the opened panel's favour; a short panel takes
+   only its content and hands the rest back (phones keep their own rules). */
+@media(min-width:761px){
+  .shell.session-detail-open .conv-wrap{flex:2 1 0;min-height:120px}
+  .shell.session-detail-open .work-status-drawer.open{flex:3 1 0;min-height:120px;max-height:fit-content}
+  .shell.session-detail-open .work-status-drawer.open .work-status-panel{max-height:none}
+}
 .work-status-badge{width:100%;min-height:56px;padding:9px 12px;display:flex;align-items:center;gap:10px;flex:none;border:0;background:transparent;color:var(--text);text-align:left}
 .work-status-badge:hover{background:color-mix(in srgb,var(--accent) 6%,transparent)}
 .work-status-copy{min-width:0;flex:1;display:grid;gap:2px}
@@ -1763,6 +1811,9 @@ pre.term{margin:0;padding:11px 13px;background:var(--term-bg);color:var(--term-f
   --syntax-match-bg:#1b241e1a;--syntax-match-outline:#1b241e66;--syntax-match-fg:#1b241e;
 }
 :root[data-theme="light"][data-skin="terminal"] .bubble .markdown-body pre{background:var(--term-bg);color:var(--term-fg)}
+:root[data-theme="light"][data-skin="terminal"] .bubble>pre{background:transparent;color:var(--term-fg)}
+:root[data-theme="light"][data-skin="terminal"] .bubble-copy-anchor>.copy-btn{background:color-mix(in srgb,var(--term-fg) 10%,var(--term-bg));color:color-mix(in srgb,var(--term-fg) 70%,var(--term-bg))}
+:root[data-theme="light"][data-skin="terminal"] .markdown-code-toolbar{background:color-mix(in srgb,var(--term-fg) 8%,var(--term-bg));border-bottom-color:color-mix(in srgb,var(--term-fg) 14%,var(--term-bg));color:color-mix(in srgb,var(--term-fg) 62%,var(--term-bg))}
 
 /* A · role tint, quiet enough to stay out of the way of the text. */
 :root[data-theme="light"]:not([data-skin="terminal"]) .bubble.agent{background:color-mix(in srgb,var(--cyan) 4%,var(--surface))}
@@ -1830,6 +1881,49 @@ pre.term{margin:0;padding:11px 13px;background:var(--term-bg);color:var(--term-f
   max-width:86%;align-self:var(--card-user-align);
   box-shadow:inset -3px 0 0 -1px var(--card-role-color,var(--line-strong));
 }
+
+/* Skin polish. Each skin keeps its geometry; this layer only refines depth,
+   edge weight and the role label so the six choices read as finished designs.
+   The role dot is skipped where the skin already draws a role mark (Elevated's
+   bar, Terminal's prompt) and on the final-answer badge, which has its own icon. */
+:root:not([data-skin]) .bubble>.bubble-card-head>span:not(.final-output-badge)::before,
+:root[data-skin="outline"] .bubble>.bubble-card-head>span:not(.final-output-badge)::before,
+:root[data-skin="compact"] .bubble>.bubble-card-head>span:not(.final-output-badge)::before,
+:root[data-skin="flat"] .bubble>.bubble-card-head>span:not(.final-output-badge)::before{content:"";display:inline-block;width:6px;height:6px;margin:0 6px 1px 0;border-radius:var(--radius-pill);vertical-align:middle;background:var(--card-role-color,var(--muted));box-shadow:0 0 0 3px color-mix(in srgb,var(--card-role-color,var(--muted)) 16%,transparent)}
+:root[data-skin="compact"] .bubble>.bubble-card-head>span:not(.final-output-badge)::before{width:5px;height:5px;margin-right:5px;box-shadow:none}
+
+/* Soft: a faint role wash at the top edge, a quieter outline and a low shadow. */
+:root:not([data-skin]) .bubble:not(.diff-card):not(.cmd-card):not(.working){
+  --card-outline-color:color-mix(in srgb,var(--card-role-color,var(--line)) 20%,var(--line));
+  background:linear-gradient(180deg,color-mix(in srgb,var(--card-role-color,var(--line)) 5%,var(--card-bg)) 0,var(--card-bg) 64px);
+  box-shadow:0 1px 2px var(--overlay-weak),0 10px 24px -18px var(--overlay-strong);
+}
+:root:not([data-skin]) .bubble.user:not(.working){background:linear-gradient(180deg,color-mix(in srgb,var(--accent) 12%,var(--surface)) 0,var(--card-user-bg) 64px)}
+:root:not([data-skin]) .bubble:not(.diff-card):not(.cmd-card)>.bubble-card-head{background:transparent;box-shadow:none}
+:root:not([data-skin]) .bubble>.bubble-card-head>span:not(.final-output-badge){color:color-mix(in srgb,var(--card-role-color,var(--muted)) 70%,var(--text))}
+
+/* Elevated: a hairline highlight on the lit edge and a tinted head for user cards too. */
+:root[data-skin="elevated"] .bubble{outline:1px solid color-mix(in srgb,var(--card-role-color,var(--line)) 14%,transparent);outline-offset:-1px}
+:root[data-skin="elevated"] .bubble>.bubble-card-head>span:not(.final-output-badge){color:color-mix(in srgb,var(--card-role-color,var(--muted)) 72%,var(--text))}
+
+/* Outline: the full outline stays quiet so the rail carries the role colour. */
+:root[data-skin="outline"] .bubble{--card-outline-color:color-mix(in srgb,var(--card-role-color,var(--line)) 26%,var(--line))}
+:root[data-skin="outline"] .bubble:not(.diff-card):not(.cmd-card){box-shadow:inset 3px 0 0 -.5px var(--card-role-color,var(--line-strong))}
+:root[data-skin="outline"] .bubble.user:not(.diff-card):not(.cmd-card){box-shadow:inset -3px 0 0 -.5px var(--card-role-color,var(--line-strong))}
+
+/* Compact: rows pick up a hover wash so the dense list stays scannable. */
+:root[data-skin="compact"] .bubble{transition:background-color .12s}
+:root[data-skin="compact"] .bubble:hover{background-color:color-mix(in srgb,var(--card-role-color,var(--line)) 5%,transparent)}
+:root[data-skin="compact"] .bubble.user{background:color-mix(in srgb,var(--accent) 4%,transparent)}
+
+/* Flat: requests get a soft accent block so the reader can find each turn. */
+:root[data-skin="flat"] .bubble.user:not(.working){padding-inline:14px;border-radius:var(--radius-md);background:color-mix(in srgb,var(--accent) 6%,transparent)}
+:root[data-theme="light"][data-skin="flat"] .bubble.user:not(.working){background:color-mix(in srgb,var(--accent) 6%,transparent)}
+:root[data-skin="flat"] .bubble.user+.bubble{border-top:0}
+
+/* Terminal: a prompt glyph in front of the role label. */
+:root[data-skin="terminal"] .bubble>.bubble-card-head>span:not(.final-output-badge)::before{content:"❯ ";font-weight:800}
+:root[data-skin="terminal"] .bubble.user>.bubble-card-head>span:not(.final-output-badge)::before{content:"$ "}
 
 /* ============================================================
    New task panel ("Console")
@@ -2262,6 +2356,9 @@ pre.term{margin:0;padding:11px 13px;background:var(--term-bg);color:var(--term-f
 .shell{--topbar-height:58px}
 .app-topbar{display:flex;gap:12px;padding:0 max(14px,env(safe-area-inset-right)) 0 max(14px,env(safe-area-inset-left))}
 .app-topbar>.brand{flex:none}
+/* Inside a session the back button is the brand slot's whole job; the name
+   would only take width from the agent dock. */
+.shell.detail-open .app-topbar .brand-copy{display:none}
 .topbar-nav{flex:none;padding:3px;gap:2px}
 .topbar-nav button{min-height:34px;padding:0 11px;gap:6px}
 .topbar-nav .nav-label{white-space:nowrap}
@@ -2514,7 +2611,9 @@ pre.term{margin:0;padding:11px 13px;background:var(--term-bg);color:var(--term-f
 .session-panel-title{min-width:0;display:flex;align-items:baseline;gap:8px}
 .session-panel-title strong{min-width:0;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:var(--text-sm);font-weight:650}
 .session-panel-title small{flex:none;color:var(--muted);font-size:.64rem}
-.session-panel-meta{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--muted);font-size:.66rem}
+.session-panel-meta{display:flex;align-items:center;gap:6px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--muted);font-size:.66rem}
+.session-panel-meta .engine{flex:none;padding:1.5px 6px;border-radius:5px;font-size:.62rem;line-height:1.35}
+.session-panel-model{min-width:0;overflow:hidden;text-overflow:ellipsis}
 .session-panel-empty{margin:0;padding:18px 10px;display:flex;align-items:center;gap:8px;color:var(--muted);font-size:var(--text-sm)}
 .session-panel-more{justify-self:center;margin:6px 0}
 @media(prefers-reduced-motion:reduce){.session-panel-dot.running{animation:none}}

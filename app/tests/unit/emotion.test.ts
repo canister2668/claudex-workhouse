@@ -45,7 +45,7 @@ describe("bundled emotion runtime",()=>{
     await deepseek.setState({outfit:"normal"});
     expect(deepseek.get().outfit).toBe("DeepSeek");
     const claude=new EmotionWatcher(path.join(x.data,"claude.json"),x.assets,process.platform,"normal",["normal","capy"]);
-    expect(claude.outfits()).toEqual(["capy","normal"]);
+    expect(claude.outfits()).toEqual(["normal","capy"]);
   });
 
   it("allows only the requested cross-provider outfits for DeepSeek and Ollama",async()=>{
@@ -56,7 +56,7 @@ describe("bundled emotion runtime",()=>{
     await deepseek.setOutfit("WhaleGirl");expect(deepseek.get().outfit).toBe("WhaleGirl");
     await deepseek.setOutfit("Antigravity");expect(deepseek.get().outfit).toBe("DeepSeek");
     const ollama=new EmotionWatcher(path.join(x.data,"ollama.json"),x.assets,process.platform,"Ollama",PROVIDER_EMOTION_OUTFITS.ollama,"ollama");
-    expect(ollama.outfits()).toEqual(["Antigravity","DeepSeek","Gemma-e4b","Ollama","WhaleGirl"]);
+    expect(ollama.outfits()).toEqual(["Ollama","DeepSeek","Antigravity","Gemma-e4b","WhaleGirl"]);
     for(const outfit of ["DeepSeek","Antigravity","Gemma-e4b","WhaleGirl"]){await ollama.setOutfit(outfit);expect(ollama.get().outfit).toBe(outfit);}
     const claude=new EmotionWatcher(path.join(x.data,"claude-whale.json"),x.assets,process.platform,"normal",PROVIDER_EMOTION_OUTFITS.claude,"claude");
     expect(claude.outfits()).not.toContain("WhaleGirl");
@@ -115,7 +115,12 @@ describe("bundled emotion runtime",()=>{
 
   it("finds every burnout palette id in every currently bundled character outfit",()=>{
     const x=fixture(),watcher=new EmotionWatcher(x.state,path.resolve("public","emoticons")),catalog=watcher.assetCatalog();
-    expect(Object.keys(catalog)).toEqual(["Antigravity","DeepSeek","Gemma-e4b","Gpt-Codex","Gpt-Sol","Grok","Ollama","WhaleGirl","capy","normal"]);
+    const classic=["Antigravity","DeepSeek","Gemma-e4b","Gpt-Codex","Gpt-Sol","Grok","Ollama","WhaleGirl","capy","normal"];
+    // AI Families V5 chibi sets: each character as -chan (plain or -v5) and -kun, five costumes each.
+    const v5=["Astra-code","Chat-code","Claude-code","DeepSeek-code","Fable-code","Gemini-code","Gemma-e4b-v5","Gpt-Codex-v5","Gpt-Sol-v5","Grok-code","Ollama-code","Whale-code"];
+    const v5Kun=["Astra-code","Chat-code","Claude-code","DeepSeek-code","Fable-code","Gemini-code","Gemma-e4b","Gpt-Codex","Gpt-Sol","Grok-code","Ollama-code","Whale-code"].map(name=>`${name}-kun`);
+    const costumes=(names:string[],suffixes:string[])=>names.flatMap(name=>["",...suffixes].map(suffix=>name+suffix));
+    expect(Object.keys(catalog).sort()).toEqual([...classic,...costumes(v5,["-dress","-swimsuit","-pajamas","-towel"]),...costumes(v5Kun,["-formal","-swimsuit","-pajamas","-towel"])].sort());
     for(const[outfit,assets]of Object.entries(catalog)){
       const ids=assets.map(asset=>asset.emotion);
       expect(ids,`${outfit} uses the lowercase renderer id dead`).toContain("dead");

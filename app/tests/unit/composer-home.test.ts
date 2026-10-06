@@ -71,19 +71,26 @@ describe("shared model picker", () => {
     expect(picker).toContain('{#if effortEmptyLabel !== null}<option value="">{effortEmptyLabel}</option>{/if}');
   });
 
-  it("is the one picker behind new task, session settings, assist, delegation, and agent defaults", () => {
+  it("is the shared picker for execution choices while delegation follows agent defaults", () => {
     expect(web("SessionSettingsFields.svelte")).toContain('<ModelPicker fields={["model","effort","tier"]} layout="stack"');
     expect(web("ProviderExecutionPicker.svelte")).toContain('<ModelPicker fields={["provider","model","effort","tier"]} layout="stack"');
     expect(web("ProviderExecutionPicker.svelte")).not.toContain('role="tablist"');
     const policy = web("settings/ExecutionPolicyPage.svelte");
-    expect(policy).toContain('<ModelPicker fields={["model","effort"]} layout="stack" provider="claude"');
-    expect(policy).toContain('<ModelPicker fields={["model","effort","tier"]} layout="stack" provider="codex"');
-    expect(policy).toContain('effortEmptyLabel={$t("model.selectedDefault")}');
+    expect(policy).not.toContain('<ModelPicker');
+    expect(policy).toContain('settings.provider.delegationCompatible');
+    expect(policy).toContain('{globalCodexModel}');
+    expect(policy).toContain('{globalClaudeModel}');
+    expect(policy).toContain('delegationSettings.codex.launchMode');
+    expect(policy).toContain('delegationSettings.claude.launchMode');
     const provider = web("settings/ProviderPage.svelte");
     expect(provider).toContain('idPrefix="defaults-codex" onmodel={() => globalCodexModelChanged()}');
     expect(provider).toContain('idPrefix="defaults-claude"');
     expect(provider).toContain("idPrefix={`defaults-${compatible}`}");
-    expect(provider).toContain('idPrefix="delegation-codex"');
+    const delegation = provider.slice(provider.indexOf('{:else if tab === "delegation"}'));
+    expect(delegation).not.toContain('<ModelPicker');
+    expect(delegation).toContain('settings.provider.delegationCompatible');
+    expect(delegation).toContain('{globalCodexModel}');
+    expect(delegation).toContain('{globalClaudeModel}');
     // Review and conversation participants use the same picker per block.
     expect(dialog.match(/<ModelPicker fields=\{\["model","effort"(?:,"tier")?\]\} layout="row" size="sm"/g)).toHaveLength(6);
     expect(dialog).not.toContain('<label class="cf">{$t("model.label")}<select');

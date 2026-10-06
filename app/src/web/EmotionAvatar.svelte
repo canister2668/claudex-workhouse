@@ -2,6 +2,7 @@
   import { Expand, Move, Pin, RotateCcw, Settings, Zap } from "@lucide/svelte";
   import { onMount } from "svelte";
   import { avatarNoticeKey, DEFAULT_AVATAR_COLLAPSE_DELAY_MS, normalizeAvatarCollapseDelay, terminalNoticeStatus } from "./avatar-notice";
+  import AvatarOutfitPicker from "./AvatarOutfitPicker.svelte";
   import { emotionAssetUrl } from "./collaboration-assets";
   import { emotionAssetFile, emotionStateMatchesContext, localizedEmotionCopy, statusEmotion, type EmotionAssetEntry } from "./emotion-state";
   import { subscribeEmotionStream, type EmotionTaskStates } from "./emotion-stream";
@@ -14,8 +15,8 @@
   export let engine: "all" | "codex" | "claude" | "deepseek" | "ollama" | "antigravity" | "grok" = "all";
   export let context: { provider?: "codex" | "claude" | "deepseek" | "ollama" | "antigravity" | "grok"; status?: string; sessionId?: string | null; taskId?: string | null } | null = null;
   export let variant: "mini" | "panel" = "mini";
-  export let codexAvatar: "Gpt-Codex"|"Gpt-Sol" = "Gpt-Sol";
-  export let onCodexAvatarChange:((avatar:"Gpt-Codex"|"Gpt-Sol")=>void)|null=null;
+  export let codexAvatar = "Gpt-Sol";
+  export let onCodexAvatarChange:((avatar:string)=>void)|null=null;
   export let onAvatarOutfitChange:((provider:"codex"|"claude"|"deepseek"|"ollama"|"antigravity"|"grok",outfit:string)=>void)|null=null;
   export let onMiniClick:(()=>void)|null=null;
   export let miniLabel="";
@@ -89,7 +90,7 @@
       }
       localOutfit=null;
       onAvatarOutfitChange?.(provider,outfit);
-      if(provider==="codex"){codexAvatar=outfit as "Gpt-Codex"|"Gpt-Sol";onCodexAvatarChange?.(codexAvatar);}
+      if(provider==="codex"){codexAvatar=outfit;onCodexAvatarChange?.(codexAvatar);}
     } catch { if(request===outfitRequest)localOutfit=null; }
   }
   let fallbackStep = 0;
@@ -260,15 +261,7 @@
             {#if onHeaderAvatarSizeChange}<button type="button" onclick={()=>onHeaderAvatarSizeChange?.(((headerAvatarSizeStep+1)%3) as 0|1|2)}><Expand size={13}/>{$t("avatar.headerSize",{size:sizeLabel(headerAvatarSizeStep)})}</button>{/if}
             {#if onFloatingAvatarSizeChange}<button type="button" onclick={()=>onFloatingAvatarSizeChange?.(((floatingAvatarSizeStep+1)%3) as 0|1|2)}><Expand size={13}/>{$t("avatar.noticeSize",{size:sizeLabel(floatingAvatarSizeStep)})}</button>{/if}
             {#if onFloatingPinnedChange}<button type="button" class:on={floatingPinned} aria-pressed={floatingPinned} onclick={()=>onFloatingPinnedChange?.(!floatingPinned)}><Pin size={13}/>{$t("avatar.pinFloating",{state:floatingPinned?$t("common.on"):$t("common.off")})}</button>{/if}
-            {#if ctxEngine === "codex"}
-              {#each [["Gpt-Codex","Codex"],["Gpt-Sol","Sol"]] as [avatar,name]}
-                <button type="button" class="avatar-choice" class:on={outfit===avatar} onclick={()=>{void setOutfit(avatar);controlsOpen=false;}}><img src={emotionAssetUrl(avatar,"neutral.webp")} alt=""/>{name}</button>
-              {/each}
-            {:else if outfits.length > 1}
-              {#each outfits as item}
-                <button type="button" class="avatar-choice" class:on={outfit===item} onclick={()=>{setOutfit(item);controlsOpen=false;}}><img src={emotionAssetUrl(item,"neutral.webp")} alt=""/>{item}</button>
-              {/each}
-            {/if}
+            {#if outfits.length > 1}<AvatarOutfitPicker compact {outfits} value={outfit} onselect={(item)=>{void setOutfit(item);}}/>{/if}
             <button type="button" title={inputMode==="mcp"?$t("avatar.mode.mcpTitle"):$t("avatar.mode.catchTitle")} onclick={toggleMode}><Zap size={13}/>{inputMode==="mcp"?"MCP":$t("avatar.mode.catch")}</button>
             {#if allowDrag&&pos}<button type="button" onclick={() => { resetPos(); controlsOpen = false; }}><RotateCcw size={13}/>{$t("avatar.resetPosition")}</button>{/if}
           {/if}

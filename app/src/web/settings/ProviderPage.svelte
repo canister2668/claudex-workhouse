@@ -16,6 +16,7 @@
   import WorkModeChips from "../WorkModeChips.svelte";
   import AutomationLevelChips from "../AutomationLevelChips.svelte";
   import SettingRow from "../ui/SettingRow.svelte";
+  import AvatarOutfitPicker from "../AvatarOutfitPicker.svelte";
   import Switch from "../ui/Switch.svelte";
   import SettingsSection from "./SettingsSection.svelte";
   import ProviderConnectionCard from "./ProviderConnectionCard.svelte";
@@ -135,9 +136,6 @@
   // Delegation tab.
   export let delegationSettings: DelegationSettings;
   export let delegationLoading = false;
-  export let delegationCodexEfforts: Array<{ reasoningEffort: string }> = [];
-  export let delegationCodexHasPriority = false;
-  export let setDelegationCodexModel: (model: string | null) => void = () => {};
 
   const isCompatible = (value: ProviderId): value is CompatibleProvider => value !== "codex" && value !== "claude";
   const isAuthProvider = (value: ProviderId): value is ConnectionAuthProvider => value === "codex" || value === "claude" || value === "antigravity" || value === "grok";
@@ -256,7 +254,7 @@
     {#if character.tonePreset === "custom"}<SettingRow label={$t("character.customTone")} stacked><textarea rows="4" maxlength="2000" value={character.customTone} oninput={(event) => updateCharacter(provider, { customTone: (event.currentTarget as HTMLTextAreaElement).value })}></textarea></SettingRow>{/if}
     <SettingRow label={$t("character.conversationOnly")} help={$t("character.conversationOnlyBody")}><Switch checked={character.conversationOnly} label={$t("character.conversationOnly")} onchange={(checked) => updateCharacter(provider, { conversationOnly: checked })}/></SettingRow>
     {#if characterSettings.avatarDisplay === "character"}
-      <SettingRow label={$t("character.avatarOutfit")} help={provider !== "codex" ? $t("character.installedAssetsOnly") : ""}><select aria-label={$t("character.avatarOutfit")} value={character.avatarOutfit} onchange={(event) => updateCharacter(provider, { avatarOutfit: (event.currentTarget as HTMLSelectElement).value })}>{#each providerOutfits[provider] as outfit}<option value={outfit}>{provider === "antigravity" ? "Gemini" : outfit}</option>{/each}</select></SettingRow>
+      <SettingRow label={$t("character.avatarOutfit")} help={$t("character.installedAssetsOnly")} stacked><AvatarOutfitPicker outfits={providerOutfits[provider]} value={character.avatarOutfit} onselect={(outfit) => updateCharacter(provider, { avatarOutfit: outfit })}/></SettingRow>
     {/if}
     <SettingRow label={$t("character.emotionIntensity")}><select aria-label={$t("character.emotionIntensity")} value={character.emotionIntensity} onchange={(event) => updateCharacter(provider, { emotionIntensity: (event.currentTarget as HTMLSelectElement).value as any })}><option value="subtle">{$t("character.emotion.subtle")}</option><option value="natural">{$t("character.emotion.natural")}</option><option value="expressive">{$t("character.emotion.expressive")}</option></select></SettingRow>
   </SettingsSection>
@@ -297,14 +295,14 @@
       <section class="delegation-card">
         <h4>Codex → Claude</h4>
         <SettingRow label={$t("delegation.launchMode")}><div class="segments"><button type="button" disabled={delegationLoading} class:active={delegationSettings.claude.launchMode === "managed"} onclick={() => delegationSettings = { ...delegationSettings, claude: { ...delegationSettings.claude, launchMode: "managed" } }}>{$t("delegation.managed")}</button><button type="button" disabled={delegationLoading} class:active={delegationSettings.claude.launchMode === "direct"} onclick={() => delegationSettings = { ...delegationSettings, claude: { ...delegationSettings.claude, launchMode: "direct" } }}>{$t("delegation.directCli")}</button></div></SettingRow>
-        <ModelPicker fields={["model","effort"]} layout="stack" provider="claude" models={claudeModels} efforts={claudeEfforts} model={delegationSettings.claude.model} effort={delegationSettings.claude.reasoningEffort} idPrefix="delegation-claude" onmodel={(value) => delegationSettings = { ...delegationSettings, claude: { ...delegationSettings.claude, model: value } }} oneffort={(value) => delegationSettings = { ...delegationSettings, claude: { ...delegationSettings.claude, reasoningEffort: value } }}/>
+        <p class="settings-note">{$t("settings.provider.delegationCompatible", { name })}<br/><strong>{globalClaudeModel} · {globalClaudeEffort}</strong></p>
         <small class="field-help">{$t("delegation.managedBody")}</small>
       </section>
     {:else if provider === "codex"}
       <section class="delegation-card">
         <h4>Claude → Codex</h4>
         <SettingRow label={$t("delegation.launchMode")}><div class="segments"><button type="button" disabled={delegationLoading} class:active={delegationSettings.codex.launchMode === "managed"} onclick={() => delegationSettings = { ...delegationSettings, codex: { ...delegationSettings.codex, launchMode: "managed" } }}>{$t("delegation.managed")}</button><button type="button" disabled={delegationLoading} class:active={delegationSettings.codex.launchMode === "direct"} onclick={() => delegationSettings = { ...delegationSettings, codex: { ...delegationSettings.codex, launchMode: "direct" } }}>{$t("delegation.directCli")}</button></div></SettingRow>
-        <ModelPicker fields={["model","effort","tier"]} layout="stack" provider="codex" models={codexModels} efforts={delegationCodexEfforts} effortEmptyLabel={$t("model.selectedDefault")} hasPriority={delegationCodexHasPriority} model={delegationSettings.codex.model ?? ""} effort={delegationSettings.codex.reasoningEffort ?? ""} tier={delegationSettings.codex.serviceTier} idPrefix="delegation-codex" onmodel={(value) => setDelegationCodexModel(value || null)} oneffort={(value) => delegationSettings = { ...delegationSettings, codex: { ...delegationSettings.codex, reasoningEffort: value || null } }} ontier={(value) => delegationSettings = { ...delegationSettings, codex: { ...delegationSettings.codex, serviceTier: value === "priority" ? "priority" : null } }}/>
+        <p class="settings-note">{$t("settings.provider.delegationCompatible", { name })}<br/><strong>{globalCodexModel} · {globalCodexEffort} · {$t(globalCodexTier === "priority" ? "model.fast" : "model.standard")}</strong></p>
         <small class="field-help">{$t("delegation.codexBody")}</small>
       </section>
     {:else}

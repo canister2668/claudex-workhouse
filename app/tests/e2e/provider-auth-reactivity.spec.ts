@@ -7,7 +7,7 @@ import {expect,test,type Page} from "@playwright/test";
 const openAvatarSettings=async(dialog:ReturnType<Page["getByRole"]>)=>{
   const section=dialog.locator("details.agent-pop-profile");
   if(!(await section.evaluate(el=>(el as HTMLDetailsElement).open)))await section.locator("summary").click();
-  if(!(await dialog.locator(".avatar-choice").first().isVisible()))await dialog.getByRole("button",{name:"아바타 설정"}).click();
+  if(!(await dialog.locator(".outfit-tile").first().isVisible()))await dialog.getByRole("button",{name:"아바타 설정"}).click();
 };
 const avatarButton=(page:Page,provider:string)=>page.getByRole("button",{name:new RegExp(`^${provider}: .+ — 진행 중·최근 작업 보기$`)});
 
@@ -128,8 +128,8 @@ test("provider OAuth code inputs appear without reopening settings",async({page}
   await avatarButton(page,"Claude").click();
   const claudeDialog=page.getByRole("dialog",{name:"Claude 아바타 및 세션"});
   await openAvatarSettings(claudeDialog);
-  await expect(claudeDialog.locator(".avatar-choice")).toHaveCount(2);
-  await expect(claudeDialog.locator(".avatar-choice")).toHaveText(["capy","normal"]);
+  await expect(claudeDialog.locator(".outfit-tile")).toHaveCount(2);
+  await expect(claudeDialog.locator(".outfit-tile .outfit-name")).toHaveText(["Fable","Claude"]);
   await avatarButton(page,"Claude").click();
   for(const provider of ["Gemini","DeepSeek","Ollama"]){
     await avatarButton(page,provider).click();
@@ -139,20 +139,21 @@ test("provider OAuth code inputs appear without reopening settings",async({page}
     const emotion=provider==="Gemini"?"happy":"neutral";
     await expect(dialog.locator(".recent-avatar-profile img").first()).toHaveAttribute("src",new RegExp(`/emoticons/${asset}/${emotion}\\.webp$`));
     await openAvatarSettings(dialog);
-    const expectedOutfits=provider==="Gemini"?["Antigravity","Gemma-e4b"]:provider==="DeepSeek"?["DeepSeek","Ollama"]:["Antigravity","DeepSeek","Gemma-e4b","Ollama"];
-    await expect(dialog.locator(".avatar-choice")).toHaveText(expectedOutfits);
+    // The picker shows display labels: Antigravity is "Gemini", Gemma-e4b is "Gemma E4B".
+    const expectedOutfits=provider==="Gemini"?["Gemini","Gemma E4B"]:provider==="DeepSeek"?["DeepSeek","Ollama"]:["Gemini","DeepSeek","Gemma E4B","Ollama"];
+    await expect(dialog.locator(".outfit-tile .outfit-name")).toHaveText(expectedOutfits);
     if(provider==="Gemini"){
-      await dialog.locator(".avatar-choice").filter({hasText:"Gemma-e4b"}).click();
+      await dialog.locator(".outfit-tile").filter({hasText:"Gemma E4B"}).click();
       expect(outfitWrites).toBe(1);
       await expect(dialog.locator(".recent-avatar-profile img").first()).toHaveAttribute("src",/\/emoticons\/Gemma-e4b\/happy\.webp$/);
       await openAvatarSettings(dialog);
       await dialog.getByRole("button",{name:/플로팅/}).click();
     }else if(provider==="DeepSeek"){
-      await dialog.locator(".avatar-choice").filter({hasText:"Ollama"}).click();
+      await dialog.locator(".outfit-tile").filter({hasText:"Ollama"}).click();
       await expect(dialog.locator(".recent-avatar-profile img").first()).toHaveAttribute("src",/\/emoticons\/Ollama\/neutral\.webp$/);
     }else{
-      for(const outfit of ["DeepSeek","Antigravity","Gemma-e4b"]){
-        await dialog.locator(".avatar-choice").filter({hasText:outfit}).click();
+      for(const [outfit,label] of [["DeepSeek","DeepSeek"],["Antigravity","Gemini"],["Gemma-e4b","Gemma E4B"]]){
+        await dialog.locator(".outfit-tile").filter({hasText:label}).click();
         await expect(dialog.locator(".recent-avatar-profile img").first()).toHaveAttribute("src",new RegExp(`/emoticons/${outfit}/neutral\\.webp$`));
         if(outfit!=="Gemma-e4b")await openAvatarSettings(dialog);
       }

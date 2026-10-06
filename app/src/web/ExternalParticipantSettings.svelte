@@ -10,6 +10,9 @@
   let grants:any[]=[];
   let primaryWorkspaceId="";
   let mounts:MountDraft[]=[];
+  let executionEnabled=false;
+  let executionProvider:"codex"|"claude"="codex";
+  let executionLevel:"auto"|"read"="auto";
   let runtimeKey="";
   let keyConfigured=false;
   let tokenConfigured=false;
@@ -39,7 +42,7 @@
   async function createGrant(){
     busy=true;notice="";
     try{
-      const body={workspaceId:primaryWorkspaceId,mounts:mounts.map(item=>({alias:item.alias.trim(),workspaceId:item.workspaceId,rootPath:item.rootPath.trim(),readPaths:paths(item.readPaths),writePaths:paths(item.writePaths)}))};
+      const body={workspaceId:primaryWorkspaceId,mounts:mounts.map(item=>({alias:item.alias.trim(),workspaceId:item.workspaceId,rootPath:item.rootPath.trim(),readPaths:paths(item.readPaths),writePaths:paths(item.writePaths)})),...(executionEnabled?{execution:{provider:executionProvider,automationLevel:executionLevel,maxActiveTasks:1}}:{})};
       const created=await api("/api/external-participants/grants",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
       pendingToken=created.token;
       await saveParticipantToken();
@@ -78,6 +81,12 @@
   </form>
   <form onsubmit={(event)=>{event.preventDefault();void createGrant();}}>
     <label>{label("작업 보드 Workspace","Board Workspace")}<select bind:value={primaryWorkspaceId}>{#each workspaces as workspace}<option value={workspace.id}>{workspace.displayName} · {workspace.canonicalPath}</option>{/each}</select></label>
+    <label class="participant-check"><input type="checkbox" bind:checked={executionEnabled}/>{label("dot 등 외부 모델의 실행 작업 제출 허용","Allow dot or another external model to submit execution tasks")}</label>
+    {#if executionEnabled}
+      <p>{label("선택한 작업 보드 Workspace에서 실제 제공자 작업을 시작하고 후속 수정을 요청할 수 있어요. 아래 폴더 읽기·쓰기 범위와 별개이며, 모델은 전역 위임 설정을 사용해요. 동시에 실행하는 작업은 하나예요.","Allows real provider tasks and follow-ups in the selected Board Workspace, independently of the file mounts below. Uses global delegation model settings and permits one active task at a time.")}</p>
+      <label>{label("실행 제공자","Execution provider")}<select bind:value={executionProvider}><option value="codex">Codex</option><option value="claude">Claude</option></select></label>
+      <label>{label("작업 권한","Task access")}<select bind:value={executionLevel}><option value="auto">{label("파일 수정·명령 실행","Edit files and run commands")}</option><option value="read">{label("읽기·검토","Read and review")}</option></select></label>
+    {/if}
     {#each mounts as mount,index}
       <fieldset><legend>{label("폴더 구획","Folder mount")} {index+1}</legend>
         <label>{label("보이는 이름","Alias")}<input bind:value={mount.alias} placeholder={"risu"}/></label>
@@ -91,7 +100,7 @@
     <div class="participant-actions"><button type="button" disabled={mounts.length>=8} onclick={()=>mounts=[...mounts,{alias:"",workspaceId:primaryWorkspaceId,rootPath:"",readPaths:"",writePaths:""}]}>{label("구획 추가","Add mount")}</button><button type="submit" disabled={busy||!primaryWorkspaceId||!mounts.length}>{label("협업 권한 만들기","Create collaboration grant")}</button></div>
   </form>
   {#if pendingToken}<button type="button" disabled={busy} onclick={()=>void saveParticipantToken().then(()=>notice=label("작업 토큰을 저장했어요.","Participant token saved.")).catch(error=>notice=String(error))}>{label("토큰 저장 재시도","Retry saving token")}</button>{/if}
-  {#if grants.length}<div class="participant-grants"><strong>{label("발급된 권한","Grants")}</strong>{#each grants as grant}<div><span>{grant.mounts?.length?grant.mounts.map((item:any)=>item.alias).join(" / "):grant.workspaceId} · {grant.revokedAt?label("폐기됨","revoked"):label("활성","active")}</span>{#if !grant.revokedAt}<button type="button" disabled={busy} onclick={()=>void revoke(grant.id)}>{label("폐기","Revoke")}</button>{/if}</div>{/each}</div>{/if}
+  {#if grants.length}<div class="participant-grants"><strong>{label("발급된 권한","Grants")}</strong>{#each grants as grant}<div><span>{grant.mounts?.length?grant.mounts.map((item:any)=>item.alias).join(" / "):grant.workspaceId} · {grant.revokedAt?label("폐기됨","revoked"):label("활성","active")}{#if grant.execution} · {grant.execution.provider} ({grant.execution.automationLevel}){/if}</span>{#if !grant.revokedAt}<button type="button" disabled={busy} onclick={()=>void revoke(grant.id)}>{label("폐기","Revoke")}</button>{/if}</div>{/each}</div>{/if}
   {#if notice}<p role="status">{notice}</p>{/if}
 </section>
 
@@ -101,4 +110,5 @@
   form,fieldset{display:grid;gap:.55rem}fieldset{border:1px solid var(--line);border-radius:10px;padding:.65rem}label{display:grid;gap:.25rem;min-width:0}input,select,textarea{width:100%;min-width:0;box-sizing:border-box}
   button{width:max-content;max-width:100%;min-height:38px}.participant-grants{display:grid;gap:.35rem}.participant-grants>div{display:flex;align-items:center;justify-content:space-between;gap:.5rem;padding:.4rem;border:1px solid var(--line);border-radius:8px}.participant-grants span{overflow-wrap:anywhere}
   p{margin:0;color:var(--muted)}@media(max-width:600px){button{min-height:44px}.participant-actions button{flex:1}}
+  .participant-check{display:flex;align-items:center;gap:.5rem}.participant-check input{width:auto;flex:none}
 </style>

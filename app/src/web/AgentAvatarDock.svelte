@@ -32,13 +32,15 @@
   export let statusSuspended=false;
   export let streamSuspended=false;
   export let streamSuspendedProviders:Partial<Record<AvatarProvider,boolean>>={};
-  export let codexAvatar:"Gpt-Codex"|"Gpt-Sol"="Gpt-Sol";
-  export let onCodexAvatarChange:((avatar:"Gpt-Codex"|"Gpt-Sol")=>void)|null=null;
+  export let codexAvatar:string="Gpt-Sol";
+  export let onCodexAvatarChange:((avatar:string)=>void)|null=null;
   export let onAvatarOutfitChange:((provider:"codex"|"claude"|"deepseek"|"ollama"|"antigravity"|"grok",outfit:string)=>void)|null=null;
   export let completedByProvider:Record<AvatarProvider,AgentRecentSession[]>={codex:[],claude:[],grok:[],antigravity:[],deepseek:[],ollama:[]};
   export let activeByProvider:Record<AvatarProvider,AgentRecentSession[]>={codex:[],claude:[],grok:[],antigravity:[],deepseek:[],ollama:[]};
   export let sessionsLoading:Record<AvatarProvider,boolean>={codex:false,claude:false,grok:false,antigravity:false,deepseek:false,ollama:false};
   export let sessionsError:Record<AvatarProvider,boolean>={codex:false,claude:false,grok:false,antigravity:false,deepseek:false,ollama:false};
+  // Task open in the main view; opening a finished agent's task counts as seeing it.
+  export let viewingTaskId:string|null=null;
   export let onSelect:((session:AgentRecentSession)=>void|Promise<void>)|null=null;
   export let onOpen:((provider:AvatarProvider|null)=>void)|null=null;
   export let onStatusChange:((provider:AvatarProvider,taskId:string,status:"completed"|"failed"|"stopped")=>void)|null=null;
@@ -300,19 +302,22 @@
     const stamps:Partial<Record<Provider,number>>={};
     for(const provider of next.active)stamps[provider]=activatedAt[provider]??Date.now();
     activatedAt=stamps;
-    // Whatever finishes while its own tab is open has been seen.
-    arrangement=openProvider?markSeen(next,openProvider):next;
+    // Whatever finishes while its own tab or its own task is open has been seen.
+    let seen=openProvider?markSeen(next,openProvider):next;
+    for(const item of items)if(viewingTaskId&&item.recent?.taskId===viewingTaskId)seen=markSeen(seen,item.provider);
+    arrangement=seen;
   }
   $: arrange(connectedList,providerItems,phases);
+  $: if(viewingTaskId){let seen=arrangement;for(const item of providerItems)if(item.recent?.taskId===viewingTaskId)seen=markSeen(seen,item.provider);if(seen!==arrangement)arrangement=seen;}
   $: pile=pileOf(arrangement,connectedList);
 
   // The row degrades pill -> circle -> "+N" by measured width, so the agents
   // can never run over the utilities beside them. Sizes come from the CSS.
   let zone:HTMLDivElement|null=null;
-  let zoneWidth=0,slotSize=42,pillSize=216,rowGap=6,pileGap=10;
+  let zoneWidth=0,slotSize=42,pillSize=216,pillMax=340,pilePill=184,rowGap=6,pileGap=10;
   function readZone(node:HTMLDivElement){
     const style=getComputedStyle(node),px=(name:string,fallback:number)=>{const value=parseFloat(style.getPropertyValue(name));return Number.isFinite(value)?value:fallback;};
-    slotSize=px("--slot",42);pillSize=px("--pill",216);rowGap=px("--row-gap",6);pileGap=px("--pile-gap",10);zoneWidth=node.clientWidth;
+    slotSize=px("--slot",42);pillSize=px("--pill",216);pillMax=px("--pill-max",340);pilePill=px("--pile-pill",184);rowGap=px("--row-gap",6);pileGap=px("--pile-gap",10);zoneWidth=node.clientWidth;
   }
   function measureZone(node:HTMLDivElement){
     zone=node;const observer=new ResizeObserver(()=>readZone(node));observer.observe(node);readZone(node);
@@ -322,6 +327,15 @@
   $: fit=(zoneWidth>0
     ?fitActiveRow(arrangement.active,{available:zoneWidth-pileWidth(pile.length,slotSize)-(pile.length?pileGap:0),pill:pillSize,circle:slotSize,gap:rowGap,more:slotSize})
     :{mode:"circle",visible:[...arrangement.active],hidden:[]}) as ActiveRowFit<Provider>;
+
+  // Spare width is spent on information, not left empty: the resting pile
+  // unstacks into pills once everything fits, then working pills widen.
+  const rowSpan=(count:number,size:number)=>count?count*size+(count-1)*rowGap:0;
+  $: activeAsPills=!arrangement.active.length||fit.mode==="pill";
+  $: activeSpan=arrangement.active.length?rowSpan(arrangement.active.length,pillSize)+pileGap:0;
+  $: pileAsPills=zoneWidth>0&&pile.length>0&&activeAsPills&&zoneWidth-activeSpan>=rowSpan(pile.length,pilePill);
+  $: pileSpan=pile.length?(pileAsPills?rowSpan(pile.length,pilePill):pileWidth(pile.length,slotSize))+pileGap:0;
+  $: livePill=fit.mode==="pill"&&fit.visible.length?Math.max(pillSize,Math.min(pillMax,Math.floor((zoneWidth-pileSpan-(fit.visible.length-1)*rowGap)/fit.visible.length))):pillSize;
 
   let now=Date.now(),clock:ReturnType<typeof setInterval>|null=null;
   $: needsClock=fit.mode==="pill"&&fit.visible.length>0;
@@ -351,18 +365,19 @@
   {#key `${provider}:${status}`}
     <EmotionAvatar engine={provider} {codexAvatar} onMiniClick={()=>toggle(provider)} miniExpanded={openProvider===provider} miniLabel={$t("avatar.slotLabel",{provider:name,state:stateText(phase,unseen)})} context={{provider,status,sessionId:recent?.threadId,taskId:recent?.taskId}}/>
   {/key}
-  {#if unseen==="done"&&place==="pile"}<span class="avatar-unseen-dot" aria-hidden="true"></span>{/if}
+  {#if unseen==="done"}<span class="avatar-unseen-dot" aria-hidden="true"></span>{/if}
   {#if pill}
     <!-- The pill text repeats the avatar button's label, so it stays out of the
          tab order and the accessibility tree; it only widens the click target. -->
     <button type="button" class="agent-pill-body" tabindex="-1" aria-hidden="true" onclick={()=>toggle(provider)}>
-      <strong><span>{name} · {phaseText(provider,status,liveActivity)}</span><time>{elapsedFor(provider,recent,activatedAt,now)}</time></strong>
+      {#if place==="pile"||unseen}<strong><span>{name} · {stateText(phase,unseen)}</span></strong>
+      {:else}<strong><span>{name} · {phaseText(provider,status,liveActivity)}</span><time>{elapsedFor(provider,recent,activatedAt,now)}</time></strong>{/if}
       <small>{recent?.title??""}</small>
     </button>
   {/if}
 {/snippet}
 
-{#if showAvatars}<div class="agent-avatar-dock header-size-{headerAvatarSizeStep}" aria-label={$t("session.recent")} bind:this={dock}>
+{#if showAvatars}<div class="agent-avatar-dock header-size-{headerAvatarSizeStep}" style="--pill-live:{livePill}px" aria-label={$t("session.recent")} bind:this={dock}>
   <!-- Active row on the left in activation order, the pile of resting agents
        on the right. Moving between them is a crossfade, never a reshuffle. -->
   <div class="agent-zone" use:measureZone>
@@ -379,10 +394,10 @@
       </div>
     {/if}
     {#if pile.length}
-      <div class="agent-pile" role="group" aria-label={$t("avatar.pile")}>
+      <div class="agent-pile" class:as-pills={pileAsPills} role="group" aria-label={$t("avatar.pile")}>
         {#each pile as provider (provider)}
-          <div class="agent-avatar-slot {provider} status-{displayStatus(provider,recentOf(provider,providerItems),liveStatuses)||'idle'} phase-{phases[provider]}" class:unseen={arrangement.unseen[provider]==="done"} title={label(provider,recentOf(provider,providerItems),displayStatus(provider,recentOf(provider,providerItems),liveStatuses))} animate:flip={{duration:motion(180)}} in:receive|global={{key:provider}} out:send|global={{key:provider}}>
-            {@render avatarBody(provider,"pile",false)}
+          <div class="agent-avatar-slot {provider} status-{displayStatus(provider,recentOf(provider,providerItems),liveStatuses)||'idle'} phase-{phases[provider]}" class:unseen={arrangement.unseen[provider]==="done"} class:pill={pileAsPills} title={label(provider,recentOf(provider,providerItems),displayStatus(provider,recentOf(provider,providerItems),liveStatuses))} animate:flip={{duration:motion(180)}} in:receive|global={{key:provider}} out:send|global={{key:provider}}>
+            {@render avatarBody(provider,"pile",pileAsPills)}
           </div>
         {/each}
       </div>

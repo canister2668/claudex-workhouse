@@ -3,8 +3,11 @@ import path from "node:path";
 import {describe,expect,it}from"vitest";
 
 const styles=fs.readFileSync(path.join(process.cwd(),"src","web","styles.css"),"utf8");
-const panel=styles.slice(styles.indexOf(".work-status-panel{"),styles.indexOf("}",styles.indexOf(".work-status-panel{")));
-const drawer=styles.slice(styles.indexOf(".work-status-drawer{"),styles.indexOf("}",styles.indexOf(".work-status-drawer{")));
+// The base rules start a line; scoped overrides (".shell… .work-status-panel{…}")
+// can appear earlier in the file and must not be mistaken for them.
+const rule=(selector:string)=>{const start=styles.indexOf(`\n${selector}{`)+1;return styles.slice(start,styles.indexOf("}",start));};
+const panel=rule(".work-status-panel");
+const drawer=rule(".work-status-drawer");
 
 describe("the work panel stays inside the screen",()=>{
   it("uses a column that can shrink below its content",()=>{

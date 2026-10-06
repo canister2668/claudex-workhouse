@@ -10,13 +10,14 @@ import type { DeckDatabase } from "./db/client.js";
 import { HostWorkspaceManager, LOCAL_HOST_ID } from "./host-workspaces.js";
 import { MAX_EDITABLE_WORKSPACE_FILE_BYTES } from "./workspace-file-edit.js";
 import {participantSecretPresent,readParticipantSecret,storeParticipantSecret} from "./external-participant-secrets.js";
+import { executionGrantSchema, registerExternalParticipantTaskRoutes, type ExternalParticipantExecutor } from "./external-participant-tasks.js";
 
 const settingKey="external-participant.grants.v1";
 const relativePath=z.string().trim().min(1).max(512).refine(value=>!path.isAbsolute(value)&&!value.includes("\\")&&!value.includes("\0")&&!value.split("/").some(part=>part===".."||part==="."||!part),"Use a normalized relative path.");
 const scopePath=relativePath.refine(value=>!value.split("/").some(part=>part.toLowerCase()===".git"),"Git metadata is unavailable.");
 const mountScope=z.union([scopePath,z.literal(".")]);
 const mountInput=z.object({alias:z.string().regex(/^[a-z][a-z0-9-]{0,31}$/),workspaceId:z.string().min(1).max(100),rootPath:z.union([scopePath,z.literal("")]).default(""),readPaths:z.array(mountScope).min(1).max(30),writePaths:z.array(mountScope).max(10).default([])}).strict();
-const grantInput=z.object({workspaceId:z.string().min(1).max(100),readPaths:z.array(scopePath).max(30).default([]),writePaths:z.array(scopePath).max(10).default([]),mounts:z.array(mountInput).max(8).default([]),expiresAt:z.string().datetime().nullable().default(null)}).strict();
+const grantInput=z.object({workspaceId:z.string().min(1).max(100),readPaths:z.array(scopePath).max(30).default([]),writePaths:z.array(scopePath).max(10).default([]),mounts:z.array(mountInput).max(8).default([]),execution:executionGrantSchema.nullable().default(null),expiresAt:z.string().datetime().nullable().default(null)}).strict();
 const storedGrant=grantInput.extend({id:z.string().uuid(),tokenHash:z.string().regex(/^[a-f0-9]{64}$/),createdAt:z.string().datetime(),revokedAt:z.string().datetime().nullable()});
 type Grant=z.infer<typeof storedGrant>;
 const settingsSchema=z.object({version:z.literal(1),grants:z.array(storedGrant).max(100)});
@@ -27,7 +28,7 @@ const inScope=(relative:string,scopes:string[])=>scopes.some(scope=>scope==="."|
 const directoryInScope=(relative:string,scopes:string[])=>relative===""||inScope(relative,scopes)||scopes.some(scope=>scope.startsWith(`${relative}/`));
 const sensitive=(relative:string)=>/(^|\/)(?:\.env(?:\..*)?|credentials?(?:\..*)?|secrets?(?:\..*)?|id_(?:rsa|ed25519)|[^/]+\.(?:pem|key|p12|pfx)|\.npmrc|\.netrc)$/i.test(relative);
 
-export function registerExternalParticipantRoutes(app:FastifyInstance,input:{db:DeckDatabase;workspaces:HostWorkspaceManager;dataRoot:string}){
+export function registerExternalParticipantRoutes(app:FastifyInstance,input:{db:DeckDatabase;workspaces:HostWorkspaceManager;dataRoot:string;executor?:ExternalParticipantExecutor}){
   const {db,workspaces,dataRoot}=input;
   const load=async()=>{const stored=await db.getSystemSetting(settingKey),parsed=settingsSchema.safeParse(stored?.value);if(stored&&!parsed.success)throw error("External participant grants are invalid; access is disabled.",503,"EXTERNAL_GRANTS_INVALID");return{value:parsed.success?parsed.data:{version:1 as const,grants:[] as Grant[]},updatedAt:stored?.updatedAt??null};};
   const publicGrant=({tokenHash,...grant}:Grant)=>grant;
@@ -72,7 +73,8 @@ export function registerExternalParticipantRoutes(app:FastifyInstance,input:{db:
     const body=grantInput.parse(request.body),workspace=await workspaces.requireWorkspace(body.workspaceId,LOCAL_HOST_ID);
     if(workspace.archivedAt)throw error("Workspace is archived.",409,"EXTERNAL_WORKSPACE_ARCHIVED");
     if(body.expiresAt&&Date.parse(body.expiresAt)<=Date.now())throw error("Expiry must be in the future.",400,"EXTERNAL_GRANT_EXPIRY");
-    if(!body.mounts.length&&!body.readPaths.length)throw error("Grant requires readable paths or mounts.",400,"EXTERNAL_GRANT_EMPTY");
+    if(!body.mounts.length&&!body.readPaths.length&&!body.execution)throw error("Grant requires readable paths, mounts, or execution permission.",400,"EXTERNAL_GRANT_EMPTY");
+    if(body.execution&&!input.executor)throw error("Task execution is unavailable.",503,"EXTERNAL_EXECUTION_UNAVAILABLE");
     if(new Set(body.mounts.map(item=>item.alias)).size!==body.mounts.length)throw error("Mount aliases must be unique.",400,"EXTERNAL_MOUNT_DUPLICATE");
     if(body.writePaths.some(item=>!inScope(item,body.readPaths)))throw error("Writable paths must also be readable.",400,"EXTERNAL_GRANT_WRITE_SCOPE");
     for(const mount of body.mounts){
@@ -155,4 +157,5 @@ export function registerExternalParticipantRoutes(app:FastifyInstance,input:{db:
     await audit("external-participant-report",grant,`assignment=${id};kind=${body.kind};inserted=${record.inserted}`);
     return{assignmentId:id,inserted:record.inserted,eventId:record.event.id};
   });
+  registerExternalParticipantTaskRoutes(app,{db,requireGrant,executor:input.executor});
 }

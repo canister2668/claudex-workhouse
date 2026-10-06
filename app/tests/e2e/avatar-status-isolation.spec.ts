@@ -99,11 +99,16 @@ test("avatar status is task-scoped and compatible providers receive terminal eve
   await expect.poll(()=>page.evaluate(()=> (window as any).__avatarStreamUrls())).toContainEqual(expect.stringContaining("/api/tasks/antigravity/"));
 
   expect(await page.evaluate(()=> (window as any).__emitAvatarEvent("/api/tasks/antigravity/","agent-event",{type:"task_completed",content:"done",sequence:999,terminal:true,timestamp:new Date().toISOString()}))).toBeGreaterThan(0);
-  // A finish returns only that avatar to the pile, marked until it is seen.
-  await expect(page.locator(".agent-pile .agent-avatar-slot.antigravity .avatar-unseen-dot")).toBeVisible();
-  // The move out of the active row is a crossfade, so the outgoing copy may
-  // linger briefly; the avatar settles as a single pile slot.
-  await expect(page.locator(".agent-pile .agent-avatar-slot.antigravity .avatar-mini")).toHaveAttribute("aria-label",/Gemini: 완료 · 확인하지 않은 결과/);
+  // A finish keeps the avatar in the active row, marked, until it is seen.
+  await expect(page.locator(".agent-active-row .agent-avatar-slot.antigravity .avatar-unseen-dot")).toBeVisible();
+  await expect(page.locator(".agent-active-row .agent-avatar-slot.antigravity .avatar-mini")).toHaveAttribute("aria-label",/Gemini: 완료 · 확인하지 않은 결과/);
+  await expect(page.locator(".agent-avatar-slot.antigravity")).toHaveCount(1);
+  // Looking at it is what sends it to the pile. The move is a crossfade, so
+  // the outgoing copy may linger briefly before it settles as one pile slot.
+  await page.locator(".agent-active-row .agent-avatar-slot.antigravity .avatar-mini").click({force:true});
+  await page.keyboard.press("Escape");
+  await expect(page.locator(".agent-pile .agent-avatar-slot.antigravity .avatar-mini")).toHaveAttribute("aria-label",/Gemini: 완료/);
+  await expect(page.locator(".agent-pile .agent-avatar-slot.antigravity .avatar-unseen-dot")).toHaveCount(0);
   await expect(page.locator(".agent-avatar-slot.antigravity")).toHaveCount(1);
 });
 

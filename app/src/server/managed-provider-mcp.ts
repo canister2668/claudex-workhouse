@@ -1,4 +1,6 @@
 import crypto from "node:crypto";
+import {effectiveDelegationSettings} from "./execution-defaults.js";
+import {requireEnabledModels} from "./global-model-settings.js";
 import { persistAsyncUserInput } from "./async-user-input.js";
 import fs from "node:fs";
 import path from "node:path";
@@ -47,8 +49,8 @@ export class ManagedProviderBridge{
 
   async models(input:{provider:ProviderId;model?:string}){
     if(!this.modelCatalog)throw new Error("Managed model catalog is unavailable; no model was selected.");
-    const catalog=await this.modelCatalog(),delegation=normalizeDelegationSettings((await this.db.getSystemSetting("delegation.launch-modes"))?.value)[input.provider];
-    return{provider:input.provider,source:"global-enabled-catalog",updatedAt:catalog.updatedAt,models:catalog.settings[input.provider].models,configuredModel:delegation.model,reasoningEffort:delegation.reasoningEffort,launchMode:delegation.launchMode,resolvedModel:input.model?resolveManagedModel(catalog.settings,input.provider,input.model):null,availability:"Enabled configuration, not a provider authentication or execution probe."};
+    const catalog=await this.modelCatalog(),delegation=(await effectiveDelegationSettings(this.db))[input.provider];
+    return{provider:input.provider,source:"global-enabled-catalog",updatedAt:catalog.updatedAt,models:catalog.settings[input.provider].models,configuredModel:delegation.model,reasoningEffort:delegation.reasoningEffort,launchMode:delegation.launchMode,configuredModelEnabled:!delegation.model||delegation.model==="default"||catalog.settings[input.provider].models.some(item=>item.id===delegation.model),resolvedModel:input.model?resolveManagedModel(catalog.settings,input.provider,input.model):null,availability:"Enabled configuration, not a provider authentication or execution probe."};
   }
 
   private async restoreLegacyIdentity(task:DeckTask){
@@ -145,7 +147,12 @@ export class ManagedProviderBridge{
 
   private async snapshot(task:DeckTask,collaborationId:string|null):Promise<ManagedProviderSnapshot>{
     const workspace=task.workspaceId?await this.db.getWorkspace(task.workspaceId):null;
-    return{provider:task.provider,ownership:"claudex-workhouse",source:"claudex-workhouse",workspace:workspace?.displayName??task.projectId,workspaceId:task.workspaceId??"",collaborationId,taskId:task.id,threadId:task.providerSessionId??task.threadId,status:task.status,result:task.result,error:task.error,model:task.requestedModel??null};
+    let error=task.error;
+    if(!error&&collaborationId){
+      const run=(await this.db.listCollaborationRuns(collaborationId) as CollaborationRun[]).find(item=>item.providerTaskId===task.id&&item.status==="timed-out");
+      if(run)error=`Execution deadline reached at ${run.deadlineAt}.`;
+    }
+    return{provider:task.provider,ownership:"claudex-workhouse",source:"claudex-workhouse",workspace:workspace?.displayName??task.projectId,workspaceId:task.workspaceId??"",collaborationId,taskId:task.id,threadId:task.providerSessionId??task.threadId,status:task.status,result:task.result,error,model:task.requestedModel??null};
   }
 
   private resolveSourceSnapshot(source:DeckTask,input:{prompt:string;sourceContent?:string}):ActiveSourceSnapshot{
@@ -156,10 +163,12 @@ export class ManagedProviderBridge{
   }
 
   async create(source:DeckTask,input:{provider:ProviderId;prompt:string;title?:string;sourceContent?:string;automationLevel?:AutomationLevel;model?:string|null;reasoningEffort?:string|null;serviceTier?:"priority"|null;idempotencyKey:string}){
-    const model=input.model&&input.model!=="default"&&this.modelCatalog?resolveManagedModel((await this.modelCatalog()).settings,input.provider,input.model):input.model;
+    const settings=await effectiveDelegationSettings(this.db),selected=settings[input.provider],requested=input.model??selected.model;
+    const catalog=this.modelCatalog?await this.modelCatalog():null;
+    if(catalog&&!input.model)requireEnabledModels(catalog.settings,[{provider:input.provider,model:requested}]);
+    const model=requested&&requested!=="default"&&catalog?resolveManagedModel(catalog.settings,input.provider,requested):requested;
     await this.beforeProviderExecution(input.provider,model);
     return this.idempotent(source,"create",input.idempotencyKey,input,async()=>{
-      const settings=normalizeDelegationSettings((await this.db.getSystemSetting("delegation.launch-modes").catch(()=>null))?.value);
       if(settings[input.provider].launchMode!=="managed")throw Object.assign(new Error(`${input.provider} delegation is configured for direct execution, not Claudex Workhouse managed execution.`),{statusCode:409,code:"MANAGED_DELEGATION_DISABLED"});
       // Omitting automationLevel keeps the historical contract: the target
       // inherits the source's effective mode. An explicit value selects any
@@ -168,7 +177,7 @@ export class ManagedProviderBridge{
       const sourceAutomation=automationLevel(source.metadata?.automationLevel,source.permissionProfile);
       const targetAutomationLevel=input.automationLevel?assertAutomationWithinSource(input.automationLevel,sourceAutomation):sourceAutomation;
       assertAutomationSupported(input.provider,targetAutomationLevel);
-      const sourceSnapshot=this.resolveSourceSnapshot(source,input),detail=await this.collaboration.createAssist({sourceTask:source,targetProvider:input.provider,executionHostId:source.executionHostId!,workspaceId:source.workspaceId!,title:input.title?.trim()||`${source.title} · ${input.provider} managed task`,prompt:input.prompt,sourceSnapshot,targetAutomationLevel,preserveRequestPaths:true,model,reasoningEffort:input.reasoningEffort,serviceTier:input.serviceTier});
+      const sourceSnapshot=this.resolveSourceSnapshot(source,input),detail=await this.collaboration.createAssist({sourceTask:source,targetProvider:input.provider,executionHostId:source.executionHostId!,workspaceId:source.workspaceId!,title:input.title?.trim()||`${source.title} · ${input.provider} managed task`,prompt:input.prompt,sourceSnapshot,targetAutomationLevel,preserveRequestPaths:true,timeoutMs:2*60*60_000,model,reasoningEffort:input.reasoningEffort===undefined?selected.reasoningEffort:input.reasoningEffort,serviceTier:input.serviceTier===undefined?("serviceTier" in selected?selected.serviceTier:null):input.serviceTier});
       const collaborationId=(detail.session as CollaborationSession).id,deadline=Date.now()+20_000;
       let snapshot:ManagedProviderSnapshot|null=null;
       do{snapshot=await this.collaborationSnapshot(source,collaborationId);if(snapshot&&(snapshot.threadId||TERMINAL.has(snapshot.status)))break;await delay(250);}while(Date.now()<deadline);

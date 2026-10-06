@@ -3,15 +3,16 @@
 // tested without a DOM.
 //
 // Rules (approved header design):
-// - An agent that is running, waiting for a person, or has failed without the
-//   person having seen it stands in the active row; everyone else sits in the
-//   pile.
+// - An agent that is running, waiting for a person, or has finished or failed
+//   without the person having seen it stands in the active row; everyone else
+//   sits in the pile.
 // - The active row is ordered by activation. A newly active agent is appended
 //   at the right end, next to the pile, so agents that are already working are
 //   never pushed or reordered by later ones.
-// - An agent that finishes returns to the pile alone; the others keep their
-//   place. A completion observed while the page was open stays marked until
-//   the person looks at that agent.
+// - An agent that finishes keeps its place in the active row, marked, until the
+//   person looks at it; only then does it return to the pile alone. The others
+//   keep their place throughout. A finish already there on first load is old
+//   news and rests in the pile.
 
 export type AgentPhase = "running" | "waiting" | "failed" | "done" | "stopped" | "idle";
 
@@ -84,7 +85,7 @@ export function nextArrangement<P extends string>(state: ArrangementState<P>, in
   const inputFor = new Map(inputs.map(input => [input.provider, input]));
   const stays = (provider: P) => {
     const input = inputFor.get(provider);
-    return Boolean(input && (isWorkingPhase(input.phase) || unseen[provider] === "failed"));
+    return Boolean(input && (isWorkingPhase(input.phase) || unseen[provider]));
   };
   // Agents that became active in the same update are ordered by task start,
   // then by declared order, so a first load reproduces who started first.
@@ -93,14 +94,13 @@ export function nextArrangement<P extends string>(state: ArrangementState<P>, in
   return { active, unseen, phases };
 }
 
-// The person looked at this agent: a failure leaves the active row and the
-// unseen-result marker clears.
+// The person looked at this agent: the unseen-result marker clears and the
+// finished agent leaves the active row.
 export function markSeen<P extends string>(state: ArrangementState<P>, provider: P): ArrangementState<P> {
   if (!state.unseen[provider]) return state;
   const unseen = { ...state.unseen };
-  const failed = unseen[provider] === "failed";
   delete unseen[provider];
-  return { ...state, unseen, active: failed ? state.active.filter(item => item !== provider) : state.active };
+  return { ...state, unseen, active: state.active.filter(item => item !== provider) };
 }
 
 // Pile keeps the declared provider order so resting agents never shuffle.

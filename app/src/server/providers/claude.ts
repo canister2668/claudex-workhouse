@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import {effectiveDelegationSettings} from "../execution-defaults.js";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -278,7 +279,7 @@ export class ClaudeProvider implements AgentProvider {
       this.db.getSystemSetting("delegation.launch-modes").catch(()=>null),
       this.db.getSystemSetting("claude.execution").catch(()=>null)
     ]);
-    const delegationSettings=normalizeDelegationSettings(delegationStored?.value);
+    const delegationSettings=await effectiveDelegationSettings(this.db,normalizeDelegationSettings(delegationStored?.value));
     const claudeExecutionSettings=normalizeClaudeExecutionSettings(executionStored?.value);
     const workerEnvironment={CLAUDEX_WORKHOUSE_RUNTIME_PROFILE:runtimeProfile,CLAUDEX_WORKHOUSE_CONVERSATION_ATTACHMENTS:JSON.stringify(runtimeProfile==="conversation"?conversationAttachmentPaths(input.prompt,path.join(this.config.dataDir,"uploads")):[]),CLAUDEX_WORKHOUSE_DELEGATION_SETTINGS:JSON.stringify(delegationSettings),...emotionMcpEnvironment("claude",this.config.port,id,assignedSessionId,runtimeProfile),CLAUDEX_WORKHOUSE_MANAGED_PROVIDER_MCP_URL:`http://127.0.0.1:${this.config.port}/mcp/claudex-workhouse`,CLAUDEX_WORKHOUSE_CURRENT_TASK_ID:id,CLAUDEX_WORKHOUSE_CURRENT_SESSION_ID:assignedSessionId,CLAUDEX_WORKHOUSE_MANAGED_PROVIDER_TOKEN:managedProviderToken,CLAUDEX_WORKHOUSE_CLAUDE_SWITCH_MODELS_ON_FLAG:String(claudeExecutionSettings.switchModelsOnFlag),...(mode!=="resume"?{CLAUDEX_WORKHOUSE_CLAUDE_SESSION_ID:assignedSessionId}:{})};
     const externalMcp=await prepareExternalMcpEnvironment({db:this.db,taskTempDir,taskId:id,provider:"claude",runtimeProfile,port:this.config.port});

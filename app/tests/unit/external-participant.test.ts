@@ -127,7 +127,7 @@ describe("external participant scoped exchange",()=>{
       const created=await app.inject({method:"POST",url:"/api/external-participants/grants",payload:{workspaceId:"test",readPaths:["docs"],writePaths:[]}}),origin=await app.listen({host:"127.0.0.1",port:0});
       client=new Client({name:"participant-test",version:"1.0.0"});
       await client.connect(new StdioClientTransport({command:process.execPath,args:["--import","tsx","src/server/external-participant-mcp.ts"],cwd:process.cwd(),env:{...process.env,CLAUDEX_PARTICIPANT_TOKEN:created.json().token,CLAUDEX_PARTICIPANT_ORIGIN:origin} as Record<string,string>,stderr:"pipe"}));
-      const tools=await client.listTools();expect(tools.tools.map(tool=>tool.name)).toEqual(["list_assignments","list_files","read_file","write_file","create_file","submit_report"]);
+      const tools=await client.listTools();expect(tools.tools.map(tool=>tool.name)).toEqual(["get_capabilities","create_task","list_tasks","get_task","resume_task","list_assignments","list_files","read_file","write_file","create_file","submit_report"]);
       expect(tools.tools.find(tool=>tool.name==="write_file")?.annotations?.destructiveHint).toBe(true);
       const read=await client.callTool({name:"read_file",arguments:{path:"docs/guide.md"}});expect(JSON.stringify(read)).toContain("before");
     }finally{await client?.close();await app.close();}

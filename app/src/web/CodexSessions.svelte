@@ -75,7 +75,7 @@
   export let onDetail:((open:boolean)=>void)|null=null;
   export let onOpenTask:((task:any)=>void)|null=null;
   export let onOpenFile:((file:{path:string;pathBase:"workspace"|"task-cwd";sourceTaskId?:string;workspaceId?:string;line?:number;initialEdit?:boolean})=>void)|null=null;
-  export let codexAvatar:"Gpt-Codex"|"Gpt-Sol"="Gpt-Sol";
+  export let codexAvatar:string="Gpt-Sol";
   export function closeDetail(){ stopLive(); discardLive(); selected=null; selectedAssistId=null; assistOpen=false; renameEditing=false;locationRecoveryLoading=false; liveMode="History"; }
   export async function refreshSessions(){
     const current=selected;

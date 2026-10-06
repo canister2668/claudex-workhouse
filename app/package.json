@@ -1,6 +1,6 @@
 {
   "name": "claudex-workhouse",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "private": true,
   "license": "AGPL-3.0-only",
   "repository": "https://github.com/canister2668/claudex-workhouse",
@@ -49,7 +49,7 @@
     "@modelcontextprotocol/sdk": "^1.29.0",
     "better-sqlite3": "12.11.1",
     "dompurify": "^3.4.12",
-    "fastify": "^5.10.0",
+    "fastify": "^5.12.2",
     "jose": "^6.1.2",
     "marked": "^18.0.6",
     "qrcode": "^1.5.4",
@@ -83,11 +83,15 @@
       "esbuild"
     ],
     "overrides": {
-      "brace-expansion@5.0.8": "5.0.9",
       "fast-uri@<3.1.8 >=3.0.0": "3.1.8",
       "fast-uri@<4.1.5 >=4.0.0": "4.1.5",
       "find-my-way@9.6.0": "9.7.0",
-      "ip-address@10.2.0": "10.3.1"
+      "ip-address@10.2.0": "10.3.1",
+      "proxy-addr@<2.0.8": "2.0.8",
+      "devalue@<5.9.3": "5.9.3",
+      "@fastify/busboy@<3.2.1 >=3.0.0": "3.2.1",
+      "brace-expansion@>=2.0.0 <2.1.5": "2.1.5",
+      "brace-expansion@>=4.0.0 <5.0.11": "5.0.11"
     }
   },
   "packageManager": "pnpm@10.17.1"

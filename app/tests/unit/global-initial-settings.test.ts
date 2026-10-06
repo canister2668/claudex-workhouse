@@ -25,6 +25,6 @@ describe("global initial settings",()=>{
   it("sends with Enter by default while preserving explicit saved opt-outs",()=>{
     const app=read("src/web/App.svelte");
     expect(app).toContain("enterToSend=globalPrefs.enterToSend!==false");
-    expect(app).toContain('codexAvatar:"Gpt-Codex"|"Gpt-Sol"=globalPrefs.codexAvatar==="Gpt-Codex"?"Gpt-Codex":"Gpt-Sol"');
+    expect(app).toContain('codexAvatar:string=typeof globalPrefs.codexAvatar==="string"&&/^[a-zA-Z0-9_-]{1,40}$/.test(globalPrefs.codexAvatar)?globalPrefs.codexAvatar:"Gpt-Sol"');
   });
 });

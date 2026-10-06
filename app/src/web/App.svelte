@@ -411,7 +411,7 @@
     return h >= 24 ? $t("quota.resetDays",{days:Math.floor(h/24),hours:h%24}) : h ? $t("quota.resetHours",{hours:h,minutes:m}) : $t("quota.resetMinutes",{minutes:m});
   };
   let theme: "auto"|"light"|"dark" = (localStorage.getItem("deck-theme") as "light"|"dark"|null) ?? "auto";
-  function syncThemeChrome(){requestAnimationFrame(()=>{const color=getComputedStyle(document.documentElement).getPropertyValue("--bg").trim();document.querySelector<HTMLMetaElement>('meta[name="theme-color"]')?.setAttribute("content",color);});}
+  function syncThemeChrome(){requestAnimationFrame(()=>{const color=getComputedStyle(document.documentElement).backgroundColor;document.querySelector<HTMLMetaElement>('meta[name="theme-color"]')?.setAttribute("content",color);});}
   function applyTheme(value:typeof theme){theme=value;if(value==="auto"){localStorage.removeItem("deck-theme");delete document.documentElement.dataset.theme;}else{localStorage.setItem("deck-theme",value);document.documentElement.dataset.theme=value;}syncThemeChrome();}
   let palette:Palette=normalizePalette(localStorage.getItem("deck-palette"));
   function applyPalette(value:Palette){palette=value;localStorage.setItem("deck-palette",value);if(value==="forest")delete document.documentElement.dataset.palette;else document.documentElement.dataset.palette=value;syncThemeChrome();}
@@ -562,7 +562,7 @@
   const changeAvatarTrayShape=(shape:AvatarTrayShape)=>{avatarTrayShape=writeAvatarTrayShape(shape);};
   let pushState:"unsupported"|"permission-needed"|"subscribed"|"disabled"|"failed"="disabled";let pushPreferences={approvals:true,userInput:true,completed:true,failed:true,hostOffline:false,handoff:true,vibration:false,quietStart:null as string|null,quietEnd:null as string|null};
   const browserId=(()=>{let value=localStorage.getItem("deck-browser-id");if(!value){value=crypto.randomUUID();localStorage.setItem("deck-browser-id",value);}return value;})();
-  let codexAvatar:"Gpt-Codex"|"Gpt-Sol"=globalPrefs.codexAvatar==="Gpt-Codex"?"Gpt-Codex":"Gpt-Sol";
+  let codexAvatar:string=typeof globalPrefs.codexAvatar==="string"&&/^[a-zA-Z0-9_-]{1,40}$/.test(globalPrefs.codexAvatar)?globalPrefs.codexAvatar:"Gpt-Sol";
   const savedDefaultProvider=globalPrefs.defaultProvider??savedPrefs.provider;
   let globalDefaultProvider:ProviderId=(["codex","claude","grok","antigravity","deepseek","ollama"] as ProviderId[]).includes(savedDefaultProvider)?savedDefaultProvider:"codex";
   let globalCodexModel=globalPrefs.codexModel??savedPrefs.codexModel??"";
@@ -1094,6 +1094,7 @@
   }
   function syncGlobalCodexOptions(){
     const visible=availableCodexModels();if(!visible.length)return;
+    if(executionDefaultsLoaded&&globalCodexModel&&!visible.some((item:any)=>item.id===globalCodexModel)){globalSaveNotice=$t("settings.executionDefaultsUnavailable");return;}
     const model=visible.find((item:any)=>item.id===globalCodexModel)??visible.find((item:any)=>item.isDefault)??visible[0];
     const changed=globalCodexModel!==model.id;globalCodexModel=model.id;
     if(!model.supportedReasoningEfforts?.some((item:any)=>item.reasoningEffort===globalCodexEffort))globalCodexEffort=model.defaultReasoningEffort??model.supportedReasoningEfforts?.[0]?.reasoningEffort??"medium";
@@ -1111,7 +1112,7 @@
     if(claudeEfforts.length&&!claudeEfforts.some(item=>item.id===conversationClaudeEffort))conversationClaudeEffort=claudeEfforts.find(item=>item.id==="default")?.id??claudeEfforts[0].id;
   }
   function syncConversationCompatibleOptions(){for(const provider of compatibleProviders){const models=availableCompatibleModels(provider),efforts=compatibleEffortOptions(provider);if(models.length&&!models.some(item=>item.id===conversationCompatibleModels[provider]))conversationCompatibleModels={...conversationCompatibleModels,[provider]:models[0].id};if(efforts.length&&!efforts.some(item=>item.id===conversationCompatibleEfforts[provider]))conversationCompatibleEfforts={...conversationCompatibleEfforts,[provider]:"default"};}}
-  function syncAllGlobalModelChoices(){syncGlobalCodexOptions();syncCodexOptions();syncConversationCodexOptions();syncConversationClaudeOptions();syncConversationCompatibleOptions();const claude=availableClaudeModels(),codex=availableCodexModels();if(claude.length&&!claude.some(item=>item.id===globalClaudeModel))globalClaudeModel=claude[0].id;if(claude.length&&!claude.some(item=>item.id===createClaudeModel))createClaudeModel=globalClaudeModel;for(const provider of compatibleProviders){const efforts=compatibleEffortOptions(provider);if(efforts.length&&!efforts.some(item=>item.id===globalCompatibleEfforts[provider]))globalCompatibleEfforts={...globalCompatibleEfforts,[provider]:"default"};if(efforts.length&&!efforts.some(item=>item.id===createCompatibleEfforts[provider]))createCompatibleEfforts={...createCompatibleEfforts,[provider]:globalCompatibleEfforts[provider]};const models=availableCompatibleModels(provider);if(models.length&&!models.some(item=>item.id===globalCompatibleModels[provider]))globalCompatibleModels={...globalCompatibleModels,[provider]:models[0].id};const selected=createCompatibleModel(provider);if(models.length&&!models.some(item=>item.id===selected))setCreateCompatibleModel(provider,globalCompatibleModels[provider]);}if(claudeEfforts.length&&!claudeEfforts.some(item=>item.id===globalClaudeEffort))globalClaudeEffort=claudeEfforts.find(item=>item.id==="default")?.id??claudeEfforts[0].id;if(claude.length&&!claude.some(item=>item.id===delegationSettings.claude.model))delegationSettings={...delegationSettings,claude:{...delegationSettings.claude,model:claude[0].id}};if(codex.length&&!codex.some((item:any)=>item.id===delegationSettings.codex.model))setDelegationCodexModel(codex.find((item:any)=>item.isDefault)?.id??codex[0].id);}
+  function syncAllGlobalModelChoices(){syncGlobalCodexOptions();syncCodexOptions();syncConversationCodexOptions();syncConversationClaudeOptions();syncConversationCompatibleOptions();const claude=availableClaudeModels(),codex=availableCodexModels();if(claude.length&&!claude.some(item=>item.id===globalClaudeModel)){if(executionDefaultsLoaded&&globalClaudeModel)globalSaveNotice=$t("settings.executionDefaultsUnavailable");else globalClaudeModel=claude[0].id;}if(claude.length&&!claude.some(item=>item.id===createClaudeModel))createClaudeModel=globalClaudeModel;for(const provider of compatibleProviders){const efforts=compatibleEffortOptions(provider);if(efforts.length&&!efforts.some(item=>item.id===globalCompatibleEfforts[provider]))globalCompatibleEfforts={...globalCompatibleEfforts,[provider]:"default"};if(efforts.length&&!efforts.some(item=>item.id===createCompatibleEfforts[provider]))createCompatibleEfforts={...createCompatibleEfforts,[provider]:globalCompatibleEfforts[provider]};const models=availableCompatibleModels(provider);if(models.length&&!models.some(item=>item.id===globalCompatibleModels[provider]))globalCompatibleModels={...globalCompatibleModels,[provider]:models[0].id};const selected=createCompatibleModel(provider);if(models.length&&!models.some(item=>item.id===selected))setCreateCompatibleModel(provider,globalCompatibleModels[provider]);}if(claudeEfforts.length&&!claudeEfforts.some(item=>item.id===globalClaudeEffort))globalClaudeEffort=claudeEfforts.find(item=>item.id==="default")?.id??claudeEfforts[0].id;if(claude.length&&!claude.some(item=>item.id===delegationSettings.claude.model))delegationSettings={...delegationSettings,claude:{...delegationSettings.claude,model:claude[0].id}};if(codex.length&&!codex.some((item:any)=>item.id===delegationSettings.codex.model))setDelegationCodexModel(codex.find((item:any)=>item.isDefault)?.id??codex[0].id);}
   function applyGlobalDefaultsToCreate(){
     createModel=globalCodexModel;createEffort=globalCodexEffort;createTier=globalCodexTier;createCodexWorkMode=globalCodexWorkMode;createCodexAutomation=globalCodexAutomation;createPermission=permissionForAutomation("codex",createCodexAutomation);
     createClaudeModel=globalClaudeModel;createClaudeEffort=globalClaudeEffort;createClaudeWorkMode=globalClaudeWorkMode;createClaudeAutomation=globalClaudeAutomation;createClaudePermission=permissionForAutomation("claude",createClaudeAutomation);
@@ -1246,7 +1247,7 @@
     if(globalModelsLoadPromise)return globalModelsLoadPromise;
     globalModelsLoadPromise=(async()=>{
       const wasClean=!globalBaseline.defaults||globalBaseline.defaults===defaultSettingsSignature();globalModelsLoading=true;
-      try{const data=await api(`/api/system-settings/models${snapshot?"?snapshot=true":""}`);globalModelSettings=normalizeGlobalModelSettings(data.settings);globalModelCandidates=normalizeModelCandidates(data.candidates);globalModelsLoaded=true;syncAllGlobalModelChoices();if(wasClean)globalBaseline.defaults=defaultSettingsSignature();}
+      try{const data=await api(`/api/system-settings/models${snapshot?"?snapshot=true":""}`);globalModelSettings=normalizeGlobalModelSettings(data.settings);globalModelCandidates=normalizeModelCandidates(data.candidates);globalModelsLoaded=true;const requestedCodex=globalCodexModel,requestedClaude=globalClaudeModel;syncAllGlobalModelChoices();if(executionDefaultsLoaded){globalCodexModel=requestedCodex;globalClaudeModel=requestedClaude;if((requestedCodex&&!globalModelSettings.codex.models.some(item=>item.id===requestedCodex))||(requestedClaude&&!globalModelSettings.claude.models.some(item=>item.id===requestedClaude)))globalSaveNotice=$t("settings.executionDefaultsUnavailable");}if(wasClean)globalBaseline.defaults=defaultSettingsSignature();}
       catch(e){globalSaveNotice=e instanceof Error?e.message:String(e);}
       finally{globalModelsLoading=false;}
     })();
@@ -1280,6 +1281,35 @@
   async function saveAndCloseGlobalSettings(){if(await saveGlobalSettings()){settingsClosePrompt=false;globalOpen=false;resumeSetup();}}
   function updateCharacter(provider:ProviderId,patch:Partial<CharacterSettings["providers"]["codex"]>){characterSettings={...characterSettings,providers:{...characterSettings.providers,[provider]:{...characterSettings.providers[provider],...patch}}};}
   function updateAvatarDisplay(value:CharacterSettings["avatarDisplay"]){characterSettings={...characterSettings,avatarDisplay:value};avatarDisplayMode.set(value);}
+  let executionDefaultsLoaded=false,executionDefaultsUpdatedAt:string|null=null;
+  function applyServerExecutionDefaults(data:Record<string,any>){
+    globalDefaultProvider=data.defaultProvider??globalDefaultProvider;
+    globalCodexModel=data.codexModel??globalCodexModel;globalCodexEffort=data.codexEffort??globalCodexEffort;
+    if(Object.hasOwn(data,"codexTier"))globalCodexTier=data.codexTier;
+    globalCodexWorkMode=data.codexWorkMode??globalCodexWorkMode;globalCodexAutomation=data.codexAutomation??globalCodexAutomation;
+    globalClaudeModel=data.claudeModel??globalClaudeModel;globalClaudeEffort=data.claudeEffort??globalClaudeEffort;
+    globalClaudeWorkMode=data.claudeWorkMode??globalClaudeWorkMode;globalClaudeAutomation=data.claudeAutomation??globalClaudeAutomation;
+    for(const provider of compatibleProviders){
+      if(data[`${provider}Model`]!==undefined)globalCompatibleModels={...globalCompatibleModels,[provider]:data[`${provider}Model`]};
+      if(data[`${provider}Effort`]!==undefined)globalCompatibleEfforts={...globalCompatibleEfforts,[provider]:data[`${provider}Effort`]};
+      if(data[`${provider}WorkMode`]!==undefined)globalCompatibleWorkModes={...globalCompatibleWorkModes,[provider]:data[`${provider}WorkMode`]};
+      if(data[`${provider}Automation`]!==undefined)globalCompatibleAutomation={...globalCompatibleAutomation,[provider]:data[`${provider}Automation`]};
+    }
+    showAvatars=data.showAvatars??showAvatars;showSpeech=data.showSpeech??showSpeech;collapseCompleted=data.collapseCompleted??collapseCompleted;
+    notifications=data.notifications??notifications;vibration=data.vibration??vibration;rememberLast=data.rememberLast??rememberLast;enterToSend=data.enterToSend??enterToSend;
+    avatarAutoCollapse=data.avatarAutoCollapse??avatarAutoCollapse;avatarCollapseDelayMs=data.avatarCollapseDelayMs??avatarCollapseDelayMs;
+    scrollAutoSwitch=data.scrollAutoSwitch??scrollAutoSwitch;immersiveScroll=data.immersiveScroll??immersiveScroll;hideLocalPaths=data.hideLocalPaths??hideLocalPaths;
+    codexAvatar=data.codexAvatar??codexAvatar;allowPaidCredits=data.allowPaidCredits??allowPaidCredits;
+    localStorage.setItem("deck-global-settings",JSON.stringify(data));
+  }
+  async function loadExecutionDefaults(){
+    try{
+      let result=await api("/api/system-settings/execution-defaults");
+      if(!result.settings&&Object.keys(globalPrefs).length)result=await api("/api/system-settings/execution-defaults",{method:"PUT",headers:{"Idempotency-Key":uuid()},body:JSON.stringify({settings:globalPrefs,baseUpdatedAt:null,migrate:true})});
+      if(result.settings)applyServerExecutionDefaults(result.settings);
+      executionDefaultsUpdatedAt=result.updatedAt;executionDefaultsLoaded=true;
+    }catch(error){globalSaveNotice=error instanceof Error?error.message:String(error);}
+  }
   async function saveGlobalSettings():Promise<boolean>{
     if(globalSaving)return false;
     globalSaveNotice="";
@@ -1289,6 +1319,7 @@
     // never turn a confirmed full-access permission back into workspace mode.
     pushPreferences={...pushPreferences,completed:notifications,vibration};
     try{
+      if(!executionDefaultsLoaded)throw new Error($t("settings.executionDefaultsLoadFailed"));
       if(!charactersLoaded)await loadCharacterSettings();
       if(!charactersLoaded)throw new Error(globalSaveNotice||$t("character.loadFailed"));
       if(!delegationLoaded)await loadDelegationSettings();
@@ -1301,10 +1332,14 @@
       if(!claudeExecutionLoaded)throw new Error(globalSaveNotice||$t("claudeExecution.loadFailed"));
       if(!antigravityExecutionLoaded)await loadAntigravityExecutionSettings();
       if(!antigravityExecutionLoaded)throw new Error(globalSaveNotice||$t("antigravityExecution.loadFailed"));
+      if((globalCodexModel&&!globalModelSettings.codex.models.some(item=>item.id===globalCodexModel))||(globalClaudeModel&&!globalModelSettings.claude.models.some(item=>item.id===globalClaudeModel)))throw new Error($t("settings.executionDefaultsUnavailable"));
+      const requestedDefaults=[globalCodexModel,globalClaudeModel];
       syncAllGlobalModelChoices();
+      if(requestedDefaults[0]!==globalCodexModel||requestedDefaults[1]!==globalClaudeModel)throw new Error($t("settings.executionDefaultsUnavailable"));
       delegationSettings=compatibleDefaultsFromUi(delegationSettings,globalCompatibleModels,globalCompatibleEfforts);
       const data={defaultProvider:globalDefaultProvider,codexModel:globalCodexModel,codexEffort:globalCodexEffort,codexTier:globalCodexTier,codexPermission:permissionForAutomation("codex",globalCodexAutomation),codexWorkMode:globalCodexWorkMode,codexAutomation:globalCodexAutomation,claudeModel:globalClaudeModel,claudeEffort:globalClaudeEffort,claudePermission:permissionForAutomation("claude",globalClaudeAutomation),claudeWorkMode:globalClaudeWorkMode,claudeAutomation:globalClaudeAutomation,...Object.fromEntries(compatibleProviders.flatMap(provider=>[[`${provider}Model`,globalCompatibleModels[provider]],[`${provider}Effort`,globalCompatibleEfforts[provider]],[`${provider}WorkMode`,globalCompatibleWorkModes[provider]],[`${provider}Automation`,globalCompatibleAutomation[provider]],[`${provider}Permission`,permissionForAutomation(provider,globalCompatibleAutomation[provider])]])),codexAvatar,showAvatars,showSpeech,collapseCompleted,notifications,vibration,rememberLast,enterToSend,avatarAutoCollapse,avatarCollapseDelayMs,scrollAutoSwitch,immersiveScroll,hideLocalPaths,allowPaidCredits};
-      localStorage.setItem("deck-global-settings",JSON.stringify(data));
+      // Cache only after the canonical server save succeeds.
+
       const pendingDelegation=structuredClone(delegationSettings);
       await api("/api/system-settings/antigravity-execution",{method:"PUT",headers:{"Idempotency-Key":uuid()},body:JSON.stringify(antigravityExecution)});
       const modelResult=await api("/api/system-settings/models",{method:"PUT",headers:{"Idempotency-Key":uuid()},body:JSON.stringify({settings:globalModelSettings,compatibleDefaults:compatibleDefaultsPayload(pendingDelegation)})});
@@ -1312,6 +1347,10 @@
       // before this save began. Keep the user's pending selection whenever it
       // is still enabled, or a newly selected Opus can revert to the old model.
       if(modelResult.delegation)delegationSettings=reconcileDelegationAfterModelSave(pendingDelegation,modelResult.delegation,modelResult.settings);
+      const defaultsResult=await api("/api/system-settings/execution-defaults",{method:"PUT",headers:{"Idempotency-Key":uuid()},body:JSON.stringify({settings:data,baseUpdatedAt:executionDefaultsUpdatedAt})});
+      executionDefaultsUpdatedAt=defaultsResult.updatedAt;
+      applyServerExecutionDefaults(defaultsResult.settings);
+      delegationSettings=defaultsResult.delegation;
       const writes=[
         {label:$t("settings.notifications"),promise:api("/api/push/preferences",{method:"PUT",headers:{"Idempotency-Key":uuid()},body:JSON.stringify(pushPreferences)})},
         {label:$t("character.settings"),promise:api("/api/system-settings/characters",{method:"PUT",headers:{"Idempotency-Key":uuid()},body:JSON.stringify(characterSettings)})},
@@ -1327,7 +1366,7 @@
       // capability, not a settings store: a permission prompt the user never
       // answers, or an installation without VAPID keys, must not leave the
       // Save button dimmed and the result unreported.
-      codexAvatar=characterSettings.providers.codex.avatarOutfit==="Gpt-Sol"?"Gpt-Sol":"Gpt-Codex";
+      codexAvatar=characterSettings.providers.codex.avatarOutfit||"Gpt-Sol";
       captureGlobalBaseline();globalSaveNotice=$t("settings.globalSaved");
       // Settings are durable at this point. Release the Save button and any
       // save-and-close flow immediately; browser notification permission is a
@@ -1344,12 +1383,12 @@
   async function disablePush(){if(!("serviceWorker" in navigator))return;const registration=await navigator.serviceWorker.getRegistration("/sw.js"),subscription=await registration?.pushManager.getSubscription();if(subscription){await api("/api/push/unsubscribe",{method:"POST",headers:{"Idempotency-Key":uuid()},body:JSON.stringify({endpoint:subscription.endpoint})});await subscription.unsubscribe();}pushState="disabled";}
   async function disableAllPush(){if(!confirm($t("notification.disableAllConfirm")))return;await api("/api/push/unsubscribe-all",{method:"POST",headers:{"Idempotency-Key":uuid()},body:JSON.stringify({confirm:true})});const registration=await navigator.serviceWorker.getRegistration("/sw.js"),subscription=await registration?.pushManager.getSubscription();await subscription?.unsubscribe();pushState="disabled";notifications=false;}
   async function sendPresence(){if(document.visibilityState!=="visible"&&pushState!=="subscribed")return;await api("/api/push/presence",{method:"POST",headers:{"Idempotency-Key":uuid()},body:JSON.stringify({browserId,visible:document.visibilityState==="visible"})}).catch(()=>{});}
-  function changeCodexAvatar(value:"Gpt-Codex"|"Gpt-Sol"){
+  function changeCodexAvatar(value:string){
     codexAvatar=value;
     try{const saved=JSON.parse(localStorage.getItem("deck-global-settings")||"{}");localStorage.setItem("deck-global-settings",JSON.stringify({...saved,codexAvatar:value}));}catch{}
   }
   function changeAvatarOutfit(provider:ProviderId,outfit:string){
-    if(provider==="codex")changeCodexAvatar(outfit==="Gpt-Sol"?"Gpt-Sol":"Gpt-Codex");
+    if(provider==="codex")changeCodexAvatar(outfit);
     if(!charactersLoaded)return;
     characterSettings={...characterSettings,providers:{...characterSettings.providers,[provider]:{...characterSettings.providers[provider],avatarOutfit:outfit}}};
     try{const baseline=JSON.parse(globalBaseline.characters);baseline.providers[provider].avatarOutfit=outfit;globalBaseline.characters=JSON.stringify(baseline);}catch{}
@@ -1881,7 +1920,7 @@
     await openTask(entry.task);await tick();
     if(codexDetailOpen&&!selected)sessionPanelCodexKey=taskSessionKey(entry.task);
   }
-  const sessionPanelMeta=(entry:BrowserListItem)=>entry.kind==="collaboration"?collaborationModeLabel(entry.collaboration):`${providerDisplayName(entry.task.provider)} · ${entry.task.provider==="claude"?claudeModelName(entry.task.requestedModel):(entry.task.requestedModel??$t("model.default"))}`;
+  const sessionPanelModel=(task:Task)=>task.provider==="claude"?claudeModelName(task.requestedModel):(task.requestedModel??$t("model.default"));
   // Result details: wide screens open them in place, compact screens use the
   // existing sheet behind the composer badge.
   function showTaskOutcome(){if(viewportWidth<=900){outcomeMobileExpanded=true;outcomeMobileDismissed=false;}else outcomeDesktopOpen=true;}
@@ -2008,6 +2047,7 @@
     const startApplication=async()=>{
       if(applicationStarted||disposed)return;
       applicationStarted=true;
+      await loadExecutionDefaults();
       const deepLinkOpened=await openInitialDeepLink();
       if(disposed)return;
       const removeKeyboardInset=installKeyboardInset();
@@ -2467,7 +2507,7 @@
             <i class="session-panel-dot tone-{BADGE_TONE[state]}" class:running={state==="running"} role="img" aria-label={$t(badgeLabelKey(state))} title={$t(badgeLabelKey(state))}></i>
             <span class="session-panel-copy">
               <span class="session-panel-title"><strong>{entry.kind==="task"?entry.task.title||$t("task.untitled"):entry.collaboration.title}</strong><small>{ago(entry.updatedAt)}</small></span>
-              <small class="session-panel-meta">{sessionPanelMeta(entry)}</small>
+              <small class="session-panel-meta">{#if entry.kind==="task"}<span class="engine {entry.task.provider}">{providerDisplayName(entry.task.provider)}</span><span class="session-panel-model">{sessionPanelModel(entry.task)}</span>{:else}{collaborationModeLabel(entry.collaboration)}{/if}</small>
             </span>
           </button>
         {/each}
@@ -2585,7 +2625,7 @@
 {#snippet agentDock()}
   <!-- One dock instance: it owns avatar status streams, notices and vibration,
        so it renders in the sidebar or, on phones, in the top bar - never both. -->
-  <AgentAvatarDock codex={codexRecent} claude={claudeRecent} grok={grokRecent} deepseek={deepseekRecent} ollama={ollamaRecent} antigravity={antigravityRecent} connectedProviders={connectedAvatarProviders} activeByProvider={avatarActive} completedByProvider={avatarCompleted} sessionsLoading={avatarSessionsLoading} sessionsError={avatarSessionsError} onSelect={openRecentSession} onStatusChange={updateAvatarTaskStatus} onOpen={avatarPanelOpen} {showAvatars} {showSpeech} {codexAvatar} {avatarAutoCollapse} {avatarCollapseDelayMs} {avatarTrayShape} statusSuspended={quotaOpen||globalOpen||createOpen} streamSuspendedProviders={collaborationStreamOwners} onCodexAvatarChange={changeCodexAvatar} onAvatarOutfitChange={changeAvatarOutfit} onNoticeAction={handleAvatarNoticeAction} backgroundNotifications={notifications} {vibration} runtimeNotices={runtimeAvatarNotices}/>
+  <AgentAvatarDock codex={codexRecent} claude={claudeRecent} grok={grokRecent} deepseek={deepseekRecent} ollama={ollamaRecent} antigravity={antigravityRecent} connectedProviders={connectedAvatarProviders} activeByProvider={avatarActive} completedByProvider={avatarCompleted} viewingTaskId={selected?.id??null} sessionsLoading={avatarSessionsLoading} sessionsError={avatarSessionsError} onSelect={openRecentSession} onStatusChange={updateAvatarTaskStatus} onOpen={avatarPanelOpen} {showAvatars} {showSpeech} {codexAvatar} {avatarAutoCollapse} {avatarCollapseDelayMs} {avatarTrayShape} statusSuspended={quotaOpen||globalOpen||createOpen} streamSuspendedProviders={collaborationStreamOwners} onCodexAvatarChange={changeCodexAvatar} onAvatarOutfitChange={changeAvatarOutfit} onNoticeAction={handleAvatarNoticeAction} backgroundNotifications={notifications} {vibration} runtimeNotices={runtimeAvatarNotices}/>
 {/snippet}
 
 {#snippet primaryNavButtons(withCounts:boolean)}
@@ -2711,7 +2751,7 @@
       {:else if globalTab==="notifications"}
         <NotificationsPage {notifications} bind:pushPreferences {pushState} bind:vibration {handleCompletionNotificationsChange} {disableAllPush}/>
       {:else if globalTab==="policy"}
-        <ExecutionPolicyPage providers={conversationProviders} bind:globalDefaultProvider bind:allowPaidCredits {creditUsageLoading} bind:globalCodexEffort bind:globalClaudeEffort bind:globalCompatibleEfforts {globalCodexAutomation} {globalClaudeAutomation} {globalCompatibleAutomation} codexEfforts={globalCodexModelInfo()?.supportedReasoningEfforts??[]} {claudeEfforts} {compatibleEffortOptions} {chooseGlobalAutomation} {dangerAcknowledged} bind:dangerConfirmed {recordDangerAcknowledgement} bind:delegationSettings {delegationLoading} {delegationLoaded} claudeModels={delegationClaudeModels()} codexModels={availableCodexModels()} delegationCodexEfforts={delegationCodexEfforts()} delegationCodexHasPriority={Boolean(delegationCodexModelInfo()?.serviceTiers?.some((item:any)=>item.id==="priority"))} {setDelegationCodexModel}/>
+        <ExecutionPolicyPage providers={conversationProviders} bind:globalDefaultProvider bind:allowPaidCredits {creditUsageLoading} bind:globalCodexEffort bind:globalClaudeEffort bind:globalCompatibleEfforts {globalCodexAutomation} {globalClaudeAutomation} {globalCompatibleAutomation} codexEfforts={globalCodexModelInfo()?.supportedReasoningEfforts??[]} {claudeEfforts} {compatibleEffortOptions} {chooseGlobalAutomation} {dangerAcknowledged} bind:dangerConfirmed {recordDangerAcknowledgement} bind:delegationSettings {delegationLoading} {delegationLoaded} {globalCodexModel} {globalClaudeModel} {globalCodexTier}/>
       {:else if isProviderPage(globalTab)}
         {@const settingsProvider=providerOfPage(globalTab) as ProviderId}
         <ProviderPage provider={settingsProvider} bind:tab={providerSettingsTab} onrefreshaccounts={()=>loadProviderAccounts()} account={accountIn(providerAccounts,settingsProvider as ConnectionAuthProvider)} {providerAccountsLoading} runtime={runtimeCards.find(item=>item.provider===settingsProvider)} {planLabel} {accountStatusLabel} runningAttempt={isConnectionAuthProvider(settingsProvider)?attemptIn(authAttempts,settingsProvider):null} onreconnect={reconnectProvider}
@@ -2724,7 +2764,7 @@
           {authAttempts} {authCodes} {authFeedback} {providerName} {authErrorLabel} {startProviderLogin} {submitAuthCode} {cancelProviderLogin} {logoutProvider} {copy} onauthcode={(authProvider,value)=>authCodes={...authCodes,[authProvider]:value}} {compatibleProviderSettings} {compatibleProviderSecrets} {compatibleProviderSaving} {updateCompatibleBaseUrl} {updateCompatibleSecret} {saveCompatibleProvider} loadProviderAccounts={()=>loadProviderAccounts()} {providerAuthNotice}
           {characterSettings} {updateCharacter} {providerOutfits} {charactersLoading} {charactersLoaded}
           {runtimeAutoUpdate} {runtimeBusy} {runtimeSettingsBusy} {runtimeNotice} {checkUpdates} {updateRuntime} {toggleRuntimeAutoUpdate}
-          bind:delegationSettings {delegationLoading} delegationCodexEfforts={delegationCodexEfforts()} delegationCodexHasPriority={Boolean(delegationCodexModelInfo()?.serviceTiers?.some((item:any)=>item.id==="priority"))} {setDelegationCodexModel}/>
+          bind:delegationSettings {delegationLoading}/>
       {:else if globalTab==="workspace"}
         <ProjectWorkspaceSettings {api} {projects} onviewworkspace={(workspace)=>openWorkspaceFiles(workspace)}/>
         <ClaudeCloudSessions {api}/>

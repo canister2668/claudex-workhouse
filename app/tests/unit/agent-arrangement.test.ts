@@ -48,22 +48,28 @@ describe("active row order", () => {
     expect(state.active).toEqual(["codex", "claude"]);
   });
 
-  it("returns only the finished agent to the pile, with an unseen marker", () => {
+  it("keeps a finished agent in place until it is seen, then returns only it to the pile", () => {
     let state = nextArrangement(emptyArrangement<P>(), inputs({ codex: "running", claude: "running", grok: "running" }));
     state = nextArrangement(state, inputs({ codex: "running", claude: "done", grok: "running" }));
-    expect(state.active).toEqual(["codex", "grok"]);
-    expect(pileOf(state, providers)).toEqual(["claude", "antigravity"]);
+    expect(state.active).toEqual(["codex", "claude", "grok"]);
+    expect(pileOf(state, providers)).toEqual(["antigravity"]);
     expect(state.unseen).toEqual({ claude: "done" });
     state = markSeen(state, "claude");
     expect(state.unseen).toEqual({});
+    expect(state.active).toEqual(["codex", "grok"]);
+    expect(pileOf(state, providers)).toEqual(["claude", "antigravity"]);
   });
 
-  it("puts a re-activated agent at the end instead of its old slot", () => {
+  it("keeps the slot of an unseen agent that starts again, and appends one that was seen", () => {
     let state = nextArrangement(emptyArrangement<P>(), inputs({ codex: "running", claude: "running" }));
     state = nextArrangement(state, inputs({ codex: "done", claude: "running" }));
     state = nextArrangement(state, inputs({ codex: "running", claude: "running" }));
-    expect(state.active).toEqual(["claude", "codex"]);
+    expect(state.active).toEqual(["codex", "claude"]);
     expect(state.unseen).toEqual({});
+    state = nextArrangement(state, inputs({ codex: "done", claude: "running" }));
+    state = markSeen(state, "codex");
+    state = nextArrangement(state, inputs({ codex: "running", claude: "running" }));
+    expect(state.active).toEqual(["claude", "codex"]);
   });
 
   it("keeps an observed failure in the active row until it is seen", () => {

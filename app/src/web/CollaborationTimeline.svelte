@@ -31,7 +31,7 @@
   export let api:(path:string,init?:RequestInit)=>Promise<any>;
   export let onopen:(task:any)=>void=()=>{};
   export let onopenfile:((file:{path:string;pathBase:"workspace";workspaceId:string;initialEdit:false})=>void)|null=null;
-  export let codexAvatar:"Gpt-Codex"|"Gpt-Sol"="Gpt-Sol";
+  export let codexAvatar:string="Gpt-Sol";
   export let embedded=false;
   export let onclose:(()=>void)|null=null;
   export let onproviderstatus:((statuses:CollaborationRecentStatuses)=>void)|null=null;

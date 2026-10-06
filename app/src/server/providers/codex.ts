@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import {effectiveDelegationSettings} from "../execution-defaults.js";
 import fs from "node:fs";
 import path from "node:path";
 import { spawn } from "node:child_process";
@@ -633,7 +634,7 @@ export class CodexProvider implements AgentProvider {
     const workMode=input.workMode==="plan"?"plan":"default";
     const runtimeProfile=input.runtimeProfile??"default";
     const settings = { model:valid.model, reasoningEffort:valid.reasoningEffort, serviceTier:valid.serviceTier, permissionProfile:valid.permissionProfile, workMode, runtimeProfile, automationLevel:level, executionPolicy:policy, sandboxCapability:capability, executionHostId:input.executionHostId??"local", workspaceId:input.workspaceId??null, taskTempDir };
-    const delegationSettings=normalizeDelegationSettings((await this.db.getSystemSetting("delegation.launch-modes").catch(()=>null))?.value);
+    const delegationSettings=await effectiveDelegationSettings(this.db);
     const serializedDelegation=JSON.stringify(delegationSettings);
     const externalMcp=await prepareExternalMcpEnvironment({db:this.db,taskTempDir,taskId:id,provider:"codex",runtimeProfile,port:this.config.port});
     const providerPrompt=[input.prompt,externalMcp.promptSuffix].filter(Boolean).join("\n\n");

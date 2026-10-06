@@ -13,13 +13,18 @@ import { spawn } from "node:child_process";
 export type EmotionState = { emotion: string; line: string; statusLine: string; lineKey?: string; statusKey?: string; outfit: string; source?: string; sessionId?: string; taskId?: string; timestamp?: number };
 export type EmotionAsset = { emotion: string; file: string };
 export type EmotionProvider = "codex"|"claude"|"deepseek"|"ollama"|"antigravity"|"grok";
+// AI Families V5 chibi sets: <name> is the -chan set, <kun> its twin, and each
+// comes in five costumes (the -kun "formal" is the -chan "dress" counterpart).
+const V5_CHAN_COSTUMES=["","-dress","-swimsuit","-pajamas","-towel"],V5_KUN_COSTUMES=["","-formal","-swimsuit","-pajamas","-towel"];
+const v5=(chan:string,kun:string)=>[...V5_CHAN_COSTUMES.map(costume=>chan+costume),...V5_KUN_COSTUMES.map(costume=>kun+costume)];
+// Classic sets first: the first entry is each provider's fallback.
 export const PROVIDER_EMOTION_OUTFITS:Record<EmotionProvider,readonly string[]>={
-  codex:["Gpt-Codex","Gpt-Sol"],
-  claude:["normal","capy"],
-  antigravity:["Antigravity","Gemma-e4b"],
-  grok:["Grok"],
-  deepseek:["DeepSeek","Ollama","WhaleGirl"],
-  ollama:["Ollama","DeepSeek","Antigravity","Gemma-e4b","WhaleGirl"]
+  codex:["Gpt-Codex","Gpt-Sol",...v5("Gpt-Codex-v5","Gpt-Codex-kun"),...v5("Gpt-Sol-v5","Gpt-Sol-kun"),...v5("Astra-code","Astra-code-kun"),...v5("Chat-code","Chat-code-kun")],
+  claude:["normal","capy",...v5("Claude-code","Claude-code-kun"),...v5("Fable-code","Fable-code-kun")],
+  antigravity:["Antigravity","Gemma-e4b",...v5("Gemini-code","Gemini-code-kun"),...v5("Gemma-e4b-v5","Gemma-e4b-kun")],
+  grok:["Grok",...v5("Grok-code","Grok-code-kun")],
+  deepseek:["DeepSeek","Ollama","WhaleGirl",...v5("DeepSeek-code","DeepSeek-code-kun"),...v5("Ollama-code","Ollama-code-kun"),...v5("Whale-code","Whale-code-kun")],
+  ollama:["Ollama","DeepSeek","Antigravity","Gemma-e4b","WhaleGirl",...v5("Ollama-code","Ollama-code-kun"),...v5("DeepSeek-code","DeepSeek-code-kun"),...v5("Whale-code","Whale-code-kun"),...v5("Gemini-code","Gemini-code-kun"),...v5("Gemma-e4b-v5","Gemma-e4b-kun")]
 };
 const DEFAULT_STATE: EmotionState = { emotion: "neutral", line: "", statusLine: "", outfit: "normal" };
 const slug = (value: unknown, fallback: string) => {
@@ -121,7 +126,10 @@ export class EmotionWatcher {
   outfits(): string[] {
     try {
       return fs.readdirSync(this.assetsDir, { withFileTypes: true })
-        .filter((entry) => entry.isDirectory()&&(!this.allowedOutfits||this.allowedOutfits.includes(entry.name))).map((entry) => entry.name).sort();
+        .filter((entry) => entry.isDirectory()&&(!this.allowedOutfits||this.allowedOutfits.includes(entry.name))).map((entry) => entry.name)
+        // Keep the allow-list order: its first entry is the provider's fallback and
+        // pickers group a -chan set with its -kun twin.
+        .sort((a,b)=>this.allowedOutfits?this.allowedOutfits.indexOf(a)-this.allowedOutfits.indexOf(b):a<b?-1:a>b?1:0);
     } catch { return this.allowedOutfits?[...this.allowedOutfits]:["normal"]; }
   }
 

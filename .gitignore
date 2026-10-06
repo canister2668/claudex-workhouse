@@ -55,6 +55,7 @@ __pycache__/
 # Generated release bundles and visual-review outputs
 /release-files/
 /artifacts/
+/output/
 /answer-card-folding-mockup.html
 
 # Local secrets (reverse-proxy auth secret, MCP credentials, ...)

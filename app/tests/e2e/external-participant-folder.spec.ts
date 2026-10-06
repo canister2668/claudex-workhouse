@@ -50,8 +50,14 @@ test("collaboration folder setup suggests three documentation mounts and one out
   await folder.getByRole("button",{name:"협업 권한 만들기"}).click();
   await expect.poll(()=>storedToken).toBe(token);
   expect(grantBody.workspaceId).toBe("wh");
+  expect(grantBody.execution).toBeUndefined();
   expect(grantBody.mounts.map((mount:any)=>[mount.alias,mount.workspaceId,mount.rootPath,mount.writePaths])).toEqual([
     ["workhouse","wh","docs",[]],["risu","risu","docs",[]],["nai","nai","docs",[]],["shared","wh","data/collaboration",["outbox"]]
   ]);
+  expect(await folder.evaluate(element=>element.scrollWidth-element.clientWidth)).toBeLessThanOrEqual(0);
+  await folder.getByRole("checkbox",{name:"dot 등 외부 모델의 실행 작업 제출 허용"}).check();
+  await folder.getByRole("combobox",{name:"실행 제공자",exact:true}).selectOption("claude");
+  await folder.getByRole("button",{name:"협업 권한 만들기"}).click();
+  await expect.poll(()=>grantBody?.execution).toEqual({provider:"claude",automationLevel:"auto",maxActiveTasks:1});
   expect(await folder.evaluate(element=>element.scrollWidth-element.clientWidth)).toBeLessThanOrEqual(0);
 });
