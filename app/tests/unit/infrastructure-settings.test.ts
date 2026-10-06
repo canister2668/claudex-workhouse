@@ -56,7 +56,6 @@ describe("deployment and infrastructure settings UI", () => {
     expect(css).toContain(".application-update-card{display:grid;grid-template-columns:minmax(180px,1fr)");
     expect(css).toContain(".application-update-card>.application-update-current{min-width:180px}");
     expect(app).toContain('applicationUpdate.updateAvailable && applicationUpdate.blockers.length');
-    expect(app).toContain('applicationUpdate.reason === "source-checkout-not-updatable"');
   });
 
   it("uses the normalized infrastructure contracts and never renders diagnostic JSON", () => {

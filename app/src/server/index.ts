@@ -357,8 +357,21 @@ const applicationUpdates=new ApplicationUpdateCoordinator({
   store:db,
   blockers:applicationUpdateBlockers,
   snapshot:async(attemptId,current)=>createApplicationUpdateSnapshot({attemptId,snapshotRoot:config.snapshotDir,dataRoot:config.dataRoot,dbPath:config.dbPath,metadata:current,appRoot:config.appRoot,platform:process.platform}),
-  writeRequest:request=>writeApplicationUpdateRequest(path.join(config.dataRoot,"runtime","application-updates","requests"),request)
+  writeRequest:request=>writeApplicationUpdateRequest(path.join(config.dataRoot,"runtime","application-updates","requests"),request),
+  launchUpdater:(request,requestPath)=>{if(request.installMethod==="source-checkout")launchSourceCheckoutUpdater(requestPath);}
 });
+// The source-checkout updater restarts the service that starts it, so it runs
+// in its own session with output going to a log file, never to this process.
+function launchSourceCheckoutUpdater(requestPath:string){
+  const updater=path.join(config.appRoot,"bin","claudex-workhouse-source-updater.mjs");
+  if(!fs.existsSync(updater))throw Object.assign(new Error("The source-checkout updater is missing from this checkout."),{statusCode:500,code:"APPLICATION_UPDATER_MISSING"});
+  const logDirectory=path.join(config.dataRoot,"logs");fs.mkdirSync(logDirectory,{recursive:true});
+  const output=fs.openSync(path.join(logDirectory,"application-update-source.log"),"a");
+  try{
+    const child=spawn(process.execPath,[updater,"--request",requestPath,"--data-root",config.dataRoot],{cwd:config.appRoot,detached:true,shell:false,windowsHide:true,stdio:["ignore",output,output],env:{...process.env,CLAUDEX_WORKHOUSE_DATA_ROOT:config.dataRoot,CLAUDEX_WORKHOUSE_PORT:String(config.port)}});
+    child.unref();
+  }finally{fs.closeSync(output);}
+}
 const applicationUpdateResultsDirectory=path.join(config.dataRoot,"runtime","application-updates","results");
 await reconcileApplicationUpdateResults(applicationUpdateResultsDirectory,db).catch(()=>({processed:0,rejected:1}));
 const [startupTasks,startupProjects,storedSetup,storedOwner,storedInstallationIdentity,startupHosts]=await Promise.all([

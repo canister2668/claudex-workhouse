@@ -51,7 +51,11 @@ describe("application update contract",()=>{
     expect(evaluateApplicationUpdate(installed(),release()).state).toBe("available");
     expect(evaluateApplicationUpdate(installed({version:"1.1.0",imageDigest:`sha256:${"b".repeat(64)}`}),release()).state).toBe("up-to-date");
     expect(evaluateApplicationUpdate(installed({version:"1.1.0"}),release())).toMatchObject({state:"failed",reason:"installed-artifact-mismatch"});
-    expect(evaluateApplicationUpdate(installed({installMethod:"source-checkout"}),release())).toMatchObject({state:"unconfigured",reason:"source-checkout-not-updatable"});
+    // A Git checkout updates to the release tag; it has no artifact identity, so
+    // the same version is simply current.
+    expect(evaluateApplicationUpdate(installed({installMethod:"source-checkout",imageDigest:null}),release())).toMatchObject({state:"available",updateAvailable:true});
+    expect(evaluateApplicationUpdate(installed({installMethod:"source-checkout",imageDigest:null,version:"1.1.0"}),release())).toMatchObject({state:"up-to-date",reason:null});
+    expect(evaluateApplicationUpdate(installed({installMethod:"unknown",imageDigest:null}),release())).toMatchObject({state:"unconfigured",reason:"install-method-unsupported"});
   });
   it("binds an npm installation to the signed node package", ()=>{
     const node=(overrides:Record<string,unknown>={})=>installed({installMethod:"node-package",imageDigest:null,packageSha256:"d".repeat(64),...overrides});
@@ -103,6 +107,23 @@ describe("application update contract",()=>{
     expect(order).toEqual(["snapshot","request"]);expect(result).toMatchObject({state:"applying",snapshotId:"snapshot"});
     const request=JSON.parse(fs.readFileSync(result.requestPath!,"utf8"));expect(request).toMatchObject({schemaVersion:1,attemptId:result.id,manifestSha256:"2".repeat(64),artifact:{digest:`sha256:${"b".repeat(64)}`}});
     expect(fs.statSync(root).mode&0o777).toBe(0o700);expect(fs.statSync(result.requestPath!).mode&0o777).toBe(0o600);
+  });
+  it("asks a source checkout for the release tag and starts its updater after recording the attempt",async()=>{
+    const store=new Store(),order:string[]=[],requests:any[]=[];
+    const coordinator=new ApplicationUpdateCoordinator({current:installed({installMethod:"source-checkout",imageDigest:null}),release:async()=>release(),store,blockers:async()=>[],snapshot:async()=>({id:"snapshot",directory:"/snapshot"}),
+      writeRequest:request=>{order.push("request");requests.push(request);return"/requests/a.json";},
+      launchUpdater:(request,requestPath)=>{order.push(`launch:${request.installMethod}:${requestPath}`);expect(store.items[0]?.state).toBe("applying");}});
+    const value=release(),attempt=await coordinator.apply({targetVersion:value.manifest.version,manifestSha256:value.manifestSha256,confirm:true});
+    expect(order).toEqual(["request","launch:source-checkout:/requests/a.json"]);
+    expect(requests[0]).toMatchObject({installMethod:"source-checkout",targetVersion:"1.1.0",artifact:{tag:"v1.1.0"}});
+    expect(attempt.state).toBe("applying");
+  });
+  it("records a failed attempt when the source updater cannot be started",async()=>{
+    const store=new Store(),coordinator=new ApplicationUpdateCoordinator({current:installed({installMethod:"source-checkout",imageDigest:null}),release:async()=>release(),store,blockers:async()=>[],snapshot:async()=>({id:"snapshot",directory:"/snapshot"}),
+      writeRequest:()=>"/requests/a.json",launchUpdater:()=>{throw new Error("updater missing");}});
+    const value=release();
+    await expect(coordinator.apply({targetVersion:value.manifest.version,manifestSha256:value.manifestSha256,confirm:true})).rejects.toThrow("updater missing");
+    expect(store.items[0]).toMatchObject({state:"failed",error:"updater missing"});
   });
   it("does not publish a request when snapshot creation fails or confirmation becomes stale",async()=>{
     const store=new Store(),writeRequest=vi.fn(async()=>"/request"),coordinator=new ApplicationUpdateCoordinator({current:installed(),release:async()=>release(),store,blockers:async()=>[],snapshot:async()=>{throw new Error("snapshot failed");},writeRequest});

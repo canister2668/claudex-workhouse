@@ -6,6 +6,8 @@ import type { VerifiedRelease } from "./deployment/release-manifest.js";
 const SEMVER=/^([0-9]+)\.([0-9]+)\.([0-9]+)(?:-([0-9A-Za-z.-]+))?(?:\+[0-9A-Za-z.-]+)?$/;
 const SHA256=/^[a-f0-9]{64}$/;
 const IMAGE_DIGEST=/^sha256:[a-f0-9]{64}$/;
+export const SOURCE_CHECKOUT_UPDATER_PROTOCOL=1;
+export const sourceCheckoutReleaseTag=(version:string)=>`v${version}`;
 
 export type ApplicationUpdateState="unconfigured"|"checking"|"up-to-date"|"available"|"blocked-active-tasks"|"staging"|"applying"|"verifying"|"completed"|"rollback-running"|"rolled-back"|"failed";
 export type ApplicationInstallMethod="source-checkout"|"docker-compose"|"windows-portable"|"node-package"|"unknown";
@@ -51,12 +53,12 @@ export interface ApplicationUpdateSnapshot{readonly id:string;readonly directory
 export interface ApplicationUpdateRequest{
   readonly schemaVersion:1;
   readonly attemptId:string;
-  readonly installMethod:"docker-compose"|"windows-portable"|"node-package";
+  readonly installMethod:"docker-compose"|"windows-portable"|"node-package"|"source-checkout";
   readonly sourceVersion:string;
   readonly targetVersion:string;
   readonly manifestSha256:string;
   readonly snapshotId:string;
-  readonly artifact:{readonly repository?:string;readonly digest?:string;readonly url?:string;readonly filename?:string;readonly size?:number;readonly sha256?:string;readonly registry?:string;readonly name?:string};
+  readonly artifact:{readonly repository?:string;readonly digest?:string;readonly url?:string;readonly filename?:string;readonly size?:number;readonly sha256?:string;readonly registry?:string;readonly name?:string;readonly tag?:string};
   readonly manifest:{readonly url:string;readonly signatureUrl:string;readonly signingPublicKeyPem:string;readonly signingPublicKeySha256:string;readonly keyId:string};
   readonly createdAt:string;
 }
@@ -124,7 +126,12 @@ function targetBinding(current:ApplicationInstallMetadata,release:VerifiedReleas
   // A manifest published before the record carried its own protocol floor
   // cannot state the contract, and is refused rather than assumed compatible.
   if(current.installMethod==="node-package")return release.manifest.nodePackage?.minimumUpdaterProtocolVersion===undefined?{supported:false,reason:"manifest-updater-contract-missing",protocol:null,identity:null}:{supported:true,reason:null,protocol:release.manifest.nodePackage.minimumUpdaterProtocolVersion,identity:release.manifest.nodePackage.sha256};
-  return{supported:false,reason:current.installMethod==="source-checkout"?"source-checkout-not-updatable":"install-method-unsupported",protocol:null,identity:null};
+  // A Git checkout has no downloadable artifact: the signed manifest names the
+  // version, and the updater fast-forwards the checkout to that release tag,
+  // rebuilds it and restarts. The tag's own app/package.json must agree with
+  // the signed version before anything moves.
+  if(current.installMethod==="source-checkout")return{supported:true,reason:null,protocol:SOURCE_CHECKOUT_UPDATER_PROTOCOL,identity:null};
+  return{supported:false,reason:"install-method-unsupported",protocol:null,identity:null};
 }
 
 export function evaluateApplicationUpdate(current:ApplicationInstallMetadata,release:VerifiedRelease):Pick<ApplicationUpdateStatus,"state"|"target"|"updateAvailable"|"reason">{
@@ -140,7 +147,7 @@ export function evaluateApplicationUpdate(current:ApplicationInstallMetadata,rel
   // the current release. npm verified the registry integrity when it installed
   // the package; at the same version that is the check, and a digest is only
   // compared when the environment actually supplies one.
-  if(!identity)return current.installMethod==="node-package"
+  if(!identity)return current.installMethod==="node-package"||current.installMethod==="source-checkout"
     ?{state:"up-to-date",target,updateAvailable:false,reason:null}
     :{state:"failed",target,updateAvailable:false,reason:"installed-artifact-identity-missing"};
   return identity===binding.identity?{state:"up-to-date",target,updateAvailable:false,reason:null}:{state:"failed",target,updateAvailable:false,reason:"installed-artifact-mismatch"};
@@ -159,6 +166,10 @@ export interface ApplicationUpdateCoordinatorOptions{
   readonly blockers:()=>Promise<readonly ApplicationUpdateBlocker[]>;
   readonly snapshot:(attemptId:string,current:ApplicationInstallMetadata)=>Promise<ApplicationUpdateSnapshot>;
   readonly writeRequest:(request:ApplicationUpdateRequest)=>Promise<string>|string;
+  // Starts the updater that consumes a request when the install has one the
+  // server can launch itself (a source checkout); other methods leave it to a
+  // host updater or the operator.
+  readonly launchUpdater?:(request:ApplicationUpdateRequest,requestPath:string)=>Promise<void>|void;
 }
 
 export class ApplicationUpdateCoordinator{
@@ -188,10 +199,12 @@ export class ApplicationUpdateCoordinator{
       attempt={id,state:"staging",sourceVersion:this.options.current.version,targetVersion:release.manifest.version,manifestSha256:release.manifestSha256,installMethod:this.options.current.installMethod,platform:this.options.current.platform,architecture:this.options.current.architecture,snapshotId:null,requestPath:null,rollbackPerformed:false,error:null,createdAt:now,updatedAt:now,completedAt:null};
       attempt=await this.options.store.createApplicationUpdateAttempt(attempt);
       const snapshot=await this.options.snapshot(id,this.options.current);
-      const artifact=this.options.current.installMethod==="docker-compose"?{repository:release.manifest.server.image,digest:release.manifest.server.digest}:this.options.current.installMethod==="node-package"?{registry:release.manifest.nodePackage!.registry,name:release.manifest.nodePackage!.name,url:release.manifest.nodePackage!.url,filename:release.manifest.nodePackage!.filename,size:release.manifest.nodePackage!.size,sha256:release.manifest.nodePackage!.sha256}:{url:release.manifest.windowsPortable!.url,filename:release.manifest.windowsPortable!.filename,size:release.manifest.windowsPortable!.size,sha256:release.manifest.windowsPortable!.sha256};
-      const request:ApplicationUpdateRequest={schemaVersion:1,attemptId:id,installMethod:this.options.current.installMethod as "docker-compose"|"windows-portable"|"node-package",sourceVersion:this.options.current.version,targetVersion:release.manifest.version,manifestSha256:release.manifestSha256,snapshotId:snapshot.id,artifact,manifest:{url:release.manifestUrl,signatureUrl:release.signatureUrl,signingPublicKeyPem:release.signingPublicKeyPem,signingPublicKeySha256:release.signingPublicKeySha256,keyId:release.keyId},createdAt:new Date().toISOString()};
+      const artifact=this.options.current.installMethod==="source-checkout"?{tag:sourceCheckoutReleaseTag(release.manifest.version)}:this.options.current.installMethod==="docker-compose"?{repository:release.manifest.server.image,digest:release.manifest.server.digest}:this.options.current.installMethod==="node-package"?{registry:release.manifest.nodePackage!.registry,name:release.manifest.nodePackage!.name,url:release.manifest.nodePackage!.url,filename:release.manifest.nodePackage!.filename,size:release.manifest.nodePackage!.size,sha256:release.manifest.nodePackage!.sha256}:{url:release.manifest.windowsPortable!.url,filename:release.manifest.windowsPortable!.filename,size:release.manifest.windowsPortable!.size,sha256:release.manifest.windowsPortable!.sha256};
+      const request:ApplicationUpdateRequest={schemaVersion:1,attemptId:id,installMethod:this.options.current.installMethod as "docker-compose"|"windows-portable"|"node-package"|"source-checkout",sourceVersion:this.options.current.version,targetVersion:release.manifest.version,manifestSha256:release.manifestSha256,snapshotId:snapshot.id,artifact,manifest:{url:release.manifestUrl,signatureUrl:release.signatureUrl,signingPublicKeyPem:release.signingPublicKeyPem,signingPublicKeySha256:release.signingPublicKeySha256,keyId:release.keyId},createdAt:new Date().toISOString()};
       const requestPath=await this.options.writeRequest(request);attempt={...attempt,state:"applying",snapshotId:snapshot.id,requestPath,updatedAt:new Date().toISOString()};
-      return await this.options.store.updateApplicationUpdateAttempt(attempt);
+      attempt=await this.options.store.updateApplicationUpdateAttempt(attempt);
+      await this.options.launchUpdater?.(request,requestPath);
+      return attempt;
     }catch(error){
       if(attempt)await this.options.store.updateApplicationUpdateAttempt({...attempt,state:"failed",error:error instanceof Error?error.message:String(error),updatedAt:new Date().toISOString(),completedAt:new Date().toISOString()}).catch(()=>{});
       throw error;
