@@ -2225,7 +2225,7 @@
       {@const overviewActive=latestThreadRows(overviewTasks).filter(task=>active.has(task.status))}
       {@const overviewWaiting=overviewActive.filter(task=>task.status==="waiting")}
       {@const overviewRunning=overviewActive.filter(task=>task.status!=="waiting")}
-      {@const overviewCompleted=latestThreadRows(overviewTasks).filter(task=>task.status==="completed").slice(0,5)}
+      {@const overviewCompleted=latestThreadRows(overviewTasks).filter(task=>task.status==="completed").sort((left,right)=>right.updatedAt.localeCompare(left.updatedAt)).slice(0,5)}
       {@const overviewCompletedToday=latestThreadRows(overviewTasks).filter(task=>task.status==="completed"&&sameLocalDay(task.updatedAt)).length}
       {@const overviewDirty=workspaces.filter(item=>Boolean(item.lastGitStatus?.dirty)).length}
       {@const overviewOnline=hosts.filter(item=>item.status==="online"||item.status==="connected").length}
@@ -2268,7 +2268,7 @@
               <header><div><h2>{$t("overview.recent")}</h2></div><button type="button" onclick={openSessions}>{$t("overview.allSessions")} ›</button></header>
               <div class="overview-recent-list">
                 {#each overviewCompleted as task (task.id)}
-                  <button type="button" onclick={()=>openTask(task)}><span><Check size={15}/></span><strong>{task.title||$t("task.untitled")}</strong><small>{ago(task.updatedAt)}</small></button>
+                  <button type="button" onclick={()=>openTask(task)}><span><Check size={15}/></span><span class="overview-recent-copy"><strong>{task.title||$t("task.untitled")}</strong><span class="meta"><span class="engine {task.provider}">{providerDisplayName(task.provider)}</span><SessionModelBadges provider={task.provider} modelLabel={task.provider==="claude"?claudeModelName(task.requestedModel):(task.requestedModel??$t("model.default"))} effort={task.requestedReasoningEffort} serviceTier={task.requestedServiceTier}/></span></span><small>{ago(task.updatedAt)}</small></button>
                 {:else}
                   <p class="overview-side-empty">{$t("overview.noRecent")}</p>
                 {/each}

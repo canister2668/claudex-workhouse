@@ -42,7 +42,13 @@
 .session-model-badges{min-width:0;display:inline-flex;align-items:center;gap:4px}
 .meta .session-model-badges::after,.meta .session-model-badges span::after{display:none!important}
 .session-model-chip{max-width:160px;padding:2px 6px;border:1px solid color-mix(in srgb,var(--line) 82%,transparent);border-radius:999px;background:var(--surface-2);color:var(--muted);font-size:.65rem;font-weight:700;line-height:1.25;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.session-model-chip.model{border-color:color-mix(in srgb,var(--accent) 30%,var(--line));background:color-mix(in srgb,var(--accent) 7%,var(--surface-2));color:var(--text)}
+.session-model-chip.model{border-color:color-mix(in srgb,var(--model-provider,var(--accent)) 45%,var(--line));background:color-mix(in srgb,var(--model-provider,var(--accent)) 14%,var(--surface-2));color:var(--text)}
+.session-model-badges[data-provider="codex"]{--model-provider:var(--provider-codex)}
+.session-model-badges[data-provider="claude"]{--model-provider:var(--provider-claude)}
+.session-model-badges[data-provider="grok"]{--model-provider:var(--provider-grok)}
+.session-model-badges[data-provider="antigravity"]{--model-provider:var(--provider-antigravity)}
+.session-model-badges[data-provider="deepseek"]{--model-provider:var(--provider-deepseek)}
+.session-model-badges[data-provider="ollama"]{--model-provider:var(--provider-ollama)}
 .load-more{display:flex;min-height:44px;margin:12px auto;padding:0 20px;align-items:center;border:1px solid var(--line);background:var(--surface);border-radius:10px;color:var(--text)}
 .load-more:hover{border-color:var(--line-strong)}
 .running-history-control{margin:10px 14px 0;padding:8px 10px;display:flex;align-items:center;gap:9px;flex:none;border:1px solid var(--line);border-radius:10px;background:color-mix(in srgb,var(--surface) 88%,var(--accent) 12%)}.running-history-control button{min-height:36px;padding:0 10px;display:inline-flex;align-items:center;gap:6px;flex:none;border:1px solid color-mix(in srgb,var(--accent) 42%,var(--line));border-radius:8px;background:var(--surface);color:var(--accent-strong);font-size:.72rem;font-weight:700}.running-history-control button[aria-pressed="true"]{background:color-mix(in srgb,var(--accent) 13%,var(--surface))}.running-history-control button:disabled{opacity:.6}.running-history-control small{min-width:0;color:var(--muted);font-size:.68rem;line-height:1.35}

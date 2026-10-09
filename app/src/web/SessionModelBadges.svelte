@@ -8,7 +8,7 @@
   export let serviceTier:string|null|undefined=null;
 </script>
 
-<span class="session-model-badges" aria-label={`${$t("model.label")} ${modelLabel}`}>
+<span class="session-model-badges" data-provider={provider} aria-label={`${$t("model.label")} ${modelLabel}`}>
   <span class="session-model-chip model" title={$t("model.label")}>{modelLabel}</span>
   {#if effort}<span class="session-model-chip" title={$t("model.reasoningEffort")}>{effortLabel(effort)}</span>{/if}
   {#if provider==="codex"&&serviceTier}<span class="session-model-chip" title={$t("model.speed")}>{$t(serviceTier==="priority"?"model.fast":"model.standard")}</span>{/if}

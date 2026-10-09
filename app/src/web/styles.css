@@ -626,8 +626,10 @@ button{cursor:pointer}
 .overview-worker-list b{max-width:88px;color:var(--muted);font-size:.62rem;overflow:hidden;text-overflow:ellipsis}
 .overview-recent-list button{width:100%;min-height:55px;padding:8px 0;display:grid;grid-template-columns:32px minmax(0,1fr) auto;align-items:center;gap:9px;border:0;border-top:1px solid color-mix(in srgb,var(--line) 68%,transparent);background:transparent;text-align:left}
 .overview-recent-list button:first-child{border-top:0}
-.overview-recent-list button>span{width:30px;height:30px;display:grid;place-items:center;border-radius:10px;background:color-mix(in srgb,var(--cyan) 12%,var(--surface-2));color:var(--cyan)}
+.overview-recent-list button>span:first-child{width:30px;height:30px;display:grid;place-items:center;border-radius:10px;background:color-mix(in srgb,var(--cyan) 12%,var(--surface-2));color:var(--cyan)}
 .overview-recent-list button strong{min-width:0;font-size:.74rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.overview-recent-copy{min-width:0;display:flex;flex-direction:column;gap:3px}
+.overview-recent-copy .meta{min-width:0;flex-wrap:nowrap;overflow:hidden;white-space:nowrap}
 .overview-recent-list button small{color:var(--muted);font-size:.61rem;white-space:nowrap}
 .overview-side-empty{margin:0;padding:10px 0 16px;color:var(--muted);font-size:.72rem}
 .overview-create{width:100%;min-height:68px;padding:12px 15px;display:flex;align-items:center;gap:11px;border:0;border-radius:17px;background:var(--accent);color:var(--on-accent);text-align:left;box-shadow:0 10px 25px color-mix(in srgb,var(--accent) 24%,transparent)}
