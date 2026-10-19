@@ -49,7 +49,22 @@ Environment credentials already configured by the operator remain subject to
 Claude Code's own authentication precedence. In particular, an existing
 `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, cloud-provider configuration, or
 custom credential helper may take precedence over subscription login. Workhouse
-does not create these values and does not override that CLI behavior.
+does not create these values and does not override that CLI behavior, except in
+the opt-in API-credit mode below.
+
+The owner can switch Claude to API credits under Settings › Claude › Account or
+from the switch in a Claude session header. In that mode Workhouse passes the
+saved Console API key to the Claude worker as `ANTHROPIC_API_KEY`, which the CLI
+prefers over the subscription login, so usage is billed to that Console
+organization (where the monthly Max and Team API credits are spent). The key is
+stored only in `data/config/claude-billing.json` with mode 0600, applies to the
+next request of every Claude session on this server, and is not sent to remote
+execution hosts. Anthropic provides no endpoint for the credit balance, so the
+remaining credit is the configured monthly credit minus this cycle's spend. The
+spend comes from the Admin API cost report when an optional `sk-ant-admin` key
+is saved; that read is the only Anthropic API call Workhouse makes itself, and
+the admin key is never given to a task. Without it, Workhouse sums the
+`total_cost_usd` that the CLI reports for each API-mode run.
 
 Codex follows the same provider-native boundary: login and authenticated calls
 are performed through the official Codex app-server runtime rather than by

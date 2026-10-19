@@ -210,7 +210,12 @@ export function mergeHistoricalFileChanges(history:AgentEvent[],replay:AgentEven
   for(const image of replay.filter(imageOutput)){
     const key=imageKey(image);if(seenImageKeys.has(key))continue;seenImageKeys.add(key);
     const itemId=eventItemId(image),turnId=eventTurnId(image);
-    const match=merged.findIndex(event=>imageOutput(event)&&imageKey(event)===key||(itemId&&eventItemId(event)===itemId&&(!turnId||!eventTurnId(event)||eventTurnId(event)===turnId)));
+    // A live stream carries both item/started and item/completed for one
+    // image item. Attaching the media to the started row as well renders the
+    // same picture twice, so only a non-started row may adopt it.
+    const sameItem=(event:AgentEvent)=>Boolean(itemId&&eventItemId(event)===itemId&&(!turnId||!eventTurnId(event)||eventTurnId(event)===turnId));
+    const exact=merged.findIndex(event=>imageOutput(event)&&(imageKey(event)===key||sameItem(event)));
+    const match=exact>=0?exact:merged.findIndex(event=>event.type!=="tool_started"&&sameItem(event));
     if(match>=0){
       if(!imageOutput(merged[match]!)){
         const current=merged[match]!;

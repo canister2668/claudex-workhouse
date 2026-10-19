@@ -10,9 +10,12 @@ import { delegationDeveloperInstructions, normalizeDelegationSettings } from "./
 import {automationLevel,executionPolicyTurnInstructions} from "./automation-level.js";
 import {beginWorkerEmotion,claudeEmotionForTool,updateWorkerEmotion} from "./worker-emotion.js";
 import { sanitizeSensitiveValue } from "./sensitive-data.js";
+import {appendClaudeCreditLedger} from "./claude-billing.js";
+import {claudeCallCostUsd,type ClaudeCallUsage} from "./claude-pricing.js";
 import {createTextDeltaBatcher} from "./text-delta-batcher.js";
 import {ProviderOutputBlockTracker} from "./provider-output-block.js";
 import {persistProviderSystemEvent} from "./provider-system-events.js";
+import {claudeAgentStartedEvent,claudeAgentSystemEvent,claudeAgentToolResultEvent,isClaudeAgentTool} from "./claude-subagents.js";
 import {EXTERNAL_MCP_BUNDLE_ENV,externalMcpForClaude,readExternalMcpBundle} from "./external-mcp-bundle.js";
 import {CONVERSATION_EMOTION_INSTRUCTION,EMOTION_MCP_PROFILE_HEADER,EMOTION_MCP_SERVER_ID,EMOTION_MCP_SESSION_HEADER,EMOTION_MCP_TASK_HEADER,EMOTION_MCP_TOOL_NAME,validatedEmotionMcpUrl,type EmotionMcpProvider} from "./emotion-mcp-policy.js";
 import{holdWorkerLiveness,terminateWindowsProcessTree,usesWindowsWorkerLiveness,watchStopRequest}from"./worker-liveness.js";
@@ -65,6 +68,8 @@ const externalMcpBundle=runtimeProfile==="default"?readExternalMcpBundle(process
 const externalMcp=externalMcpBundle?externalMcpForClaude(externalMcpBundle):{mcpServers:{},allowedTools:[],environment:{}};
 const configuredSwitchModelsOnFlag=productEnv("CLAUDE_SWITCH_MODELS_ON_FLAG");
 const switchModelsOnFlag=configuredSwitchModelsOnFlag==="true"?true:configuredSwitchModelsOnFlag==="false"?false:null;
+// The server decides fast mode (setting on and an Opus model that supports it).
+const fastMode=providerId==="claude"&&productEnv("CLAUDE_FAST_MODE")==="true";
 const configuredSessionId=String(productEnv("CLAUDE_SESSION_ID")??"").trim();
 const requestedSessionId=/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(configuredSessionId)?configuredSessionId:"";
 const startedAt = new Date().toISOString();
@@ -131,7 +136,8 @@ const args = ["-p", "--output-format", "stream-json", "--include-partial-message
 if(isolatedRuntime)args.push("--safe-mode","--no-chrome","--strict-mcp-config","--tools",...(tools.length?tools:[""]));
 else args.push("--tools",...tools,"--setting-sources","user,project,local");
 for(const directory of new Set(conversationAttachments.map(item=>path.dirname(item))))args.push("--add-dir",directory);
-if(switchModelsOnFlag!==null)args.push("--settings",JSON.stringify({switchModelsOnFlag}));
+const cliSettings={...(switchModelsOnFlag!==null?{switchModelsOnFlag}:{}),...(fastMode?{fastMode:true}:{})};
+if(Object.keys(cliSettings).length)args.push("--settings",JSON.stringify(cliSettings));
 const mcpServers:Record<string,unknown>={};
 if(emotionMcpUrl)mcpServers[EMOTION_MCP_SERVER_ID]={type:"http",url:emotionMcpUrl,headers:{[EMOTION_MCP_TASK_HEADER]:"${CLAUDEX_WORKHOUSE_CURRENT_TASK_ID}",[EMOTION_MCP_SESSION_HEADER]:"${CLAUDEX_WORKHOUSE_CURRENT_SESSION_ID}",[EMOTION_MCP_PROFILE_HEADER]:"${CLAUDEX_WORKHOUSE_RUNTIME_PROFILE}"}};
 if(managedMcpUrl)mcpServers["claudex-workhouse"]={type:"http",url:managedMcpUrl,headers:{Authorization:"Bearer ${CLAUDEX_WORKHOUSE_MANAGED_PROVIDER_TOKEN}","X-Claudex-Workhouse-Task-Id":"${CLAUDEX_WORKHOUSE_CURRENT_TASK_ID}"}};
@@ -155,33 +161,39 @@ function toolSummary(name: string, input: any): string {
   if (name === "Grep" || name === "Glob") return `${input.pattern ?? ""}${input.path ? ` · ${relativePath(input.path, cwd)}` : ""}`;
   if (name === "WebFetch") return String(input.url ?? "");
   if (name === "WebSearch") return String(input.query ?? "");
-  if (name === "Task") return String(input.description ?? input.subagent_type ?? "");
   if (name === "TodoWrite") return "Update the todo list";
   if (name === "Bash") return String(input.command ?? "");
   return "";
 }
 const bashCommandsByToolId=new Map<string,string>();
-function emitToolUse(part: any) {
+// Agent tool_use ids double as the subagent's roster key and its child thread.
+const agentToolIds=new Set<string>();
+function emitToolUse(part: any, threadId: string|null = state.sessionId) {
   const name = part.name || "tool"; const input = part.input || {}; const id = part.id ?? null;
   const emotion=claudeEmotionForTool(name);if(emotion)updateWorkerEmotion(root,providerId,emotion,state.sessionId);
+  if (isClaudeAgentTool(name)) {
+    if(typeof id==="string"&&id)agentToolIds.add(id);
+    spool.append({ ...claudeAgentStartedEvent(part), threadId });
+    return;
+  }
   if (EDIT_TOOLS.has(name)) {
     const changes = name === "MultiEdit" ? (input.edits || []).map((e: any) => ({ file: input.file_path, old: e.old_string, new: e.new_string }))
       : name === "Write" ? [{ file: input.file_path, old: "", new: input.content ?? "" }]
       : [{ file: input.file_path, old: input.old_string ?? "", new: input.new_string ?? "" }];
     for (const ch of changes) {
       const d = unifiedLineDiff(ch.old, ch.new);
-      const resolved=relativePathInfo(ch.file,cwd);spool.append({ type: "file_change_started", content: d.text, threadId: state.sessionId, itemId: id, toolName: name, metadata: { path: resolved.path, pathBase:resolved.pathBase, tool: name, additions: d.additions, deletions: d.deletions } });
+      const resolved=relativePathInfo(ch.file,cwd);spool.append({ type: "file_change_started", content: d.text, threadId, itemId: id, toolName: name, metadata: { path: resolved.path, pathBase:resolved.pathBase, tool: name, additions: d.additions, deletions: d.deletions } });
     }
     return;
   }
   if (name === "Bash") {
     const command=String(input.command??"");
     if(typeof id==="string"&&id&&command)bashCommandsByToolId.set(id,command);
-    spool.append({ type:"command_started", content:command, threadId:state.sessionId, itemId:id, toolName:name, metadata:{command,description:input.description??null,source:"provider"} });
+    spool.append({ type:"command_started", content:command, threadId, itemId:id, toolName:name, metadata:{command,description:input.description??null,source:"provider"} });
     return;
   }
   const detail = toolSummary(name, input);
-  spool.append({ type: "tool_started", content: detail ? `${name}: ${detail}` : name, threadId: state.sessionId, itemId: id, toolName: name, metadata: {} });
+  spool.append({ type: "tool_started", content: detail ? `${name}: ${detail}` : name, threadId, itemId: id, toolName: name, metadata: {} });
 }
 
 beginWorkerEmotion(root,providerId,prompt,state.sessionId);
@@ -191,10 +203,28 @@ let stopRequested=false;
 const lines = readline.createInterface({ input: child.stdout });
 let sawCompactionBoundary=false;
 let currentOutputCallId:string|null=null;
+// Set only for API-credit launches; the run cost feeds the credit display.
+const creditLedgerFile=providerId==="claude"&&process.env.ANTHROPIC_API_KEY?process.env.CLAUDEX_WORKHOUSE_CLAUDE_CREDIT_LEDGER||null:null;
+let runCostUsd:number|null=null;
+// Each API call's usage, keyed by message id. Assistant events and the partial
+// stream both report it; the largest value of each counter is the final one.
+const runCallUsage=new Map<string,{model:string|null;usage:ClaudeCallUsage}>();
+let creditCallId:string|null=null;
+function noteCallUsage(id:unknown,model:unknown,usage:any){
+  if(!creditLedgerFile||typeof id!=="string"||!usage||typeof usage!=="object")return;
+  const previous=runCallUsage.get(id),merged:any={...(previous?.usage??{})};
+  for(const key of ["input_tokens","output_tokens","cache_read_input_tokens","cache_creation_input_tokens"])if(typeof usage[key]==="number"&&usage[key]>=(merged[key]??0))merged[key]=usage[key];
+  if(usage.cache_creation&&typeof usage.cache_creation==="object")merged.cache_creation={...usage.cache_creation};
+  if(typeof usage.speed==="string")merged.speed=usage.speed;
+  runCallUsage.set(id,{model:typeof model==="string"?model:previous?.model??null,usage:merged});
+}
 lines.on("line", (line) => {
   try {
     const event = JSON.parse(line);
     if (event.session_id) state.sessionId = event.session_id;
+    if(event.type==="assistant")noteCallUsage(event.message?.id,event.message?.model,event.message?.usage);
+    else if(event.type==="stream_event"&&event.event?.type==="message_start"){creditCallId=typeof event.event.message?.id==="string"?event.event.message.id:null;noteCallUsage(creditCallId,event.event.message?.model,event.event.message?.usage);}
+    else if(event.type==="stream_event"&&event.event?.type==="message_delta")noteCallUsage(creditCallId,null,event.event.usage);
     state.activity=`${event.type}${event.subtype?`/${event.subtype}`:""}`;
     if (event.type === "system" && event.subtype === "init") {
       state.contextCapabilities={manualCompact:Array.isArray(event.slash_commands)&&event.slash_commands.includes("/compact"),contextCommand:Array.isArray(event.slash_commands)&&event.slash_commands.includes("/context")};
@@ -208,7 +238,8 @@ lines.on("line", (line) => {
       const previous=state.contextUsage as ProviderContextUsage|undefined;
       state.contextUsage=compactedContext(previous??{usedTokens:null,windowTokens:claudeContextWindow(state.model??model),percent:null,updatedAt:at},trigger,at);
       spool.append({ type:"context_compaction", content:`${providerLabel} context ${trigger==="auto"?"automatically ":""}compacted.`, threadId:state.sessionId, itemId:nativeItemId, timestamp:at, metadata:{nativeType:event.type,subtype:event.subtype,trigger:trigger==="auto"?"auto":trigger==="manual"?"manual":null,preTokens:Number.isFinite(Number(compactMetadata.preTokens??compactMetadata.pre_tokens))?Number(compactMetadata.preTokens??compactMetadata.pre_tokens):null,contextUsage:state.contextUsage} });
-    } else if (event.type === "system"&&persistProviderSystemEvent(providerId,event.subtype)) spool.append({ type:"tool_progress", content:`${providerLabel} ${event.subtype ?? "system"} event.`, threadId:state.sessionId, metadata:{nativeType:event.type,subtype:event.subtype} });
+    } else if (event.type === "system"&&agentToolIds.size&&claudeAgentSystemEvent(event,agentToolIds)) spool.append({ ...claudeAgentSystemEvent(event,agentToolIds)!, threadId:state.sessionId });
+    else if (event.type === "system"&&persistProviderSystemEvent(providerId,event.subtype)) spool.append({ type:"tool_progress", content:`${providerLabel} ${event.subtype ?? "system"} event.`, threadId:state.sessionId, metadata:{nativeType:event.type,subtype:event.subtype} });
     if (event.type === "stream_event") {
       const native=event.event ?? {};
       const delta=native.delta ?? {};
@@ -229,23 +260,29 @@ lines.on("line", (line) => {
       if(streamOutputUsage){recordOutputUsage(currentOutputCallId,streamOutputUsage);spool.append({type:"unknown",content:"Claude output usage updated.",threadId:state.sessionId,metadata:{nativeMethod:"claude/outputUsage/updated",outputCallId:currentOutputCallId,outputUsage:streamOutputUsage}});}
     }
     const parts = event.message?.content ?? [];
-    if(event.type==="assistant"&&typeof event.message?.id==="string")currentOutputCallId=event.message.id;
-    const usage=claudeContextUsageFromStreamEvent(event,state.model??model),outputUsage=claudeOutputUsageFromStreamEvent(event);
+    // A subagent's own messages carry the Agent call that spawned it. They go
+    // to that child thread, and its usage is not the parent's context.
+    const childThreadId=typeof event.parent_tool_use_id==="string"&&event.parent_tool_use_id?event.parent_tool_use_id:null,partThreadId=childThreadId??state.sessionId;
+    const childCallId=childThreadId&&typeof event.message?.id==="string"?event.message.id:null;
+    if(!childThreadId&&event.type==="assistant"&&typeof event.message?.id==="string")currentOutputCallId=event.message.id;
+    const usage=childThreadId?null:claudeContextUsageFromStreamEvent(event,state.model??model),outputUsage=childThreadId?null:claudeOutputUsageFromStreamEvent(event);
     if(outputUsage)recordOutputUsage(currentOutputCallId,outputUsage);
     if(usage){state.contextUsage={...usage,lastCompactedAt:state.contextUsage?.lastCompactedAt??null,compactionTrigger:state.contextUsage?.compactionTrigger??null};spool.append({type:"unknown",content:"Claude context usage updated.",threadId:state.sessionId,metadata:{nativeMethod:"claude/contextUsage/updated",usageScope:"message",outputCallId:currentOutputCallId,contextUsage:state.contextUsage,outputUsage}});}
     for (const part of parts) {
-      if (part.type === "text" && part.text && !compactOperation) { state.log += `${part.text}\n`; if(event.type === "assistant"){textDeltas.flush();compatibleTextBlockId=null;spool.append({ type:"message_completed", content:part.text, threadId:state.sessionId, itemId:outputBlocks.completed(currentOutputCallId), metadata:{nativeType:event.type,outputCallId:currentOutputCallId,outputUsage} });} }
-      if (part.type === "tool_use") { state.log += `[tool] ${part.name}\n`; emitToolUse(part); }
+      if (part.type === "text" && part.text && !compactOperation) { state.log += `${part.text}\n`; if(event.type === "assistant"){textDeltas.flush();compatibleTextBlockId=null;const callId=childCallId??currentOutputCallId;spool.append({ type:"message_completed", content:part.text, threadId:partThreadId, itemId:outputBlocks.completed(callId), metadata:{nativeType:event.type,outputCallId:callId,outputUsage,...(childThreadId?{agentThreadId:childThreadId}:{})} });} }
+      if (part.type === "tool_use") { state.log += `[tool] ${part.name}\n`; emitToolUse(part,partThreadId); }
       if (part.type === "tool_result") {
         const itemId=typeof part.tool_use_id==="string"?part.tool_use_id:null,command=itemId?bashCommandsByToolId.get(itemId):undefined,isError=Boolean(part.is_error);
+        if(itemId&&agentToolIds.has(itemId)){spool.append({...claudeAgentToolResultEvent(part,event.tool_use_result),threadId:partThreadId});continue;}
         if(itemId)bashCommandsByToolId.delete(itemId);
         const content=typeof part.content==="string"?part.content:JSON.stringify(part.content??"");
-        if(command)spool.append({type:"command_completed",content,threadId:state.sessionId,itemId,toolName:"Bash",status:isError?"failed":"completed",metadata:{nativeType:event.type,command,isError,ok:!isError,source:"provider"}});
-        else spool.append({type:"tool_completed",content,threadId:state.sessionId,itemId,metadata:{nativeType:event.type,isError}});
+        if(command)spool.append({type:"command_completed",content,threadId:partThreadId,itemId,toolName:"Bash",status:isError?"failed":"completed",metadata:{nativeType:event.type,command,isError,ok:!isError,source:"provider"}});
+        else spool.append({type:"tool_completed",content,threadId:partThreadId,itemId,metadata:{nativeType:event.type,isError}});
       }
     }
     if (event.type === "result") {
       textDeltas.flush();
+      const cost=Number(event.total_cost_usd);if(Number.isFinite(cost)&&cost>=0)runCostUsd=Math.max(runCostUsd??0,cost);
       if(compactOperation&&!event.is_error&&!sawCompactionBoundary){
         const at=new Date().toISOString();
         state.contextUsage=compactedContext(state.contextUsage??{usedTokens:null,windowTokens:claudeContextWindow(state.model??model),percent:null,updatedAt:at},"manual",at);
@@ -269,6 +306,10 @@ child.once("error", (error) => { textDeltas.flush();state.status = "failed"; sta
 child.once("close", async(code, signal) => {
   textDeltas.flush();
   if(postResultFinalization)await postResultFinalization;
+  if(creditLedgerFile&&(runCallUsage.size||runCostUsd)){
+    const costUsd=[...runCallUsage.values()].reduce((sum,call)=>sum+claudeCallCostUsd(call.model,call.usage),0);
+    try{appendClaudeCreditLedger(creditLedgerFile,{at:new Date().toISOString(),taskId:taskId??null,costUsd:Math.round(costUsd*1e6)/1e6,calls:runCallUsage.size,cliCostUsd:runCostUsd,billing:"api"});}catch{}
+  }
   const transitioned=["pending","queued","running","waiting"].includes(state.status);
   if (transitioned) {
     state.status = signal||stopRequested ? "stopped" : code === 0&&!pendingResultError ? "completed" : "failed";

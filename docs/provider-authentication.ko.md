@@ -45,8 +45,20 @@ Claude 작업은 `claude -p`, `--output-format stream-json`, `--resume` 같은
 운영자가 실행 환경에 이미 설정한 자격증명에는 Claude Code 자체의 인증 우선순위가
 적용됩니다. 기존 `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, 클라우드
 Provider 설정 또는 사용자 지정 credential helper가 구독 로그인보다 우선할 수
-있습니다. Workhouse는 이 값을 생성하지 않으며 CLI의 우선순위를 변경하지
-않습니다.
+있습니다. Workhouse는 아래의 API 크레딧 모드를 켠 경우를 제외하면 이 값을
+생성하지 않으며 CLI의 우선순위를 변경하지 않습니다.
+
+소유자는 설정 › Claude › 계정 또는 Claude 세션 상단의 스위치에서 Claude를 API
+크레딧으로 전환할 수 있습니다. 이 모드에서는 저장된 Console API 키를
+`ANTHROPIC_API_KEY`로 Claude 워커에 넘기고, CLI가 이를 구독 로그인보다 우선하므로
+사용량이 해당 Console 조직(Max·Team 월간 API 크레딧이 쓰이는 곳)에 과금됩니다.
+키는 `data/config/claude-billing.json`(권한 0600)에만 저장되고, 이 서버의 모든
+Claude 세션에서 다음 요청부터 적용되며, 원격 실행 호스트로는 전달되지 않습니다.
+Anthropic은 크레딧 잔액을 알려 주는 엔드포인트를 제공하지 않으므로 남은 크레딧은
+설정한 월 크레딧에서 이번 주기 사용액을 뺀 값입니다. 선택 항목인 `sk-ant-admin`
+키를 저장하면 사용액을 Admin API 비용 보고서에서 읽습니다. Workhouse가 직접 하는
+Anthropic API 호출은 이것뿐이며, Admin 키는 작업에 전달되지 않습니다. Admin 키가
+없으면 API 모드로 실행한 작업마다 CLI가 보고한 `total_cost_usd`를 합산합니다.
 
 Codex도 같은 Provider 고유 경계를 따릅니다. 로그인과 인증된 호출은 자격증명을
 추출해 OpenAI API를 직접 호출하는 방식이 아니라 공식 Codex app-server

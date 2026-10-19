@@ -29,6 +29,7 @@ export type HtmlPreviewResult={
 };
 
 export type HtmlPreviewReadResponse={
+  images?:Record<string,string>;
   fileId:string;
   relativePath:string;
   content:string;

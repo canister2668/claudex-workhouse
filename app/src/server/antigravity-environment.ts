@@ -62,8 +62,17 @@ export function ensureGeminiCliModelConfiguration(home:string){
   }
   if(!current||typeof current!=="object"||Array.isArray(current))throw new Error(`Workhouse Gemini CLI settings must contain a JSON object: ${file}`);
   const experimental=current.experimental&&typeof current.experimental==="object"&&!Array.isArray(current.experimental)?current.experimental:{};
-  if(experimental.dynamicModelConfiguration===true)return file;
-  const updated={...current,experimental:{...experimental,dynamicModelConfiguration:true}},temporary=path.join(directory,`.settings.${crypto.randomUUID()}.tmp`);
+  const general=current.general&&typeof current.general==="object"&&!Array.isArray(current.general)?current.general:{};
+  const model=current.model&&typeof current.model==="object"&&!Array.isArray(current.model)?current.model:{};
+  // Migrate the earlier Workhouse override: it also disabled 429 backoff.
+  // InvalidStreamError replays are now blocked separately by the CLI preload.
+  const networkRetries={...general};
+  if(networkRetries.maxAttempts===1)delete networkRetries.maxAttempts;
+  // Remove our premature compression override; let the CLI use its default.
+  const modelSettings={...model};
+  if(modelSettings.compressionThreshold===0.1)delete modelSettings.compressionThreshold;
+  if(experimental.dynamicModelConfiguration===true&&general.maxAttempts!==1&&model.compressionThreshold!==0.1)return file;
+  const updated={...current,experimental:{...experimental,dynamicModelConfiguration:true},general:networkRetries,model:modelSettings},temporary=path.join(directory,`.settings.${crypto.randomUUID()}.tmp`);
   try{fs.writeFileSync(temporary,`${JSON.stringify(updated,null,2)}\n`,{encoding:"utf8",mode:0o600,flag:"wx"});fs.renameSync(temporary,file);fs.chmodSync(file,0o600);}
   finally{try{if(fs.existsSync(temporary))fs.unlinkSync(temporary);}catch{}}
   return file;
@@ -90,14 +99,14 @@ export function antigravityEnvironment(config:Pick<AppConfig,"dataDir">,settings
  * would make every resume start an empty conversation. Trust is granted here
  * rather than per run: Workhouse already decided the workspace is in scope.
  */
-export function geminiCliEnvironment(config:Pick<AppConfig,"dataDir">,settings:AntigravityExecutionSettings,questionChannel?:{directory:string;port:number;taskId:string;token:string}):NodeJS.ProcessEnv{
+export function geminiCliEnvironment(config:Pick<AppConfig,"dataDir">,settings:AntigravityExecutionSettings,questionChannel?:{directory:string;port:number;taskId:string;token:string},runtimeProfile:EmotionRuntimeProfile="default"):NodeJS.ProcessEnv{
   const home=geminiCliHome(config);
   ensureGeminiCliModelConfiguration(home);
   let questionSettings:string|undefined;
   if(questionChannel){
     fs.mkdirSync(questionChannel.directory,{recursive:true,mode:0o700});
     questionSettings=path.join(questionChannel.directory,"gemini-question-settings.json");
-    fs.writeFileSync(questionSettings,JSON.stringify({mcpServers:{"claudex-workhouse":{httpUrl:`http://127.0.0.1:${questionChannel.port}/mcp/claudex-workhouse`,headers:{Authorization:`Bearer ${questionChannel.token}`,[EMOTION_MCP_TASK_HEADER]:questionChannel.taskId},includeTools:["request_user_input_async"],trust:true}}}),{encoding:"utf8",mode:0o600});
+    fs.writeFileSync(questionSettings,JSON.stringify({mcpServers:{"claudex-workhouse":{httpUrl:`http://127.0.0.1:${questionChannel.port}/mcp/claudex-workhouse`,headers:{Authorization:`Bearer ${questionChannel.token}`,[EMOTION_MCP_TASK_HEADER]:questionChannel.taskId},includeTools:runtimeProfile==="default"?["request_user_input_async","managed_provider_models","managed_provider_task_create","managed_provider_task_get","managed_provider_task_wait","managed_provider_task_resume","workspace_instructions_read","workspace_instructions_update"]:["request_user_input_async"],trust:true}}}),{encoding:"utf8",mode:0o600});
   }
   return{
     ...providerBaseEnvironment(),

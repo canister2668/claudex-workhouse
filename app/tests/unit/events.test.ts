@@ -199,6 +199,20 @@ describe("AgentEvent safety and presentation", () => {
     expect(merged[1]).toMatchObject({type:"tool_completed",metadata:{itemId:"image",mediaKind:"image",mediaPath:"docs/preview.png",mediaPathBase:"task-cwd"}});
   });
 
+  it("does not copy a durable image onto the stream's started row for the same item",()=>{
+    const media={mediaKind:"image",mediaPath:"docs/preview.png",mediaPathBase:"task-cwd"};
+    const stream=[
+      {type:"tool_started",content:"imageView",taskId:"codex:one",turnId:"turn",itemId:"image",metadata:{itemType:"imageView"}},
+      {type:"tool_completed",content:"imageView",taskId:"codex:one",turnId:"turn",itemId:"image",metadata:{itemType:"imageView",...media}}
+    ] as AgentEvent[];
+    const durable=[{type:"tool_completed",content:"imageView",metadata:{itemType:"imageView",itemId:"image",turnId:"turn",sourceTaskId:"codex:one",durableImageOutput:true,...media}}] as AgentEvent[];
+
+    const merged=mergeHistoricalFileChanges(stream,durable);
+
+    expect(merged.filter(event=>event.metadata?.mediaKind==="image")).toHaveLength(1);
+    expect(merged[0]?.metadata?.mediaKind).toBeUndefined();
+  });
+
   it("inserts a replay-only image before the final answer from its turn",()=>{
     const history=[
       normalizeAgentEvent({type:"message",content:"request",metadata:{role:"user",turnId:"turn",itemId:"user"}},"codex"),

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { agentPhase, emptyArrangement, fitActiveRow, formatElapsed, markSeen, nextArrangement, pileOf, pileWidth, type AgentPhase, type ArrangementInput } from "../../src/web/agent-arrangement";
+import { agentPhase, emptyArrangement, fitActiveRow, formatElapsed, markSeen, nextArrangement, outcomeAcknowledged, pileOf, pileWidth, type AgentPhase, type ArrangementInput } from "../../src/web/agent-arrangement";
 
 type P = "codex" | "claude" | "grok" | "antigravity";
 const providers: P[] = ["codex", "claude", "grok", "antigravity"];
@@ -95,6 +95,20 @@ describe("active row order", () => {
     state = nextArrangement(state, inputs({ codex: "running", claude: "done" }).filter(input => input.provider !== "claude"));
     expect(state.active).toEqual(["codex"]);
     expect(state.unseen).toEqual({});
+  });
+});
+
+describe("acknowledged outcome", () => {
+  it("returns a seen failure to the neutral face and keeps an unseen one", () => {
+    const observed = nextArrangement(nextArrangement(emptyArrangement<P>(), [{ provider: "codex", phase: "running" }]), [{ provider: "codex", phase: "failed" }]);
+    expect(outcomeAcknowledged("failed", observed.unseen.codex)).toBe(false);
+    expect(outcomeAcknowledged("failed", markSeen(observed, "codex").unseen.codex)).toBe(true);
+  });
+  it("treats stops and failures already present on load as settled, never success or work", () => {
+    expect(outcomeAcknowledged("stopped")).toBe(true);
+    expect(outcomeAcknowledged("failed")).toBe(true);
+    expect(outcomeAcknowledged("done")).toBe(false);
+    expect(outcomeAcknowledged("running")).toBe(false);
   });
 });
 

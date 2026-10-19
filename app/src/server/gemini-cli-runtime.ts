@@ -1,3 +1,4 @@
+import {classifyGeminiFailure} from "./gemini-cli-policy.js";
 import fs from "node:fs";
 import path from "node:path";
 import type {AutomationLevel} from "./automation-level.js";
@@ -186,7 +187,20 @@ export function geminiCliExitFailure(code:number|null,signal:string|null):Gemini
  * and keeps the full text in the log rather than in the headline.
  */
 export function classifyGeminiCliError(message:string):GeminiCliFailure{
-  const value=message.toLowerCase();
+  const value=message.toLowerCase(),failure=classifyGeminiFailure(message);
+  if(value.includes("requests ending with a model turn"))
+    return{code:"GEMINI_INVALID_TURN",message:"Vertex AI rejected the conversation turn format (HTTP 400). This is not a quota error; check Gemini CLI tool-response compatibility."};
+  if(value.includes("gemini_cli_compatibility_unsupported"))
+    return{code:"GEMINI_CLI_COMPATIBILITY_UNSUPPORTED",message:"The installed Gemini CLI changed its request format. Update the Workhouse compatibility adapter before retrying."};
+  if(failure.kind==="network")
+    return{code:"GEMINI_CLI_NETWORK_ERROR",message:"Gemini CLI could not complete the API connection (fetch failed). The underlying connection failure is not identified in this log."};
+  if(failure.kind==="safety")
+    return{code:"GEMINI_SAFETY_BLOCKED",message:"Vertex AI explicitly reported that the response was blocked due to safety."};
+  if(value.includes("invalid stream")||value.includes("invalidstreamerror")||value.includes("no_response_text")||value.includes("no response text")||value.includes("empty response text")||value.includes("model stream ended with malformed function call")||value.includes("model stream ended with unexpected tool call"))
+    return{code:"GEMINI_INVALID_STREAM",message:"Vertex AI returned an invalid stream or no response text."};
+  if(value.includes("model stream ended without a finish reason")||value.includes("no_finish_reason"))
+    return{code:"GEMINI_CLI_INCOMPLETE_STREAM",message:"Vertex AI ended the model stream without a finish reason. The cause is unknown; this does not by itself establish quota exhaustion or a safety block."};
+  if(failure.kind==="invalid_stream")return{code:"GEMINI_INVALID_STREAM",message:"Vertex AI returned no usable response. No automatic content replay was performed."};
   if(value.includes("could not load the default credentials")||value.includes("invalid_grant")||value.includes("unauthenticated"))
     return{code:"GEMINI_CLI_AUTH_FAILED",message:"The Vertex service-account credentials could not be loaded. Re-upload the key in Gemini execution settings."};
   if(value.includes("has not been used in project")||value.includes("service_disabled")||value.includes("api is not enabled"))
@@ -195,7 +209,7 @@ export function classifyGeminiCliError(message:string):GeminiCliFailure{
     return{code:"VERTEX_BILLING_REQUIRED",message:"Vertex AI rejected the request for a billing reason. Check the project's billing account."};
   if(value.includes("permission denied on resource project")||value.includes("consumer_invalid")||value.includes("permission_denied"))
     return{code:"VERTEX_PROJECT_DENIED",message:"The service account cannot use this Google Cloud project or region."};
-  if(value.includes("resource_exhausted")||value.includes("429")||value.includes("quota"))
+  if(failure.kind==="quota"||value.includes("resource_exhausted")||value.includes("429")||value.includes("quota"))
     return{code:"VERTEX_QUOTA_EXHAUSTED",message:"Vertex AI is rate limiting or has exhausted quota for this project."};
   if(value.includes("was not found")||value.includes("404")||value.includes("is not supported"))
     return{code:"VERTEX_MODEL_UNAVAILABLE",message:"The selected Gemini model is unavailable in this Vertex project or region."};
@@ -210,7 +224,16 @@ export function classifyGeminiCliError(message:string):GeminiCliFailure{
 export function geminiCliResultFailure(message:unknown,diagnostics:string):GeminiCliFailure{
   const primary=typeof message==="string"?message.trim():"";
   if(primary)return classifyGeminiCliError(primary);
-  const classified=classifyGeminiCliError(diagnostics);
-  if(classified.code!=="GEMINI_CLI_FAILED")return classified;
+  // stderr contains recovered failures as well as the final cause. Search
+  // backwards instead of allowing an earlier 429 to win over a later error.
+  for(const line of diagnostics.split(/\r?\n/).reverse()){
+    const classified=classifyGeminiCliError(line);
+    if(classified.code!=="GEMINI_CLI_FAILED")return classified;
+  }
   return{code:"GEMINI_CLI_FAILED",message:"Gemini CLI failed without a message."};
+}
+
+/** Recognize manual maintenance before developer instructions wrap the input. */
+export function geminiCliCompactionRequested(prompt:string){
+  return /^\/(?:compact|compress|summarize)(?:\s|$)/i.test(prompt.trim());
 }

@@ -20,6 +20,11 @@ describe("Grok CLI usage probe",()=>{
     expect(JSON.stringify(parsed)).not.toContain("private.user@example.com");
   });
 
+  it("parses the boxed Usage limit tab rendered by Grok CLI 1.0.50",()=>{
+    const parsed=JSON.parse(execFileSync("python3",[helper,"parse"],{input:fs.readFileSync(path.resolve(import.meta.dirname,"../fixtures/grok-usage-1.0.50.txt"),"utf8"),encoding:"utf8"}));
+    expect(parsed).toMatchObject({ok:true,plan:"SuperGrok",seven_day:{utilization:17,resets_at:null,reset_label:"October 13, 09:36"},prepaid_balance:null});
+  });
+
   it("parses billing field names and epoch resets without exposing unrelated fields",()=>{
     const input=JSON.stringify({creditUsagePercent:72.5,billingPeriodEnd:1786381200,prepaidBalance:4.25,subscription_tier:"SuperGrok Heavy",email:"secret@example.com"});
     const parsed=JSON.parse(execFileSync("python3",[helper,"parse"],{input,encoding:"utf8"}));

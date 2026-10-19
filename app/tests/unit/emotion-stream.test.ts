@@ -102,4 +102,25 @@ describe("emotion stream",()=>{
     expect(statuses.at(-1)).toBe("error");
     unsubscribe();
   });
+
+  // The first frame after a reload used to draw the hardcoded default outfit
+  // (and an empty asset catalog), then swap to the user's avatar once
+  // /api/emotion answered.
+  it("starts from the last bootstrapped appearance instead of the static defaults",async()=>{
+    localStorage.clear();
+    const first=await import("../../src/web/emotion-stream");
+    vi.stubGlobal("fetch",vi.fn(async()=>({ok:true,json:async()=>({...snapshot("neutral"),state:{emotion:"happy",line:"",statusLine:"",outfit:"capy"},outfitsByProvider:{claude:["normal","capy"]},assets:{capy:[{emotion:"neutral",file:"neutral-v5.webp"}]}})}) as any));
+    const stop=first.subscribeEmotionStream(()=>{});
+    await vi.advanceTimersByTimeAsync(0);
+    stop();
+    vi.resetModules();
+
+    const reloaded=await import("../../src/web/emotion-stream");
+    let initial:any=null;
+    const unsubscribe=reloaded.subscribeEmotionStream(value=>{initial??=value;});
+    expect(initial.state).toMatchObject({outfit:"capy",emotion:"neutral"});
+    expect(initial.assets.capy[0].file).toBe("neutral-v5.webp");
+    unsubscribe();
+    localStorage.clear();
+  });
 });

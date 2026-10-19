@@ -105,7 +105,7 @@ describe("header agents", () => {
   it("shows state as rings with an accessible label instead of text badges", () => {
     expect(dock).not.toContain("avatar-alert-badge");
     expect(dock).not.toContain('class="avatar-speech');
-    expect(dock).toContain('<span class="avatar-ring ring-{phase}" aria-hidden="true"></span>');
+    expect(dock).toContain('<span class="avatar-ring ring-{outcomeAcknowledged(phase,unseen)?\'idle\':phase}" aria-hidden="true"></span>');
     expect(dock).toContain('miniLabel={$t("avatar.slotLabel",{provider:name,state:stateText(phase,unseen)})}');
     expect(styles).toContain(".avatar-ring.ring-running{");
     expect(styles).toContain(".avatar-unseen-dot{");

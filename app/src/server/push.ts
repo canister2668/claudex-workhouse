@@ -44,9 +44,15 @@ function decrypt(secret:Secret,value:string):Subscription{const [iv,tag,body]=va
 function endpointHash(endpoint:string){return crypto.createHash("sha256").update(endpoint).digest("hex");}
 
 export class PushManager{
-  readonly publicKey:string;private secret:Secret;private sequences=new Map<string,number>();private terminalNotified=new Set<string>();private presence=new Map<string,number>();private timer:NodeJS.Timeout;private starting=true;private stopped=false;private inflight:Promise<void>|null=null;
+  readonly publicKey:string;private secret:Secret;private sequences=new Map<string,number>();private terminalNotified=new Set<string>();private presence=new Map<string,number>();private timer:NodeJS.Timeout|null=null;private starting=true;private stopped=false;private inflight:Promise<void>|null=null;
   constructor(private root:string,private db:DeckDatabase,subject="mailto:claudex-workhouse@example.invalid"){
     this.secret=loadSecret(root);this.publicKey=this.secret.publicKey;webpush.setVapidDetails(subject,this.secret.publicKey,this.secret.privateKey);
+  }
+  // Begin only once server initialization has yielded and the API is ready.
+  // Otherwise synchronous route/static registration can starve DB replies
+  // while the first notification query already has an active watchdog.
+  start(){
+    if(this.timer||this.stopped)return;
     this.timer=setInterval(()=>this.tick(),1000);this.timer.unref?.();this.tick();
   }
   private tick(){if(this.stopped||this.inflight)return;this.inflight=this.poll().then(()=>{this.starting=false;},()=>{/* Keep startup replay suppression until the first successful DB poll. */}).finally(()=>{this.inflight=null;});}
@@ -95,5 +101,5 @@ export class PushManager{
     }
     for(const taskId of [...this.sequences.keys()])if(!returned.has(taskId)){this.sequences.delete(taskId);this.terminalNotified.delete(taskId);}
   }
-  async close(){this.stopped=true;clearInterval(this.timer);await this.inflight?.catch(()=>{});}
+  async close(){this.stopped=true;if(this.timer)clearInterval(this.timer);await this.inflight?.catch(()=>{});}
 }

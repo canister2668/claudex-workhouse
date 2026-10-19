@@ -11,6 +11,32 @@ export type EmotionStreamSnapshot={state:EmotionStreamState;codexState:EmotionSt
 const neutral=(outfit:string):EmotionStreamState=>({emotion:"neutral",line:"",statusLine:"",outfit});
 const emptyTaskStates=():EmotionTaskStates=>({codex:{},claude:{},grok:{},deepseek:{},ollama:{},antigravity:{}});
 let snapshot:EmotionStreamSnapshot={state:neutral("normal"),codexState:neutral("Gpt-Sol"),grokState:neutral("Grok"),deepseekState:neutral("DeepSeek"),ollamaState:neutral("Ollama"),antigravityState:neutral("Antigravity"),taskStates:emptyTaskStates(),outfits:["normal","capy"],outfitsByProvider:{codex:["Gpt-Codex","Gpt-Sol"],claude:["normal","capy"],grok:["Grok"],antigravity:["Antigravity","Gemma-e4b"],deepseek:["DeepSeek","Ollama"],ollama:["Ollama","DeepSeek","Antigravity","Gemma-e4b"]},assets:{},assetBaseUrl:location.origin,mode:"mcp",bootstrapStatus:"pending"};
+// The static defaults above are not the user's avatars. Rendering them until
+// /api/emotion answered showed the old art for a moment on every reload, then
+// swapped. The last bootstrapped appearance (outfits, asset catalog, asset host)
+// is cached so the first frame already draws the current avatar; the emotion
+// itself still starts neutral and comes from the server.
+const APPEARANCE_KEY="deck-emotion-appearance-v1";
+const STATE_KEYS:Record<EmotionProvider,"state"|"codexState"|"grokState"|"deepseekState"|"ollamaState"|"antigravityState">={claude:"state",codex:"codexState",grok:"grokState",deepseek:"deepseekState",ollama:"ollamaState",antigravity:"antigravityState"};
+function readAppearance(){
+  try{
+    const value=JSON.parse(localStorage.getItem(APPEARANCE_KEY)||"null");
+    if(!value||typeof value!=="object"||!value.outfits||typeof value.outfits!=="object")return;
+    const next={...snapshot};
+    for(const [provider,key] of Object.entries(STATE_KEYS) as Array<[EmotionProvider,typeof STATE_KEYS[EmotionProvider]]>){const outfit=value.outfits[provider];if(typeof outfit==="string"&&outfit)next[key]={...next[key],outfit};}
+    if(value.outfitsByProvider&&typeof value.outfitsByProvider==="object")next.outfitsByProvider={...next.outfitsByProvider,...value.outfitsByProvider};
+    if(value.assets&&typeof value.assets==="object")next.assets=value.assets;
+    if(typeof value.assetBaseUrl==="string"){next.assetBaseUrl=value.assetBaseUrl;setEmotionAssetBaseUrl(value.assetBaseUrl);}
+    snapshot=next;
+  }catch{}
+}
+function saveAppearance(){
+  try{
+    const outfits=Object.fromEntries((Object.entries(STATE_KEYS) as Array<[EmotionProvider,typeof STATE_KEYS[EmotionProvider]]>).map(([provider,key])=>[provider,snapshot[key].outfit]));
+    localStorage.setItem(APPEARANCE_KEY,JSON.stringify({outfits,outfitsByProvider:snapshot.outfitsByProvider,assets:snapshot.assets,assetBaseUrl:snapshot.assetBaseUrl}));
+  }catch{}
+}
+readAppearance();
 const listeners=new Set<(value:EmotionStreamSnapshot)=>void>();
 const EVENT_KEYS:Record<string,"state"|"codexState"|"grokState"|"deepseekState"|"ollamaState"|"antigravityState">={
   "emotion":"state",
@@ -31,7 +57,9 @@ function publish(){for(const listener of listeners)listener(snapshot);}
 function update(key:"state"|"codexState"|"grokState"|"deepseekState"|"ollamaState"|"antigravityState",value:unknown){
   if(!value||typeof value!=="object")return;
   const next=mergeEmotionState(snapshot[key],value),provider:EmotionProvider=key==="state"?"claude":key==="codexState"?"codex":key==="grokState"?"grok":key==="deepseekState"?"deepseek":key==="ollamaState"?"ollama":"antigravity",taskStates=next.taskId?{...snapshot.taskStates,[provider]:{...snapshot.taskStates[provider],[next.taskId]:next}}:snapshot.taskStates;
+  const outfitChanged=next.outfit!==snapshot[key].outfit;
   snapshot={...snapshot,[key]:next,taskStates};
+  if(outfitChanged)saveAppearance();
   publish();
 }
 function stop(){source?.stop();source=null;connected=false;}
@@ -65,7 +93,7 @@ function bootstrap(){
     if(!response.ok)throw new Error(`emotion ${response.status}`);
     const data=await response.json();
     const assetBaseUrl=typeof data.assetBaseUrl==="string"?data.assetBaseUrl:snapshot.assetBaseUrl;setEmotionAssetBaseUrl(assetBaseUrl);const outfitsByProvider=data.outfitsByProvider&&typeof data.outfitsByProvider==="object"?{...snapshot.outfitsByProvider,...data.outfitsByProvider}:snapshot.outfitsByProvider,taskStates=emptyTaskStates();for(const provider of Object.keys(taskStates) as EmotionProvider[]){const values=data.taskStates?.[provider];if(values&&typeof values==="object")for(const [taskId,state] of Object.entries(values))if(state&&typeof state==="object")taskStates[provider][taskId]=mergeEmotionState(neutral(outfitsByProvider[provider][0]??"normal"),state);}
-    snapshot={state:mergeEmotionState(neutral(outfitsByProvider.claude[0]??"normal"),data.state),codexState:mergeEmotionState(neutral(data.codexState?.outfit??"Gpt-Sol"),data.codexState),grokState:mergeEmotionState(neutral(outfitsByProvider.grok[0]??"Grok"),data.grokState),deepseekState:mergeEmotionState(neutral(outfitsByProvider.deepseek[0]??"DeepSeek"),data.deepseekState),ollamaState:mergeEmotionState(neutral(outfitsByProvider.ollama[0]??"Ollama"),data.ollamaState),antigravityState:mergeEmotionState(neutral(outfitsByProvider.antigravity[0]??"Antigravity"),data.antigravityState),taskStates,outfits:Array.isArray(data.outfits)&&data.outfits.length?data.outfits:snapshot.outfits,outfitsByProvider,assets:data.assets&&typeof data.assets==="object"?data.assets:snapshot.assets,assetBaseUrl,mode:data.mode==="catch"?"catch":"mcp",bootstrapStatus:"ready"};publish();
+    snapshot={state:mergeEmotionState(neutral(outfitsByProvider.claude[0]??"normal"),data.state),codexState:mergeEmotionState(neutral(data.codexState?.outfit??"Gpt-Sol"),data.codexState),grokState:mergeEmotionState(neutral(outfitsByProvider.grok[0]??"Grok"),data.grokState),deepseekState:mergeEmotionState(neutral(outfitsByProvider.deepseek[0]??"DeepSeek"),data.deepseekState),ollamaState:mergeEmotionState(neutral(outfitsByProvider.ollama[0]??"Ollama"),data.ollamaState),antigravityState:mergeEmotionState(neutral(outfitsByProvider.antigravity[0]??"Antigravity"),data.antigravityState),taskStates,outfits:Array.isArray(data.outfits)&&data.outfits.length?data.outfits:snapshot.outfits,outfitsByProvider,assets:data.assets&&typeof data.assets==="object"?data.assets:snapshot.assets,assetBaseUrl,mode:data.mode==="catch"?"catch":"mcp",bootstrapStatus:"ready"};saveAppearance();publish();
   }).catch(()=>{snapshot={...snapshot,bootstrapStatus:"error"};publish();}).finally(()=>{bootstrapping=null;});
   return bootstrapping;
 }

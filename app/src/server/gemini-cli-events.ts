@@ -28,6 +28,7 @@ export type GeminiStreamEvent={
   message?:string;
   error?:{type?:string;message?:string};
   stats?:unknown;
+  diagnostic?:unknown;
 };
 
 function text(value:unknown){return typeof value==="string"?value:value===null||value===undefined?"":String(value);}
@@ -135,12 +136,8 @@ export function geminiOutputUsage(usage:GeminiUsage|null,updatedAt=new Date().to
 
 const GEMINI_CONTEXT_WINDOW=1_000_000;
 
-export function geminiContextUsage(usage:GeminiUsage|null,updatedAt=new Date().toISOString()):ProviderContextUsage|null{
-  if(!usage)return null;
-  // The prompt of the largest model is the live context reading; the utility
-  // router's small prompts are not what fills the conversation window.
-  const primary=usage.models[0];
-  const usedTokens=primary?primary.inputTokens:usage.totals.inputTokens;
+export function geminiContextUsage(usedTokens:number|null,updatedAt=new Date().toISOString()):ProviderContextUsage|null{
+  if(usedTokens===null||!Number.isFinite(usedTokens)||usedTokens<0)return null;
   return{usedTokens,windowTokens:GEMINI_CONTEXT_WINDOW,percent:Math.max(0,Math.min(100,Math.round(usedTokens/GEMINI_CONTEXT_WINDOW*1000)/10)),updatedAt};
 }
 

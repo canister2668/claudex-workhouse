@@ -10,7 +10,7 @@
   import TonePresetSheet from "./TonePresetSheet.svelte";
   import { buildSay } from "./create-summary";
   import { emptyGlobalModelSettings, normalizeGlobalModelSettings, normalizeModelCandidates, type GlobalModelEntry, type GlobalModelSettings } from "./global-model-shape";
-  import { activeAgentStatus, activeSessions, avatarSessionRows, chooseProviderRecent, prioritizeCollaborationStatus, recentCompletedSessions, taskForRecentSession, type AgentRecentSession, type AgentRecentStatus, type CollaborationRecentStatuses } from "./agent-status";
+  import { activeAgentStatus, activeSessions, avatarSessionRows, chooseProviderRecent, prioritizeCollaborationStatus, recentTerminalSessions, taskForRecentSession, type AgentRecentSession, type AgentRecentStatus, type CollaborationRecentStatuses } from "./agent-status";
   import { connectedParticipants, creationBlockReason, fallbackProvider, participantList, providerAvailability, providerAvailabilityPhase, providerConnected, type ProviderAvailability } from "./provider-availability";
   import { effortLabel, modelLabel, permissionLabel as permLabel, relativeTime as ago, shortId, statusLabel } from "./session-ui";
   import SessionBadges from "./SessionBadges.svelte";
@@ -63,6 +63,9 @@
   import { DEFAULT_CHARACTERS, TONE_PRESETS, type CharacterSettings, type TonePreset } from "./character-settings";
   import { avatarDisplayMode } from "./provider-name-mark";
   import { requestJson, type ApiRequestOptions } from "./api-client";
+  import ClaudeBillingToggle from "./ClaudeBillingToggle.svelte";
+  import { claudeFastModeModel } from "./claude-fast-mode";
+  import SpeedCostNotice from "./SpeedCostNotice.svelte";
   import { applyIndependentRegion, summarizeLoaderFailures, type LoaderFailure } from "./independent-loader";
   import { mergeWorkspaceRecords } from "./identity-selectors";
   import { resolveViewerWorkspace } from "./workspace-recovery";
@@ -410,6 +413,22 @@
     const h = Math.floor(diff/3600000), m = Math.round((diff%3600000)/60000);
     return h >= 24 ? $t("quota.resetDays",{days:Math.floor(h/24),hours:h%24}) : h ? $t("quota.resetHours",{hours:h,minutes:m}) : $t("quota.resetMinutes",{minutes:m});
   };
+  const resetCreditCount=(q:any)=>typeof q?.resetCredits?.available==="number"?q.resetCredits.available:0;
+  const nearestResetExpiry=(q:any):string|null=>(q?.resetCredits?.credits??[]).map((credit:any)=>credit.expiresAt).filter((iso:unknown):iso is string=>typeof iso==="string").sort((x:string,y:string)=>Date.parse(x)-Date.parse(y))[0]??null;
+  $: quotaResetSummary=([["codex","Codex"],["claude","Claude"]] as const).map(([provider,name])=>({provider,name,count:resetCreditCount(quota?.[provider]),nearest:nearestResetExpiry(quota?.[provider]),urgent:urgentResetCount(quota?.[provider])})).filter(item=>item.count>0);
+  const RESET_CREDIT_URGENT_MS=3*86_400_000;
+  const urgentResetCount=(q:any)=>(q?.resetCredits?.credits??[]).filter((credit:any)=>typeof credit.expiresAt==="string"&&Date.parse(credit.expiresAt)-Date.now()<RESET_CREDIT_URGENT_MS).reduce((sum:number,credit:any)=>sum+(credit.count??1),0);
+  const fmtResetShort=(iso:string|null)=>{
+    if(!iso) return $t("quota.resetCreditNoExpiry");
+    const days=Math.floor((Date.parse(iso)-Date.now())/86400000),date=new Intl.DateTimeFormat($locale,{month:"numeric",day:"numeric"}).format(new Date(iso));
+    return days<1?$t("quota.resetCreditShortToday",{date}):$t("quota.resetCreditShort",{date,days});
+  };
+  $: quotaResetTitle=quotaResetSummary.map(item=>$t("quota.resetCreditsProvider",{provider:item.name,count:item.count,expiry:fmtResetShort(item.nearest)})).join(" / ");
+  const fmtResetCreditExpiry=(iso:string|null)=>{
+    if(!iso) return $t("quota.resetCreditNoExpiry");
+    const days=Math.floor((Date.parse(iso)-Date.now())/86400000),date=formatDateTime(iso,$locale);
+    return days<1?$t("quota.resetCreditExpiresToday",{date}):$t("quota.resetCreditExpires",{date,days});
+  };
   let theme: "auto"|"light"|"dark" = (localStorage.getItem("deck-theme") as "light"|"dark"|null) ?? "auto";
   function syncThemeChrome(){requestAnimationFrame(()=>{const color=getComputedStyle(document.documentElement).backgroundColor;document.querySelector<HTMLMetaElement>('meta[name="theme-color"]')?.setAttribute("content",color);});}
   function applyTheme(value:typeof theme){theme=value;if(value==="auto"){localStorage.removeItem("deck-theme");delete document.documentElement.dataset.theme;}else{localStorage.setItem("deck-theme",value);document.documentElement.dataset.theme=value;}syncThemeChrome();}
@@ -437,7 +456,7 @@
   type ClaudeModelTransition={scope:string;from:string;to:string;fromName:string;toName:string};
   let claudeCatalogLoading=true;let claudeCatalogRefreshing=false;let codexCatalogRefreshing=false;let providerCatalogRefreshing:Partial<Record<ProviderId,boolean>>={};let claudeCatalogMeta:ClaudeCatalogMeta|null=null;let claudeModelTransitions:ClaudeModelTransition[]=[];
   type RuntimeStatus={provider:ProviderId;name:string;current:string|null;latest:string|null;updateAvailable:boolean|null;managed:boolean;source:string;checkedAt:string|null;canUpdate:boolean;checksum:string|null;checksumSource?:"package"|"binary"|null;fault?:string|null;management:"managed"|"external"|"api";dependsOn:"codex"|"claude"|null;configured:boolean|null};
-  type RuntimeAutoUpdateSettings={version:1;providers:Record<"codex"|"claude",boolean>};
+  type RuntimeAutoUpdateSettings={version:1;providers:Record<"codex"|"claude"|"grok",boolean>};
   type ApplicationUpdateStatus={state:string;current:{version:string;installMethod:string};target:{version:string;publishedAt:string;manifestSha256:string;keyId:string}|null;updateAvailable:boolean;reason:string|null;blockers:Array<{kind:string;id:string;status:string}>;recentAttempts:Array<{id:string;state:string;sourceVersion:string;targetVersion:string;rollbackPerformed:boolean;error:string|null;updatedAt:string}>};
   type AvatarNoticeAction={type:"open-provider-models";provider:ProviderId};
   type RuntimeAvatarNotice={key:string;emotion:string;line:string;statusLine:string;action?:AvatarNoticeAction};
@@ -453,9 +472,9 @@
     {provider:"antigravity",name:"Gemini Antigravity CLI",management:"external"},{provider:"grok",name:"Grok CLI",management:"external"},
     {provider:"deepseek",name:"DeepSeek",management:"api"},{provider:"ollama",name:"Ollama Cloud",management:"api"},
   ];
-  let runtimeBusy:"check"|"codex"|"claude"|null=null;
-  let runtimeSettingsBusy:"codex"|"claude"|null=null;
-  let runtimeAutoUpdate:RuntimeAutoUpdateSettings={version:1,providers:{codex:false,claude:false}};
+  let runtimeBusy:"check"|"codex"|"claude"|"grok"|null=null;
+  let runtimeSettingsBusy:"codex"|"claude"|"grok"|null=null;
+  let runtimeAutoUpdate:RuntimeAutoUpdateSettings={version:1,providers:{codex:false,claude:false,grok:true}};
   let runtimeAvatarNotices:Partial<Record<ProviderId,RuntimeAvatarNotice>>={};
   let runtimeNoticeQueues:Partial<Record<ProviderId,RuntimeAvatarNotice[]>>={};
   const runtimeNoticeTimers:Partial<Record<ProviderId,ReturnType<typeof setTimeout>>>={};
@@ -474,7 +493,7 @@
   const authStreams:Partial<Record<ConnectionAuthProvider,EventSource>>={};
   const authWindows:Partial<Record<ConnectionAuthProvider,Window>>={};
   const AUTH_TERMINAL=new Set<AuthAttempt["state"]>(["completed","failed","cancelled","timeout"]);let authPollTimer:ReturnType<typeof setInterval>|null=null;let authPollBusy=false;
-  const runtimeFor=(provider:"codex"|"claude")=>runtimes.find(item=>item.provider===provider);
+  const runtimeFor=(provider:"codex"|"claude"|"grok")=>runtimes.find(item=>item.provider===provider);
   const accountFor=(provider:ConnectionAuthProvider)=>providerAccounts.find(item=>item.provider===provider);
   // One source of truth for "may this provider take new work": the connection
   // snapshot. Session history no longer keeps a provider in any creation path,
@@ -574,7 +593,7 @@
   let globalClaudeEffort=globalPrefs.claudeEffort??savedPrefs.claudeEffort??"medium";
   let globalClaudeWorkMode:WorkMode=(globalPrefs.claudeWorkMode??savedPrefs.claudeWorkMode)==="plan"||(globalPrefs.claudeWorkMode??savedPrefs.claudeWorkMode)==null&&(globalPrefs.claudePermission??savedPrefs.claudePermission??":read-only")===":read-only"?"plan":"default";
   let globalClaudeAutomation:AutomationLevel=automationLevelOf(globalPrefs.claudePermission??savedPrefs.claudePermission??":read-only",{automationLevel:globalPrefs.claudeAutomation??savedPrefs.claudeAutomation});
-  let createModel=globalCodexModel;let createEffort=globalCodexEffort;let createTier:string|null=globalCodexTier;let createPermission=permissionForAutomation("codex",globalCodexAutomation);let dangerAcknowledged=dangerFullAccessAcknowledged();let dangerConfirmed=dangerAcknowledged;
+  let createModel=globalCodexModel;let createEffort=globalCodexEffort;let createTier:string|null=globalCodexTier;let createClaudeTier:string|null=null;let createPermission=permissionForAutomation("codex",globalCodexAutomation);let dangerAcknowledged=dangerFullAccessAcknowledged();let dangerConfirmed=dangerAcknowledged;
   let createClaudePermission=permissionForAutomation("claude",globalClaudeAutomation);let createClaudeModel=globalClaudeModel;let createClaudeEffort=globalClaudeEffort;
   type CompatibleExecutionProvider="antigravity"|"deepseek"|"ollama"|"grok";
   type VertexGoogleSearchMode="off"|"auto"|"always";
@@ -631,7 +650,7 @@
     editWorkMode=workModeOf(selected.provider,selected.permissionProfile,selected.metadata);
     editAutomation=automationLevelOf(selected.permissionProfile,selected.metadata);
     editGoogleSearchMode=vertexGoogleSearchMode(selected.metadata?.googleSearchMode);
-    if(selected.provider==="claude"){editModel=selected.requestedModel??"default";editEffort=selected.requestedReasoningEffort??"default";editPermission=selected.permissionProfile??":read-only";}
+    if(selected.provider==="claude"){editModel=selected.requestedModel??"default";editEffort=selected.requestedReasoningEffort??"default";editTier=selected.requestedServiceTier==="priority"?"priority":null;editPermission=selected.permissionProfile??":read-only";}
     else if(compatibleCreateProvider(selected.provider)){editModel=selected.requestedModel??globalCompatibleModels[selected.provider];editEffort=selected.requestedReasoningEffort??"default";editPermission=selected.permissionProfile??":read-only";}
     else{editModel=selected.requestedModel||availableCodexModels().find((x:any)=>x.isDefault)?.id||availableCodexModels()[0]?.id||"";const m=allCodexModelOptions().find((x:any)=>x.id===editModel);editEffort=selected.requestedReasoningEffort||m?.defaultReasoningEffort||"medium";editTier=selected.requestedServiceTier??null;editPermission=selected.permissionProfile||":workspace";}
     taskSettingsOpen=true;
@@ -641,7 +660,7 @@
     try{
       if(selected.provider==="claude"){
         editPermission=permissionForWorkMode("claude",editWorkMode,editPermission);
-        const d=await api(`/api/tasks/claude/${encodeURIComponent(selected.id)}/settings`,{method:"PATCH",body:JSON.stringify({model:editModel,reasoningEffort:editEffort,permissionProfile:editPermission,workMode:editWorkMode,automationLevel:editAutomation,dangerConfirmation:editDanger,projectId:editProject,workspaceId:editWorkspace})});
+        const d=await api(`/api/tasks/claude/${encodeURIComponent(selected.id)}/settings`,{method:"PATCH",body:JSON.stringify({model:editModel,reasoningEffort:editEffort,serviceTier:editTier==="priority"&&claudeFastModeModel(editModel)?"priority":null,permissionProfile:editPermission,workMode:editWorkMode,automationLevel:editAutomation,dangerConfirmation:editDanger,projectId:editProject,workspaceId:editWorkspace})});
         selected=d.task;taskState.upsert(d.task);
       }else if(compatibleCreateProvider(selected.provider)){
         editPermission=permissionForWorkMode(selected.provider,editWorkMode,editPermission);
@@ -954,7 +973,7 @@
   $: ollamaRecent=taskRecent("ollama",avatarTasks);
   $: antigravityRecent=taskRecent("antigravity",avatarTasks);
   $: collaborationStreamOwners=selectedCollaboration?Object.fromEntries(conversationProviders.map(provider=>[provider,activeAgentStatus(collaborationRecent[provider])])):{};
-  $: avatarCompleted={codex:recentCompletedSessions(avatarTasks,"codex"),claude:recentCompletedSessions(avatarTasks,"claude"),antigravity:recentCompletedSessions(avatarTasks,"antigravity"),deepseek:recentCompletedSessions(avatarTasks,"deepseek"),ollama:recentCompletedSessions(avatarTasks,"ollama"),grok:recentCompletedSessions(avatarTasks,"grok")};
+  $: avatarCompleted={codex:recentTerminalSessions(avatarTasks,"codex"),claude:recentTerminalSessions(avatarTasks,"claude"),antigravity:recentTerminalSessions(avatarTasks,"antigravity"),deepseek:recentTerminalSessions(avatarTasks,"deepseek"),ollama:recentTerminalSessions(avatarTasks,"ollama"),grok:recentTerminalSessions(avatarTasks,"grok")};
   $: avatarActive={codex:activeSessions(avatarTasks,"codex"),claude:activeSessions(avatarTasks,"claude"),antigravity:activeSessions(avatarTasks,"antigravity"),deepseek:activeSessions(avatarTasks,"deepseek"),ollama:activeSessions(avatarTasks,"ollama"),grok:activeSessions(avatarTasks,"grok")};
   const projectName = (id:string) => projects.find((item) => item.id === id)?.name ?? id;
   const projectLabel = (task:Task) => task.projectId.startsWith("dir:") ? (task.cwd ? `…/${task.cwd.split("/").filter(Boolean).slice(-1)[0]}` : $t("workspace.localFolder")) : projectName(task.projectId);
@@ -1065,14 +1084,15 @@
   const createEffortsFor=(provider:ProviderId)=>provider==="codex"?(createModelInfo()?.supportedReasoningEfforts??[]):provider==="claude"?claudeEfforts:compatibleEffortOptions(provider as CompatibleExecutionProvider);
   const createEffortFor=(provider:ProviderId)=>provider==="codex"?createEffort:provider==="claude"?createClaudeEffort:createCompatibleEfforts[provider as CompatibleExecutionProvider];
   function setCreateEffort(value:string){if(createProvider==="codex")createEffort=value;else if(createProvider==="claude")createClaudeEffort=value;else createCompatibleEfforts={...createCompatibleEfforts,[createProvider]:value};}
-  const createHasPriority=()=>createProvider==="codex"&&Boolean(createModelInfo()?.serviceTiers?.some((item:any)=>item.id==="priority"));
+  const createHasPriority=()=>createProvider==="codex"?Boolean(createModelInfo()?.serviceTiers?.some((item:any)=>item.id==="priority")):createProvider==="claude"&&claudeFastModeModel(createClaudeModel);
+  const createTierFor=()=>createProvider==="claude"?createClaudeTier:createTier;
   // The branch is whatever the workspace is on: the create payload has no
   // branch field, so the composer only shows it.
   const createBranch=()=>{const branch=workspaces.find(item=>item.id===createWorkspace)?.lastGitStatus?.branch;return typeof branch==="string"&&branch?branch:null;};
   // Slot values only drive the Korean particles; the rendered tokens are the controls.
   $: createComposerParts=tracked(createProvider,createWorkspace,workspaces,createAutomationNow,$t)?buildSay($t("create.composerSentence"),{agent:providerDisplayName(createProvider),workspace:createWorkspaceLabel(),automation:automationLabel(createAutomationNow)}):[];
-  $: createAdvancedSummary=tracked(createProvider,createModel,createEffort,createClaudeEffort,createCompatibleEfforts,createTier,createHost,createWorkspace,workspaces,hosts,createCodexWorkMode,createClaudeWorkMode,createCompatibleWorkModes,$t)
-    ?[createEffortFor(createProvider)?effortLabel(createEffortFor(createProvider)):"",createHasPriority()&&createTier==="priority"?$t("model.fast"):"",createHostLabel(),createBranch()??"",createWorkModeFor(createProvider)==="plan"?$t("workMode.plan"):""].filter(Boolean).join(" · "):"";
+  $: createAdvancedSummary=tracked(createProvider,createModel,createEffort,createClaudeEffort,createCompatibleEfforts,createTier,createClaudeTier,createClaudeModel,createHost,createWorkspace,workspaces,hosts,createCodexWorkMode,createClaudeWorkMode,createCompatibleWorkModes,$t)
+    ?[createEffortFor(createProvider)?effortLabel(createEffortFor(createProvider)):"",createHasPriority()&&createTierFor()==="priority"?$t("model.fast"):"",createHostLabel(),createBranch()??"",createWorkModeFor(createProvider)==="plan"?$t("workMode.plan"):""].filter(Boolean).join(" · "):"";
   const sameLocalDay=(iso:string)=>{const day=new Date(iso),today=new Date();return day.getFullYear()===today.getFullYear()&&day.getMonth()===today.getMonth()&&day.getDate()===today.getDate();};
   function setCreateTurns(value:number){debateMaxTurns=Math.min(100,Math.max(1,Math.round(Number.isFinite(value)?value:1)));}
   function syncCreateWorkspace(){
@@ -1387,6 +1407,11 @@
     codexAvatar=value;
     try{const saved=JSON.parse(localStorage.getItem("deck-global-settings")||"{}");localStorage.setItem("deck-global-settings",JSON.stringify({...saved,codexAvatar:value}));}catch{}
   }
+  let codexDetailTaskId:string|null=null;
+  function changeToneFavorites(provider:ProviderId,toneFavorites:import("./character-settings").TonePreset[]){
+    characterSettings={...characterSettings,providers:{...characterSettings.providers,[provider]:{...characterSettings.providers[provider],toneFavorites}}};
+    try{const baseline=JSON.parse(globalBaseline.characters);baseline.providers[provider].toneFavorites=toneFavorites;globalBaseline.characters=JSON.stringify(baseline);}catch{}
+  }
   function changeAvatarOutfit(provider:ProviderId,outfit:string){
     if(provider==="codex")changeCodexAvatar(outfit);
     if(!charactersLoaded)return;
@@ -1495,14 +1520,14 @@
   async function loadSystemDiagnostic(){diagnosticBusy=true;try{systemDiagnostic=(await api("/api/system/diagnostics")).report;}catch(e){runtimeNotice=e instanceof Error?e.message:String(e)}finally{diagnosticBusy=false;}}
   async function copySystemDiagnostic(){if(systemDiagnostic)await navigator.clipboard.writeText(JSON.stringify(systemDiagnostic,null,2));}
   async function checkUpdates(){if(runtimeBusy)return;runtimeBusy="check";runtimeNotice="";try{const data=await api("/api/runtime-updates/check",{method:"POST",body:"{}"});runtimes=data.runtimes??[];if(data.autoUpdate)runtimeAutoUpdate=data.autoUpdate;runtimeNotice=$t(runtimes.some(item=>item.updateAvailable)?"runtime.updateAvailable":"runtime.upToDate");}catch(e){runtimeNotice=e instanceof Error?e.message:String(e)}finally{runtimeBusy=null;}}
-  async function updateRuntime(provider:"codex"|"claude"){
+  async function updateRuntime(provider:"codex"|"claude"|"grok"){
     const item=runtimeFor(provider);if(runtimeBusy||!item?.canUpdate||!item.updateAvailable)return;
     if(!confirm($t("runtime.updateConfirm",{name:item.name,current:item.current??$t("runtime.currentVersion"),latest:item.latest??$t("runtime.latestVersion")})))return;
     runtimeBusy=provider;runtimeNotice=$t("runtime.updating",{name:item.name});
     try{const data=await api(`/api/runtime-updates/${provider}`,{method:"POST",body:JSON.stringify({confirm:true})});runtimes=data.runtimes??[];if(data.autoUpdate)runtimeAutoUpdate=data.autoUpdate;runtimeNotice=$t("runtime.updated",{name:item.name});}
     catch(e){runtimeNotice=e instanceof Error?e.message:String(e)}finally{runtimeBusy=null;}
   }
-  async function toggleRuntimeAutoUpdate(provider:"codex"|"claude",enabled:boolean){
+  async function toggleRuntimeAutoUpdate(provider:"codex"|"claude"|"grok",enabled:boolean){
     if(runtimeSettingsBusy)return;runtimeSettingsBusy=provider;runtimeNotice="";const previous=runtimeAutoUpdate;runtimeAutoUpdate={...previous,providers:{...previous.providers,[provider]:enabled}};
     try{const data=await api("/api/runtime-updates/settings",{method:"PUT",headers:{"Idempotency-Key":uuid()},body:JSON.stringify(runtimeAutoUpdate)});runtimeAutoUpdate=data.autoUpdate;runtimeNotice=$t(enabled?"runtime.autoUpdateEnabled":"runtime.autoUpdateDisabled",{name:providerName(provider)});}
     catch(e){runtimeAutoUpdate=previous;runtimeNotice=e instanceof Error?e.message:String(e);}finally{runtimeSettingsBusy=null;}
@@ -1797,8 +1822,8 @@
   function currentCreatePayload(){
     const workMode=createWorkModeFor(createProvider);
     const automationLevel=createAutomationFor(createProvider);
-    const compatibleModel=createProvider==="deepseek"||createProvider==="ollama"||createProvider==="antigravity"?compatibleCreateModel():null;
-    return{provider:createProvider,projectId:createProject,executionHostId:createHost,workspaceId:createWorkspace||undefined,prompt:withAttachments(createPrompt,createAttachments),workMode,automationLevel,...(createProvider==="antigravity"?{googleSearchMode:createGoogleSearchMode}:{}),...(createProvider==="codex"?{model:createModel,reasoningEffort:createEffort,serviceTier:createTier,permissionProfile:createPermission,dangerConfirmation:dangerConfirmed,fullAccessAcknowledged:dangerConfirmed,acknowledgementVersion:dangerConfirmed?1:undefined}:{permissionProfile:createPermissionFor(createProvider),model:createProvider==="claude"?(createClaudeModel==="default"?null:createClaudeModel):compatibleModel,reasoningEffort:createProvider==="claude"?(createClaudeEffort==="default"?null:createClaudeEffort):(createCompatibleEfforts[createProvider as CompatibleExecutionProvider]==="default"?null:createCompatibleEfforts[createProvider as CompatibleExecutionProvider]),dangerConfirmation:dangerConfirmed,fullAccessAcknowledged:dangerConfirmed,acknowledgementVersion:dangerConfirmed?1:undefined})};
+    const compatibleModel=compatibleCreateProvider(createProvider)?compatibleCreateModel():null;
+    return{provider:createProvider,projectId:createProject,executionHostId:createHost,workspaceId:createWorkspace||undefined,prompt:withAttachments(createPrompt,createAttachments),workMode,automationLevel,...(createProvider==="claude"&&createClaudeTier==="priority"&&claudeFastModeModel(createClaudeModel)?{serviceTier:"priority"}:{}),...(createProvider==="antigravity"?{googleSearchMode:createGoogleSearchMode}:{}),...(createProvider==="codex"?{model:createModel,reasoningEffort:createEffort,serviceTier:createTier,permissionProfile:createPermission,dangerConfirmation:dangerConfirmed,fullAccessAcknowledged:dangerConfirmed,acknowledgementVersion:dangerConfirmed?1:undefined}:{permissionProfile:createPermissionFor(createProvider),model:createProvider==="claude"?(createClaudeModel==="default"?null:createClaudeModel):compatibleModel,reasoningEffort:createProvider==="claude"?(createClaudeEffort==="default"?null:createClaudeEffort):(createCompatibleEfforts[createProvider as CompatibleExecutionProvider]==="default"?null:createCompatibleEfforts[createProvider as CompatibleExecutionProvider]),dangerConfirmation:dangerConfirmed,fullAccessAcknowledged:dangerConfirmed,acknowledgementVersion:dangerConfirmed?1:undefined})};
   }
   function finishCreateForm(){createOpen=false;createPrompt="";createAttachments=[];vscodeContext=null;}
   // Recomputed from raw state rather than the reactive snapshot so a keyboard or
@@ -2146,7 +2171,7 @@
 <svelte:head><meta name="color-scheme" content="dark light" /></svelte:head>
 
 {#snippet shellUtilities(labelled:boolean)}
-  <button type="button" data-popup-trigger="quota" class="icon-button quota-btn {barClass(quotaPeak())}" class:labelled class:active={quotaOpen} aria-label={$t("quota.title")} title={$t("quota.title")} onclick={()=>{closeOverflow();quotaOpen=!quotaOpen;if(quotaOpen)void loadQuota(true);}}><Gauge size={19}/>{#if labelled}<span>{$t("quota.title")}</span>{/if}</button>
+  <button type="button" data-popup-trigger="quota" class="icon-button quota-btn {barClass(quotaPeak())}" class:labelled class:active={quotaOpen} aria-label={$t("quota.title")} title={quotaResetTitle?`${$t("quota.title")} · ${quotaResetTitle}`:$t("quota.title")} onclick={()=>{closeOverflow();quotaOpen=!quotaOpen;if(quotaOpen)void loadQuota(true);}}><Gauge size={19}/>{#if labelled}<span>{$t("quota.title")}</span>{/if}{#if quotaResetSummary.length}<span class="quota-reset-badges" aria-hidden="true">{#each quotaResetSummary as item (item.provider)}<b class="quota-reset-badge {item.provider}">{item.count}</b>{/each}</span>{/if}</button>
   <button type="button" class="icon-button" class:labelled class:active={globalOpen} aria-label={$t("a11y.openSettings")} title={$t("settings.title")} onclick={()=>{closeOverflow();if(globalOpen)closeGlobalSettings();else openGlobalSettings();}}><Settings size={19}/>{#if labelled}<span>{$t("settings.title")}</span>{/if}</button>
   <button type="button" class="icon-button" class:labelled aria-label={$t("a11y.openSearch")} title={$t("palette.open")} onclick={()=>{closeOverflow();openPalette();}}><Search size={19}/>{#if labelled}<span>{$t("palette.open")}</span>{/if}</button>
   <!-- Lists are live, so the desktop header spends no room on refresh; it stays
@@ -2367,7 +2392,7 @@
       {/if}
     </div>
     {/if}
-    {#if codexMounted}<div class="codex-session-pane" hidden={engine!=="codex"&&!codexDetailOpen}><CodexSessions active={engine==="codex"||codexDetailOpen} {api} bind:this={codexRef} bind:status={codexStatus} bind:projectId={codexProjectFilter} bind:source={codexSourceFilter} bind:ownership={codexOwnershipFilter} bind:model={codexModelFilter} sessionScope="regular" classificationContext={sessionClassificationContext} {taskState} {query} {enterToSend} {scrollAutoSwitch} {projects} {workspaces} {hosts} modelOptions={availableCodexModels()} providerQuota={quota?.codex??null} {codexAvatar} onDetail={(o)=>codexDetailOpen=o} onRecentStatus={(recent)=>codexSessionRecent=recent} onOpenTask={(task)=>openTask(task)} onOpenFile={openConversationFile}/></div>{/if}
+    {#if codexMounted}<div class="codex-session-pane" hidden={engine!=="codex"&&!codexDetailOpen}><CodexSessions active={engine==="codex"||codexDetailOpen} {api} bind:this={codexRef} bind:status={codexStatus} bind:projectId={codexProjectFilter} bind:source={codexSourceFilter} bind:ownership={codexOwnershipFilter} bind:model={codexModelFilter} sessionScope="regular" classificationContext={sessionClassificationContext} {taskState} {query} {enterToSend} {scrollAutoSwitch} {projects} {workspaces} {hosts} modelOptions={availableCodexModels()} providerQuota={quota?.codex??null} {codexAvatar} onDetail={(o,taskId)=>{codexDetailOpen=o;codexDetailTaskId=taskId??null;}} onRecentStatus={(recent)=>codexSessionRecent=recent} onOpenTask={(task)=>openTask(task)} onOpenFile={openConversationFile}/></div>{/if}
     {#if engine!=="codex"&&!codexDetailOpen}<main class="task-list session-browser-list">
       {#if searchOpen&&query.trim()}
         <HistorySearchResults {api} {query} {workspaces} initialProvider={engine==="claude"?"claude":""} onopen={openHistoryResult}/>
@@ -2521,7 +2546,7 @@
     <main class="detail">
       <div class="detail-main">
       <section class="task-heading" class:collapsed={headingCollapsed} inert={chromeHidden} use:chromeCollapse>
-        <div class="task-heading-top"><SessionBadges provider={selected.provider} status={selected.status} liveMode={liveStatus} ownership={selected.ownership}/>{#if headingCollapsed}<strong class="collapsed-title">{selected.title}</strong>{/if}<span class="task-heading-tools"><ChangedFilesChip files={detailFileEntries} canOpen={detailFileCanOpen} onopen={openDetailFile}/>{@render sessionActionsMenu(selected)}</span><button class="heading-toggle" aria-label={$t(headingCollapsed?"session.expandTitle":"session.collapseTitle")} title={$t(headingCollapsed?"session.expandTitle":"session.collapseTitle")} onclick={()=>headingCollapsed=!headingCollapsed}>{#if headingCollapsed}<ChevronDown size={18}/>{:else}<ChevronUp size={18}/>{/if}</button></div>
+        <div class="task-heading-top"><SessionBadges provider={selected.provider} status={selected.status} liveMode={liveStatus} ownership={selected.ownership}/>{#if headingCollapsed}<strong class="collapsed-title">{selected.title}</strong>{/if}<span class="task-heading-tools"><ChangedFilesChip files={detailFileEntries} canOpen={detailFileCanOpen} onopen={openDetailFile}/>{#if selected.provider==="claude"}<ClaudeBillingToggle/>{/if}{@render sessionActionsMenu(selected)}</span><button class="heading-toggle" aria-label={$t(headingCollapsed?"session.expandTitle":"session.collapseTitle")} title={$t(headingCollapsed?"session.expandTitle":"session.collapseTitle")} onclick={()=>headingCollapsed=!headingCollapsed}>{#if headingCollapsed}<ChevronDown size={18}/>{:else}<ChevronUp size={18}/>{/if}</button></div>
         {#if !headingCollapsed}<div class="heading-expanded">{#if renameEditing}<div class="session-title-editor"><input bind:value={renameTitle} aria-label={$t("session.rename")} maxlength="100" onkeydown={renameKeydown} use:focusNode/><button type="button" class="save" aria-label={$t("common.save")} title={$t("common.save")} disabled={!renameTitle.trim()||renameSaving} onclick={saveRename}>{#if renameSaving}<LoaderCircle class="spin" size={17}/>{:else}<Check size={17}/>{/if}</button><button type="button" aria-label={$t("common.cancel")} title={$t("common.cancel")} disabled={renameSaving} onclick={cancelRename}><X size={17}/></button></div>{:else}<div class="session-title-row"><h1>{selected.title}</h1><button type="button" class="session-title-edit" aria-label={$t("session.rename")} title={$t("session.rename")} onclick={beginRename}><Pencil size={15}/></button></div>{/if}
         <p>{hostName(selected.executionHostId)}{#if workerOnline(selected.executionHostId)===false} · <span class="err-text">{$t("status.offline")}</span>{/if} · {projectLabel(selected)}{#if executionBackendLabel(selected.metadata)} · {executionBackendLabel(selected.metadata)}{/if} · {ago(selected.updatedAt)}</p>
         <div class="id-row"><button onclick={()=>copySelected("task")} title={$t("task.copyId")}><span>{$t("task.label")}</span><code>{shortId(selected.nativeId)}</code><Clipboard size={15}/></button><button onclick={()=>copySelected("thread")} title={$t("session.copyThreadId")}><span>{$t("session.thread")}</span><code>{shortId(selected.threadId)}</code><Clipboard size={15}/></button></div></div>{/if}
@@ -2624,7 +2649,7 @@
 {#snippet agentDock()}
   <!-- One dock instance: it owns avatar status streams, notices and vibration,
        so it renders in the sidebar or, on phones, in the top bar - never both. -->
-  <AgentAvatarDock codex={codexRecent} claude={claudeRecent} grok={grokRecent} deepseek={deepseekRecent} ollama={ollamaRecent} antigravity={antigravityRecent} connectedProviders={connectedAvatarProviders} activeByProvider={avatarActive} completedByProvider={avatarCompleted} viewingTaskId={selected?.id??null} sessionsLoading={avatarSessionsLoading} sessionsError={avatarSessionsError} onSelect={openRecentSession} onStatusChange={updateAvatarTaskStatus} onOpen={avatarPanelOpen} {showAvatars} {showSpeech} {codexAvatar} {avatarAutoCollapse} {avatarCollapseDelayMs} {avatarTrayShape} statusSuspended={quotaOpen||globalOpen||createOpen} streamSuspendedProviders={collaborationStreamOwners} onCodexAvatarChange={changeCodexAvatar} onAvatarOutfitChange={changeAvatarOutfit} onNoticeAction={handleAvatarNoticeAction} backgroundNotifications={notifications} {vibration} runtimeNotices={runtimeAvatarNotices}/>
+  <AgentAvatarDock codex={codexRecent} claude={claudeRecent} grok={grokRecent} deepseek={deepseekRecent} ollama={ollamaRecent} antigravity={antigravityRecent} connectedProviders={connectedAvatarProviders} activeByProvider={avatarActive} completedByProvider={avatarCompleted} viewingTaskId={selected?.id??null} toneTask={selected?{id:selected.id,provider:selected.provider}:codexDetailOpen&&codexDetailTaskId?{id:codexDetailTaskId,provider:"codex"}:null} onToneFavorites={changeToneFavorites} sessionsLoading={avatarSessionsLoading} sessionsError={avatarSessionsError} onSelect={openRecentSession} onStatusChange={updateAvatarTaskStatus} onOpen={avatarPanelOpen} {showAvatars} {showSpeech} {codexAvatar} {avatarAutoCollapse} {avatarCollapseDelayMs} {avatarTrayShape} statusSuspended={quotaOpen||globalOpen||createOpen} streamSuspendedProviders={collaborationStreamOwners} onCodexAvatarChange={changeCodexAvatar} onAvatarOutfitChange={changeAvatarOutfit} onNoticeAction={handleAvatarNoticeAction} backgroundNotifications={notifications} {vibration} runtimeNotices={runtimeAvatarNotices}/>
 {/snippet}
 
 {#snippet primaryNavButtons(withCounts:boolean)}
@@ -2689,6 +2714,7 @@
     <div class="quota-pop" role="status" use:dismissOnOutside={{onDismiss:()=>quotaOpen=false,triggerSelector:'[data-popup-trigger="quota"]'}}>
       <header><strong>{$t("quota.title")}</strong><span class="quota-actions"><button class="icon-button" aria-label={$t("common.refresh")} title={$t("common.refresh")} disabled={quotaLoading} onclick={()=>void loadQuota(true)}><RefreshCw size={15} class={quotaLoading?"spin":""}/></button></span></header>
       {#if quotaLoading&&!quota}<p class="quota-note">{$t("common.loading")}</p>{/if}
+      {#if quotaResetSummary.length}<div class="quota-reset-summary" aria-label={$t("quota.resetCredits")}>{#each quotaResetSummary as item (item.provider)}<span class="quota-reset-chip {item.provider}" class:urgent={item.urgent>0}><strong>{item.name}</strong> {$t("quota.resetCreditsCount",{count:item.count})} · {fmtResetShort(item.nearest)}{#if item.urgent}{" · "}<em>{$t("quota.resetCreditsUrgent",{count:item.urgent})}</em>{/if}</span>{/each}</div>{/if}
       {#each [["codex","Codex",quota?.codex],["claude","Claude",quota?.claude],["grok","Grok",quota?.grok],["antigravity","Gemini",quota?.antigravity],["deepseek","DeepSeek",quota?.deepseek],["ollama","Ollama Cloud",quota?.ollama]] as [cls,name,q]}
         <section>
           <span class="engine {cls}">{name}</span>{#if q?.plan}<em class="plan">{q.plan}</em>{/if}
@@ -2725,7 +2751,36 @@
             </div>
             {#if !q.balance.available}<p class="quota-note warn-text">{$t("quota.balanceDepleted")}</p>{/if}
           {/if}
-          {#if q?.quotaMode==="vertex-credit"}<p class="quota-note vertex-quota-note"><strong>{$t("antigravityExecution.vertexCreditTitle")}</strong><span>{$t("antigravityExecution.vertexQuotaScope",{project:q.projectId,location:q.location})}</span><small>{$t("antigravityExecution.vertexCreditBody")}</small><a href={q.creditsUrl||`https://console.cloud.google.com/billing?project=${encodeURIComponent(String(q.projectId??""))}`} target="_blank" rel="noopener noreferrer">{$t("antigravityExecution.vertexCreditOpen")}</a></p>
+          {#if q?.resetCredits}
+            {@const resets=q.resetCredits}
+            {@const listed=resets.credits.reduce((sum:number,credit:any)=>sum+credit.count,0)}
+            {@const urgent=urgentResetCount(q)}
+            {@const nearest=nearestResetExpiry(q)}
+            <details class="quota-resets" class:urgent={urgent>0}>
+              <summary>
+                <span class="quota-resets-head"><strong>{$t("quota.resetCredits")}</strong><span class="count" class:none={!resets.available}>{$t("quota.resetCreditsCount",{count:resets.available})}</span><ChevronDown size={14} class="quota-resets-chevron"/></span>
+                {#if resets.available&&nearest}<span class="quota-reset-nearest">{$t("quota.resetCreditsNearest",{expiry:fmtResetCreditExpiry(nearest)})}</span>{/if}
+                {#if urgent}<span class="quota-reset-urgent"><CircleAlert size={13}/>{$t("quota.resetCreditsUrgentDetail",{count:urgent})}</span>{/if}
+              </summary>
+              {#each resets.credits as credit (credit.id)}
+                <p class="quota-reset-credit" class:urgent={typeof credit.expiresAt==="string"&&Date.parse(credit.expiresAt)-Date.now()<RESET_CREDIT_URGENT_MS}><span>{credit.title??$t("quota.resetCredits")}{#if credit.count>1} ×{credit.count}{/if}</span><small>{fmtResetCreditExpiry(credit.expiresAt)}{#if credit.usableNow===false} · {$t("quota.resetCreditWaiting")}{/if}</small></p>
+              {/each}
+              {#if resets.available>listed}<p class="quota-reset-credit"><small>{$t("quota.resetCreditsMore",{count:resets.available-listed})}</small></p>{/if}
+              {#if resets.available}<p class="quota-reset-credit"><small>{$t("quota.resetCreditsRedeemHint")}</small></p>{:else}<p class="quota-reset-credit"><small>{$t("quota.resetCreditsNone")}</small></p>{/if}
+            </details>
+          {/if}
+          {#if q?.quotaMode==="api-credit"&&q.apiCredit}
+            {@const credit=q.apiCredit}
+            {@const creditPct=credit.monthlyCreditUsd>0?Math.min(100,credit.spentUsd/credit.monthlyCreditUsd*100):0}
+            <div class="quota-balance" class:depleted={credit.remainingUsd<=0}>
+              <strong>{$t("claudeBilling.remaining")}</strong>
+              <span>{formatCurrency(credit.remainingUsd,"USD",$locale)}</span>
+              <small>{$t("claudeBilling.quotaSpent",{spent:formatCurrency(credit.spentUsd,"USD",$locale),total:formatCurrency(credit.monthlyCreditUsd,"USD",$locale)})}</small>
+            </div>
+            <div class="quota-line"><span>{$t("claudeBilling.quotaCycle")}</span><div class="qbar"><i class={barClass(creditPct)} style={`width:${creditPct}%`}></i></div><span class="pct">{quotaPct(creditPct)}%</span></div>
+            <p class="quota-note">{$t(credit.source==="organization"?"claudeBilling.sourceOrganization":credit.error?"claudeBilling.sourceFallback":"claudeBilling.sourceLocal")}</p>
+          {/if}
+          {#if q?.quotaMode==="api-credit"}{:else if q?.quotaMode==="vertex-credit"}<p class="quota-note vertex-quota-note"><strong>{$t("antigravityExecution.vertexCreditTitle")}</strong><span>{$t("antigravityExecution.vertexQuotaScope",{project:q.projectId,location:q.location})}</span><small>{$t("antigravityExecution.vertexCreditBody")}</small><a href={q.creditsUrl||`https://console.cloud.google.com/billing?project=${encodeURIComponent(String(q.projectId??""))}`} target="_blank" rel="noopener noreferrer">{$t("antigravityExecution.vertexCreditOpen")}</a></p>
           {:else if q?.limitsAvailable===false}<p class="quota-note">{$t(q?.balance?"quota.prepaidLimits":"quota.accountLimitsUnavailable")}</p>{:else if !quotaLoading && !q?.fiveHour && !q?.sevenDay && !q?.modelPools?.length}<p class="quota-note">{$t("quota.noData")}</p>{/if}
           {#if q?.error === "rate_limited"}<p class="quota-note warn-text">{$t("quota.rateLimited")}</p>
           {:else if q?.error}<p class="quota-note warn-text">{$t("quota.unavailable")} · {$t("quota.retrying")}</p>
@@ -2878,7 +2933,7 @@
         <details class="composer-advanced" id="create-automation" bind:open={createAdvancedOpen}>
           <summary><span>{$t("create.advanced")}</span><small>{createAdvancedSummary}</small></summary>
           <div class="composer-advanced-body">
-            <ModelPicker fields={["effort","tier"]} layout="row" provider={createProvider} efforts={createEffortsFor(createProvider)} effort={createEffortFor(createProvider)} hasPriority={createHasPriority()} tier={createTier} disabled={createOpening} idPrefix="create-advanced" oneffort={setCreateEffort} ontier={(value)=>createTier=value}/>
+            <ModelPicker fields={["effort","tier"]} layout="row" provider={createProvider} efforts={createEffortsFor(createProvider)} effort={createEffortFor(createProvider)} hasPriority={createHasPriority()} tier={createTierFor()} disabled={createOpening} idPrefix="create-advanced" oneffort={setCreateEffort} ontier={(value)=>{if(createProvider==="claude")createClaudeTier=value;else createTier=value;}}/><SpeedCostNotice provider={createProvider} tier={createHasPriority()?createTierFor():null}/>
             <div class="cf" role="group" aria-label={$t("create.executionLocation")} id="create-host"><span class="cf-n">{$t("create.executionLocation")}</span><div class="host-choice-grid">{#each hosts as item}<button type="button" class:active={createHost===item.id} disabled={createLocationLoading||item.status!=="online"} onclick={()=>{createHost=item.id;syncCreateWorkspace();}}><strong>{executionHostName(item)}</strong><small>{item.platform} · {$t(`status.${item.status}`)}{item.lastSeenAt?` · ${ago(item.lastSeenAt)}`:""}</small></button>{/each}</div></div>
             <div class="cf" id="create-branch"><span class="cf-n">{$t("create.branch")}</span><span class="composer-branch">{createBranch()??$t("common.unknown")}</span><small>{$t("create.branchHelp")}</small></div>
             <div class="cf composer-switch-row" id="create-workmode"><span class="cf-n">{$t("workMode.plan")}</span><Switch checked={createWorkModeNow==="plan"} label={$t("workMode.plan")} onchange={(checked)=>chooseCreateWorkMode(createProvider,checked?"plan":"default")}/><small>{$t("create.planFirstHelp")}</small></div>

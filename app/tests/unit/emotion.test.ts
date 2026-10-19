@@ -117,7 +117,7 @@ describe("bundled emotion runtime",()=>{
     const x=fixture(),watcher=new EmotionWatcher(x.state,path.resolve("public","emoticons")),catalog=watcher.assetCatalog();
     const classic=["Antigravity","DeepSeek","Gemma-e4b","Gpt-Codex","Gpt-Sol","Grok","Ollama","WhaleGirl","capy","normal"];
     // AI Families V5 chibi sets: each character as -chan (plain or -v5) and -kun, five costumes each.
-    const v5=["Astra-code","Chat-code","Claude-code","DeepSeek-code","Fable-code","Gemini-code","Gemma-e4b-v5","Gpt-Codex-v5","Gpt-Sol-v5","Grok-code","Ollama-code","Whale-code"];
+    const v5=["Argon-code","Astra-code","Chat-code","Claude-code","DeepSeek-code","Fable-code","Gemini-code","Gemma-e4b-v5","Gpt-Codex-v5","Gpt-Sol-v5","Grok-code","Ollama-code","Whale-code"];
     const v5Kun=["Astra-code","Chat-code","Claude-code","DeepSeek-code","Fable-code","Gemini-code","Gemma-e4b","Gpt-Codex","Gpt-Sol","Grok-code","Ollama-code","Whale-code"].map(name=>`${name}-kun`);
     const costumes=(names:string[],suffixes:string[])=>names.flatMap(name=>["",...suffixes].map(suffix=>name+suffix));
     expect(Object.keys(catalog).sort()).toEqual([...classic,...costumes(v5,["-dress","-swimsuit","-pajamas","-towel"]),...costumes(v5Kun,["-formal","-swimsuit","-pajamas","-towel"])].sort());

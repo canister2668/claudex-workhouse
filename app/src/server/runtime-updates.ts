@@ -3,6 +3,8 @@ import path from "node:path";
 import process from "node:process";
 import { execFile } from "node:child_process";
 import { readClaudeRuntime } from "./claude-runtime.js";
+import { resolveGrokBinary } from "./config.js";
+import { applyGrokCliUpdate,checkGrokCliUpdate,grokInstallLayout } from "./grok-cli-update.js";
 import { managedCodexBinary,managedCodexRuntime,managedCodexRuntimeFault } from "./codex-runtime.js";
 import { sanitizeSensitiveText } from "./sensitive-data.js";
 import type { ProviderId } from "./types.js";
@@ -21,6 +23,11 @@ export type RuntimeUpdateStatus={
 export type ManagedRuntimeUpdateStatus=RuntimeUpdateStatus&{provider:RuntimeProvider};
 export const MANAGED_RUNTIME_PROVIDERS:readonly RuntimeProvider[]=["codex","claude"];
 export const isManagedRuntimeStatus=(item:RuntimeUpdateStatus):item is ManagedRuntimeUpdateStatus=>item.provider==="codex"||item.provider==="claude";
+/** Runtimes Workhouse can update: its managed ones plus external CLIs that update themselves. */
+export type UpdatableRuntimeProvider=RuntimeProvider|"grok";
+export const UPDATABLE_RUNTIME_PROVIDERS:readonly UpdatableRuntimeProvider[]=["codex","claude","grok"];
+export type UpdatableRuntimeUpdateStatus=RuntimeUpdateStatus&{provider:UpdatableRuntimeProvider};
+export const isUpdatableRuntimeStatus=(item:RuntimeUpdateStatus):item is UpdatableRuntimeUpdateStatus=>(UPDATABLE_RUNTIME_PROVIDERS as readonly string[]).includes(item.provider);
 
 const updating=new Set<RuntimeProvider>();
 const executable=(file:string)=>{try{fs.accessSync(file,fs.constants.X_OK);return true;}catch{return false;}};
@@ -70,17 +77,33 @@ async function latestClaude(root:string){
   if(typeof version!=="string")throw new Error("Claude release response had no version.");return version;
 }
 
+/**
+ * Grok's own `update --check` against the binary Workhouse launches. Only the
+ * fields the external status row cannot know are returned; the row's
+ * management stays "external" because the CLI, not Workhouse, owns the install.
+ */
+export async function grokRuntimeCheck(binary=resolveGrokBinary(),checkedAt=new Date().toISOString()):Promise<RuntimeUpdateStatus|null>{
+  const layout=grokInstallLayout(binary);if(!layout)return null;
+  const base:RuntimeUpdateStatus={provider:"grok",name:"Grok CLI",current:null,latest:null,updateAvailable:null,managed:false,source:`external-cli:${layout.installer}`,checkedAt,canUpdate:true,checksum:null,management:"external",dependsOn:null,configured:true};
+  try{
+    const result=await checkGrokCliUpdate(binary);
+    if(result.error&&!result.latest)return{...base,current:result.current,source:`${base.source}:check-failed`};
+    return{...base,current:result.current,latest:result.latest,updateAvailable:result.updateAvailable??updateAvailable(result.current,result.latest)};
+  }catch{return{...base,source:`${base.source}:check-failed`};}
+}
+
 export async function checkRuntimeUpdates(appRoot:string,dataRoot=appRoot):Promise<RuntimeUpdateStatus[]>{
   const local=await localRuntimeStatuses(appRoot,dataRoot);const checkedAt=new Date().toISOString();
-  const latest=await Promise.allSettled([latestCodex(),latestClaude(appRoot)]);
-  return local.map((item,index)=>{
+  const[latest,grok]=await Promise.all([Promise.allSettled([latestCodex(),latestClaude(appRoot)]),grokRuntimeCheck(resolveGrokBinary(),checkedAt)]);
+  return[...local.map((item,index)=>{
     const result=latest[index];
     if(result.status==="rejected")return{...item,checkedAt,source:`${item.source}:check-failed`};
     return{...item,latest:result.value,updateAvailable:updateAvailable(item.current,result.value),checkedAt};
-  });
+  }),...(grok?[grok]:[])];
 }
 
-export async function applyRuntimeUpdate(appRoot:string,provider:RuntimeProvider,dataRoot=appRoot){
+export async function applyRuntimeUpdate(appRoot:string,provider:UpdatableRuntimeProvider,dataRoot=appRoot){
+  if(provider==="grok"){await applyGrokCliUpdate(resolveGrokBinary());return checkRuntimeUpdates(appRoot,dataRoot);}
   if(updating.has(provider))throw Object.assign(new Error(`${provider} update is already running.`),{statusCode:409});
   updating.add(provider);
   try{

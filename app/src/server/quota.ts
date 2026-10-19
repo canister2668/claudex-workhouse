@@ -16,6 +16,23 @@ export type CodexQuotaPool = {
   status: "ok" | "partial";
 };
 
+export type QuotaResetCredit = {
+  id: string;
+  title: string | null;
+  count: number;
+  expiresAt: string | null;
+  usableNow: boolean | null;
+};
+
+// Banked "reset my usage limits" passes. `available` may exceed the listed
+// credits because both providers can cap the detail rows. An absent summary
+// means the account was not offered the program or the read failed, which is
+// different from holding zero passes.
+export type QuotaResetCredits = {
+  available: number;
+  credits: QuotaResetCredit[];
+};
+
 export type ProviderQuota = {
   fiveHour: QuotaWindow | null;
   sevenDay: QuotaWindow | null;
@@ -24,6 +41,7 @@ export type ProviderQuota = {
   error?: string | null;
   status: "ok" | "partial";
   modelPools?: CodexQuotaPool[];
+  resetCredits?: QuotaResetCredits | null;
 };
 
 export type ProviderBalance = {
@@ -142,7 +160,42 @@ export function mapCodexQuota(result: any): ProviderQuota | null {
     const mapped=codexQuotaSnapshot([value]),identity=CODEX_LIMIT_MODELS[String(limitId).toLowerCase()];
     return{limitId:String(limitId),label:identity?.label??String(limitId),modelIds:identity?.modelIds??[],...mapped};
   });
-  return{...codexQuotaSnapshot(snapshots),...(modelPools.length?{modelPools}:{})};
+  const resetCredits=mapCodexResetCredits(result?.rateLimitResetCredits);
+  return{...codexQuotaSnapshot(snapshots),...(modelPools.length?{modelPools}:{}),...(resetCredits?{resetCredits}:{})};
+}
+
+export function mapCodexResetCredits(value:any,now=Date.now()):QuotaResetCredits|null{
+  if(!value||typeof value!=="object")return null;
+  const available=finiteNumber(value.availableCount);
+  if(available===null)return null;
+  const credits=(Array.isArray(value.credits)?value.credits:[]).filter((credit:any)=>credit&&typeof credit==="object"&&typeof credit.id==="string"&&credit.status==="available").map((credit:any):QuotaResetCredit=>({
+    id:credit.id,
+    title:typeof credit.title==="string"&&credit.title.trim()?credit.title.trim():null,
+    count:1,
+    expiresAt:isoFromEpoch(credit.expiresAt),
+    usableNow:null
+  })).filter((credit:QuotaResetCredit)=>!credit.expiresAt||Date.parse(credit.expiresAt)>now).sort(byExpiry);
+  return{available:Math.max(0,Math.floor(available)),credits};
+}
+
+// Claude reports banked resets as the `cedar_ember` block of its OAuth usage
+// read. `eligible:false` means the account or client surface is not offered
+// the program, so it is reported as unknown rather than as zero passes.
+export function mapClaudeResetCredits(body:any,now=Date.now()):QuotaResetCredits|null{
+  const program=body?.cedar_ember;
+  if(!program||typeof program!=="object"||program.eligible!==true)return null;
+  const credits=(Array.isArray(program.grants)?program.grants:[]).filter((grant:any)=>grant&&typeof grant==="object"&&typeof grant.id==="string").map((grant:any):QuotaResetCredit=>({
+    id:grant.id,
+    title:typeof grant.label==="string"&&grant.label.trim()?grant.label.trim():null,
+    count:Math.max(0,Math.floor(finiteNumber(grant.resets_left)??0)),
+    expiresAt:typeof grant.ends_at==="string"&&Number.isFinite(Date.parse(grant.ends_at))?new Date(grant.ends_at).toISOString():null,
+    usableNow:typeof grant.usable_now==="boolean"?grant.usable_now&&grant.paused!==true:null
+  })).filter((credit:QuotaResetCredit)=>credit.count>0&&(!credit.expiresAt||Date.parse(credit.expiresAt)>now)).sort(byExpiry);
+  return{available:credits.reduce((sum:number,credit:QuotaResetCredit)=>sum+credit.count,0),credits};
+}
+
+function byExpiry(a:QuotaResetCredit,b:QuotaResetCredit){
+  return(a.expiresAt?Date.parse(a.expiresAt):Number.MAX_SAFE_INTEGER)-(b.expiresAt?Date.parse(b.expiresAt):Number.MAX_SAFE_INTEGER);
 }
 
 function claudeWindow(value: any, durationMins: number): QuotaWindow | null {

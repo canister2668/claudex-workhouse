@@ -3,6 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { relativePathInfo, unifiedLineDiff } from "./diff.js";
 import {providerOutputBlockId} from "./provider-output-block.js";
+import {claudeAgentNotificationEvents,claudeAgentStartedEvent,claudeAgentToolResultEvent,isClaudeAgentTool} from "./claude-subagents.js";
 
 // Parses a local Claude Code session transcript (~/.claude/projects/<slug>/<id>.jsonl)
 // into the same AgentEvent shapes the live worker emits, so external sessions render
@@ -65,11 +66,16 @@ function truncateEventContent(event:any){
   return{...event,content:shortened,metadata:{...(event.metadata??{}),truncatedBytes:bytes-Buffer.byteLength(shortened,"utf8")}};
 }
 
-function toolEvent(part: any, cwd: string | null, bashCommandsByToolId:Map<string,string>, timestamp?: string) {
+function toolEvent(part: any, cwd: string | null, bashCommandsByToolId:Map<string,string>, agentToolIds:Set<string>, timestamp?: string) {
   const name = part.name || "tool";
   const input = part.input || {};
   const events: any[] = [];
   const time=timestamp?{timestamp}:{};
+  if (isClaudeAgentTool(name)) {
+    if(typeof part.id==="string"&&part.id)agentToolIds.add(part.id);
+    events.push(claudeAgentStartedEvent(part,time));
+    return events;
+  }
   if (EDIT_TOOLS.has(name)) {
     const changes = name === "MultiEdit" ? (input.edits || []).map((e: any) => ({ file: input.file_path, old: e.old_string, new: e.new_string }))
       : name === "Write" ? [{ file: input.file_path, old: "", new: input.content ?? "" }]
@@ -104,7 +110,7 @@ function emittedEventCount(entry:any){
   if(entry.type==="user"){
     if(entry.isMeta===true)return 0;
     const content=entry.message?.content;
-    if(typeof content==="string")return content.trim()&&!content.startsWith("<")?1:0;
+    if(typeof content==="string")return content.trim()&&!content.startsWith("<")||content.startsWith("<task-notification>")?1:0;
     return(Array.isArray(content)?content:[]).reduce((count:number,part:any)=>count+(
       part?.type==="text"&&typeof part.text==="string"&&part.text.trim()&&!part.text.startsWith("<")||part?.type==="tool_result"?1:0
     ),0);
@@ -174,6 +180,7 @@ export function claudeTranscriptEvents(file: string, cwd: string | null, options
   const transcriptThreadId=path.basename(file,path.extname(file));
   const completedBlocks=new Map<string,number>();
   const bashCommandsByToolId=new Map<string,string>();
+  const agentToolIds=new Set<string>(),agentToolByAgentId=new Map<string,string>();
   for (const parsedLine of lines) {
     const entry=parsedLine.entry;if(!entry)continue;
     if (entry.isSidechain) continue;
@@ -204,13 +211,18 @@ export function claudeTranscriptEvents(file: string, cwd: string | null, options
     } else if (entry.type === "user") {
       if(entry.isMeta===true)continue;
       const content = entry.message?.content;
-      if (typeof content === "string") { if (content.trim() && !content.startsWith("<")) events.push({ type: "message", content, ...time, metadata: { role: "user" } }); continue; }
+      if (typeof content === "string") {
+        if (content.trim() && !content.startsWith("<")) events.push({ type: "message", content, ...time, metadata: { role: "user" } });
+        else if (agentToolIds.size) events.push(...claudeAgentNotificationEvents(content,agentToolByAgentId,agentToolIds,time).map(truncateEventContent));
+        continue;
+      }
       for (const part of Array.isArray(content) ? content : []) {
         if (part.type === "text" && part.text?.trim() && !part.text.startsWith("<")) events.push({ type: "message", content: part.text, ...time, metadata: { role: "user" } });
         else if (part.type === "tool_result") {
           const itemId=typeof part.tool_use_id==="string"?part.tool_use_id:null,command=itemId?bashCommandsByToolId.get(itemId):undefined,isError=Boolean(part.is_error),result=typeof part.content==="string"?part.content:JSON.stringify(part.content??"");
           if(itemId)bashCommandsByToolId.delete(itemId);
-          if(command)events.push(truncateEventContent({type:"command_completed",content:result,status:isError?"failed":"completed",toolName:"Bash",itemId,...time,metadata:{command,isError,ok:!isError,source:"provider"}}));
+          if(itemId&&agentToolIds.has(itemId)){const agentEvent=claudeAgentToolResultEvent(part,entry.toolUseResult,time);if(typeof agentEvent.metadata.agentId==="string")agentToolByAgentId.set(agentEvent.metadata.agentId,itemId);events.push(truncateEventContent(agentEvent));}
+          else if(command)events.push(truncateEventContent({type:"command_completed",content:result,status:isError?"failed":"completed",toolName:"Bash",itemId,...time,metadata:{command,isError,ok:!isError,source:"provider"}}));
           else events.push(truncateEventContent({type:"tool_completed",content:result,itemId,...time,metadata:{isError}}));
         }
       }
@@ -221,7 +233,7 @@ export function claudeTranscriptEvents(file: string, cwd: string | null, options
           if(callId)completedBlocks.set(callId,ordinal+1);
           events.push({ type:"message_completed", content:part.text, itemId, threadId:transcriptThreadId, ...time, metadata:{...(itemId?{itemId}:{}),threadId:transcriptThreadId} });
         }
-        else if (part.type === "tool_use") events.push(...toolEvent(part,cwd,bashCommandsByToolId,timestamp));
+        else if (part.type === "tool_use") events.push(...toolEvent(part,cwd,bashCommandsByToolId,agentToolIds,timestamp));
       }
     }
   }

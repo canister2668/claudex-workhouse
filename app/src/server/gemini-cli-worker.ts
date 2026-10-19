@@ -1,5 +1,8 @@
+import {classifyGeminiFailure,parseGeminiRequestDiagnostic} from "./gemini-cli-policy.js";
 import fs from "node:fs";
+import {compactGeminiSession,geminiSessionInputTokens,lockGeminiSession} from "./gemini-cli-session.js";
 import path from "node:path";
+import {randomUUID} from "node:crypto";
 import readline from "node:readline";
 import {spawn} from "node:child_process";
 import {StreamSpool} from "./stream-events.js";
@@ -8,7 +11,7 @@ import {beginWorkerEmotion,updateWorkerEmotion} from "./worker-emotion.js";
 import {automationLevel} from "./automation-level.js";
 import {executionPolicyTurnInstructions} from "./automation-level.js";
 import {delegationDeveloperInstructions,normalizeDelegationSettings} from "./delegation-settings.js";
-import {geminiApprovalMode,geminiCliArguments,geminiCliExitFailure,geminiCliResultFailure,geminiShellAvailable,resolveGeminiSessionFile} from "./gemini-cli-runtime.js";
+import {geminiApprovalMode,geminiCliArguments,geminiCliExitFailure,geminiCliResultFailure,geminiCliCompactionRequested,geminiShellAvailable,resolveGeminiSessionFile} from "./gemini-cli-runtime.js";
 import {geminiContextUsage,geminiModelBreakdown,geminiOutputUsage,geminiToolEndEvent,geminiToolShape,geminiToolStartEvent,geminiToolSummary,geminiUsage,geminiWorkerActivity,type GeminiStreamEvent} from "./gemini-cli-events.js";
 
 /**
@@ -23,6 +26,7 @@ import {geminiContextUsage,geminiModelBreakdown,geminiOutputUsage,geminiToolEndE
 
 const [,,statePath,taskId,entryKind,entry,mode,cwd,marker,permissionProfile=":read-only",model="",workMode="default",sessionId="",sourceSessionId="",...promptParts]=process.argv;
 const prompt=promptParts.join(" ");
+const requestedSessionId=sessionId||(mode==="new"?randomUUID():"");
 const startedAt=new Date().toISOString();
 const root=String(process.env.CLAUDEX_WORKHOUSE_DATA_ROOT??"");
 const home=String(process.env.HOME??"");
@@ -31,7 +35,7 @@ const level=automationLevel(undefined,permissionProfile);
 const approvalMode=geminiApprovalMode(level,workMode);
 
 const procStart=(pid:number)=>{try{return fs.readFileSync(`/proc/${pid}/stat`,"utf8").split(" ")[21]??null;}catch{return null;}};
-const state:any={marker,pid:process.pid,pgid:process.pid,processStart:procStart(process.pid),sessionId:sessionId||null,status:"running",startedAt,updatedAt:startedAt,result:null,error:null,log:"",model:model||null,modelBackend:"gemini-cli-vertex",approvalMode,activity:"starting"};
+const state:any={marker,pid:process.pid,pgid:process.pid,processStart:procStart(process.pid),sessionId:requestedSessionId||null,status:"running",startedAt,updatedAt:startedAt,result:null,error:null,log:"",model:model||null,modelBackend:"gemini-cli-vertex",approvalMode,activity:"starting"};
 const atomicWrite=()=>{const temp=`${statePath}.${process.pid}.tmp`;fs.writeFileSync(temp,`${JSON.stringify(sanitizeSensitiveValue(state,{preserveSourceIdentifiers:true}))}\n`,{encoding:"utf8",mode:0o600});fs.renameSync(temp,statePath);};
 const appendLog=(value:string)=>{const clean=sanitizeSensitiveText(value).trim();if(clean)state.log=`${state.log}${state.log?"\n":""}${clean}`.slice(-262144);};
 
@@ -42,6 +46,9 @@ const fail=(failure:{code:string;message:string})=>{
   state.status=stopped?"stopped":"failed";
   state.error=sanitizeSensitiveText(failure.message);
   state.errorCode=failure.code;
+  const classified=classifyGeminiFailure(`${failure.code}: ${failure.message}`);
+  const last=state.requestDiagnostics?.at(-1);
+  state.failureDetails={...classified,...(last?.outcome==="failure"&&last.failure?.kind===classified.kind?{phase:last.phase,...last.failure}:{})};
   state.activity=state.status;
   state.updatedAt=new Date().toISOString();
   atomicWrite();
@@ -53,6 +60,30 @@ atomicWrite();
 let emotionStarted=Boolean(state.sessionId);
 if(emotionStarted)beginWorkerEmotion(root,"antigravity",prompt,state.sessionId);
 spool.append({type:"task_started",content:"Gemini CLI (Vertex Agent) worker started.",threadId:state.sessionId});
+
+const compact=mode==="compact"||Boolean(geminiCliCompactionRequested(prompt));
+const nativeSessionId=sourceSessionId||requestedSessionId;
+let releaseSession:()=>void;
+try{releaseSession=lockGeminiSession(home,nativeSessionId);}
+catch(error){fail({code:"GEMINI_SESSION_BUSY",message:error instanceof Error?error.message:String(error)});process.exit(0);}
+process.once("exit",()=>releaseSession());
+if(compact){
+  try{
+    const file=resolveGeminiSessionFile(home,nativeSessionId,cwd);
+    if(!file)throw new Error("The Gemini session transcript is unavailable.");
+    const result=compactGeminiSession(file,nativeSessionId),at=new Date().toISOString();
+    state.sessionId=nativeSessionId;
+    state.contextUsage=result.trimmedOutputs?{usedTokens:null,windowTokens:1_000_000,percent:null,updatedAt:at,lastCompactedAt:at,compactionTrigger:"manual"}:geminiContextUsage(geminiSessionInputTokens(file,nativeSessionId),at);
+    state.compaction=result;
+    state.result=result.trimmedOutputs?`Compacted ${result.trimmedOutputs} older tool outputs; recent messages retained. Original transcript backed up.`:"No older large tool outputs required compaction.";
+    state.status="completed";state.activity="completed";state.updatedAt=at;settled=true;atomicWrite();
+    spool.append({type:"context_compaction",content:state.result,threadId:nativeSessionId,metadata:{...result,trigger:"manual",status:result.trimmedOutputs?"completed":"noop"}});
+    spool.append({type:"message_completed",content:state.result,threadId:nativeSessionId,metadata:{role:"agent",phase:"final_answer"}});
+    spool.append({type:"task_completed",content:state.result,threadId:nativeSessionId,terminal:true});
+    updateWorkerEmotion(root,"antigravity","done",nativeSessionId);
+  }catch(error){fail({code:"GEMINI_COMPACTION_FAILED",message:error instanceof Error?error.message:String(error)});}
+  process.exit(0);
+}
 
 let delegationSettings:unknown;
 try{delegationSettings=JSON.parse(String(process.env.CLAUDEX_WORKHOUSE_DELEGATION_SETTINGS??"null"));}catch{delegationSettings=null;}
@@ -88,10 +119,14 @@ const args=geminiCliArguments({
   prompt:providerPrompt,
   model:model||null,
   approvalMode,
-  launch:{mode:mode as "new"|"resume"|"fork",sessionId:mode==="resume"?sourceSessionId||sessionId:sessionId,sessionFile}
+  launch:{mode:mode as "new"|"resume"|"fork",sessionId:mode==="resume"?sourceSessionId||requestedSessionId:requestedSessionId,sessionFile}
 });
 const command=entryKind==="bundle"?process.execPath:entry;
-const commandArgs=entryKind==="bundle"?[entry,...args]:args;
+// execArgv is preserved by Gemini's launcher, including its memory relaunch.
+// Do not use NODE_OPTIONS: that would leak the loader into tool subprocesses.
+const preload=new URL("./gemini-cli-preload.js",import.meta.url);
+if(!fs.existsSync(preload))preload.pathname=preload.pathname.replace(/\.js$/,".ts");
+const commandArgs=entryKind==="bundle"?["--import",preload.href,entry,...args]:args;
 
 // `gemini.js` is a launcher: the real CLI, and every shell command it runs, are
 // grandchildren. Signalling only the direct child leaves those reparented to
@@ -153,6 +188,8 @@ const stop=()=>{
 process.once("SIGTERM",stop);
 process.once("SIGINT",stop);
 
+let resultErrorMessage:unknown,lastStreamErrorMessage="";
+let sawTool=false;
 let finalText="",streamFailure:{code:string;message:string}|null=null,sawResult=false;
 const toolShapes=new Map<string,ReturnType<typeof geminiToolShape>>();
 const toolNames=new Map<string,string>();
@@ -161,6 +198,15 @@ const consume=(line:string)=>{
   let value:GeminiStreamEvent;
   try{value=JSON.parse(line);}catch{appendLog(line);state.updatedAt=new Date().toISOString();atomicWrite();return;}
   const type=String(value.type??"");
+  if(type==="workhouse_request"){
+    const diagnostic=parseGeminiRequestDiagnostic(value.diagnostic);
+    if(diagnostic){
+      state.requestDiagnostics=[...(state.requestDiagnostics??[]),diagnostic].slice(-20);
+      state.requestCount=(state.requestCount??0)+1;
+      state.updatedAt=new Date().toISOString();atomicWrite();
+    }
+    return;
+  }
   if(type==="init"){
     const id=typeof value.session_id==="string"?value.session_id:"";
     if(id){
@@ -185,6 +231,7 @@ const consume=(line:string)=>{
       }
     }
   }else if(type==="tool_use"){
+    sawTool=true;
     const toolName=String(value.tool_name??"tool"),toolId=String(value.tool_id??toolName);
     const shape=geminiToolShape(toolName);
     toolShapes.set(toolId,shape);
@@ -202,6 +249,7 @@ const consume=(line:string)=>{
     toolNames.delete(toolId);
   }else if(type==="error"){
     const message=String(value.message??"Gemini CLI reported an error.");
+    if(!value.severity||value.severity==="error")lastStreamErrorMessage=message;
     appendLog(message);
     spool.append({type:"error",content:sanitizeSensitiveText(message).slice(0,4_000),threadId:state.sessionId,metadata:{severity:value.severity??"error"}});
   }else if(type==="result"){
@@ -209,7 +257,7 @@ const consume=(line:string)=>{
     const usage=geminiUsage(value.stats),at=new Date().toISOString();
     if(usage){
       state.outputUsage=geminiOutputUsage(usage,at);
-      state.contextUsage=geminiContextUsage(usage,at);
+
       state.modelUsage=geminiModelBreakdown(usage);
       const primary=usage.models[0];
       // The CLI's own choice is the authoritative effective model. It rewrites
@@ -224,10 +272,15 @@ const consume=(line:string)=>{
         state.model=primary.model;
       }
     }
+    if(value.status!=="success"&&value.status!=="error"){
+      resultErrorMessage="Gemini CLI returned an invalid result status.";
+      streamFailure={code:"GEMINI_CLI_INVALID_RESULT",message:String(resultErrorMessage)};
+    }
     if(String(value.status??"")==="error"){
       const message=typeof value.error?.message==="string"?value.error.message:"";
       if(message)appendLog(message);
-      streamFailure=geminiCliResultFailure(message,state.log);
+      resultErrorMessage=message.trim()?message:lastStreamErrorMessage;
+      streamFailure=geminiCliResultFailure(resultErrorMessage,state.log);
     }
   }
   state.updatedAt=new Date().toISOString();
@@ -246,18 +299,30 @@ readline.createInterface({input:child.stderr}).on("line",line=>{
 child.once("error",error=>fail({code:"GEMINI_CLI_SPAWN_FAILED",message:error.message}));
 child.once("close",(code,signal)=>{
   if(settled)return;
-  if(streamFailure){fail(streamFailure);return;}
+  const transcript=state.sessionId?resolveGeminiSessionFile(home,state.sessionId,cwd):null;
+  state.contextUsage=geminiContextUsage(geminiSessionInputTokens(transcript,state.sessionId??""));
   if(stopped){fail({code:"GEMINI_CLI_CANCELLED",message:"Gemini CLI task stopped."});return;}
-  if(code!==0){fail(geminiCliExitFailure(code,signal));return;}
+  // stdout's result can arrive before the final stderr line. close fires only
+  // after both streams drain, so resolve the fallback diagnostics here.
+  if(streamFailure){fail(streamFailure.code==="GEMINI_CLI_INVALID_RESULT"?streamFailure:geminiCliResultFailure(resultErrorMessage||lastStreamErrorMessage,state.log));return;}
+  if(signal){fail(geminiCliExitFailure(code,signal));return;}
+  if(code!==0){
+    const diagnostic=geminiCliResultFailure(lastStreamErrorMessage,state.log);
+    fail(diagnostic.code!=="GEMINI_CLI_FAILED"?diagnostic:geminiCliExitFailure(code,signal));return;
+  }
   if(!sawResult){fail({code:"GEMINI_CLI_NO_RESULT",message:"Gemini CLI exited successfully without emitting a result."});return;}
   settled=true;
   const at=new Date().toISOString();
-  state.result=finalText.trim()||state.log;
+  if(!finalText.trim()&&!sawTool){
+    settled=false;
+    fail({code:"GEMINI_INVALID_STREAM",message:"Gemini CLI reported success without assistant output or tool execution."});return;
+  }
+  state.result=finalText.trim();
   state.status="completed";
   state.activity="completed";
   state.updatedAt=at;
   atomicWrite();
-  spool.append({type:"message_completed",content:state.result,threadId:state.sessionId,metadata:{role:"agent",phase:"final_answer",...(state.modelUsage?{modelUsage:state.modelUsage}:{})}});
+  if(state.result)spool.append({type:"message_completed",content:state.result,threadId:state.sessionId,metadata:{role:"agent",phase:"final_answer",...(state.modelUsage?{modelUsage:state.modelUsage}:{})}});
   spool.append({type:"task_completed",content:"Gemini CLI task completed.",threadId:state.sessionId,terminal:true});
   updateWorkerEmotion(root,"antigravity","done",state.sessionId);
 });

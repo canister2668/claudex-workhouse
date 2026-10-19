@@ -182,7 +182,7 @@ def reset_values(text: str):
             except (OverflowError, OSError, ValueError):
                 raw = None
 
-    label_match = re.search(r"(?:Next\s+reset|Resets?)\s*:\s*([^\r\n]+)", text, re.IGNORECASE)
+    label_match = re.search(r"(?:Next\s+reset|Resets?)\s*:\s*([^\r\n│]+)", text, re.IGNORECASE)
     label = label_match.group(1).strip() if label_match else None
     if raw and re.fullmatch(r"\d{4}-\d{2}-\d{2}T[^\s]+", raw):
         return raw, label
@@ -192,8 +192,10 @@ def reset_values(text: str):
 def parse_usage(text: str):
     utilization = named_number(text, ["creditUsagePercent", "credit_usage_percent"])
     if utilization is None:
+        # Grok CLI 1.0.50+ renders the percentage on a progress-bar line below
+        # "Weekly limit (Tier)", so allow a short gap that holds no other digits.
         match = re.search(
-            r"(?:Credits|Weekly\s+limit)[^\r\n%]{0,48}?(\d{1,3}(?:\.\d+)?)\s*%\s*(?:used)?",
+            r"(?:Credits|Weekly\s+limit)[^\r\n%\d]{0,160}?(?:\r?\n[^\r\n%\d]{0,160}?){0,2}?(\d{1,3}(?:\.\d+)?)\s*%\s*(?:used)?",
             text,
             re.IGNORECASE,
         )
@@ -213,7 +215,9 @@ def parse_usage(text: str):
 
     plan = named_string(text, ["subscription_tier", "subscriptionTier"])
     if plan is None:
-        match = re.search(r"\bTier\s*:\s*([A-Za-z][A-Za-z0-9 _-]{0,31})", text)
+        match = re.search(r"\bTier\s*:\s*([A-Za-z][A-Za-z0-9 _-]{0,31})", text) or re.search(
+            r"Weekly\s+limit\s*\(\s*([A-Za-z][A-Za-z0-9 _-]{0,31}?)\s*\)", text, re.IGNORECASE
+        )
         plan = match.group(1).strip() if match else None
     if plan is not None and not re.fullmatch(r"[A-Za-z0-9 _-]{1,32}", plan):
         plan = None

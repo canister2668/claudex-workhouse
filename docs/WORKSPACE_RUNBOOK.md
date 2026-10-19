@@ -165,6 +165,74 @@ confirmed that `gemini-3.8-flash` remained `gemini-3.8-flash` in the CLI's bille
 model statistics with this setting. The worker still compares billed and
 requested models and reports any future rewrite on the task.
 
+Workhouse removes its earlier `general.maxAttempts=1` override: that setting
+also disabled transient HTTP 429 backoff. Network retries now use the native
+CLI policy (the installed 0.55.1 default is 10 attempts, subject to model
+availability policy overrides). The bundle preload separately prevents
+`InvalidStreamError` content retries and retries after any response chunk has
+already been emitted. Transport retries before output remain enabled.
+Workhouse removes its former `model.compressionThreshold=0.1` override, using
+the CLI default (0.5 in 0.55.1) unless another threshold was explicitly set.
+Automatic compression may defer retryable quota, network, or server failures
+for ten minutes on the current chat only when measured context is below 80%
+of the model window. Manual compression, cancellation, permanent errors, and
+near-window contexts do not use that deferral. It does not repair an oversized
+session or bypass native context-window checks.
+
+Bundled Vertex CLI launches preload `gemini-cli-preload` with Node's `--import`.
+It adapts the verified CLI wire-format seam in memory: Gemini 3/4 tool-response
+images are nested under the preceding function response, and stripping call-ID
+prefixes preserves multimodal fields. Both restored history and fresh results
+are adapted just before transmission; native journals and installed CLI files
+are untouched. The CLI memory relaunch preserves this preload through
+`execArgv`; tool subprocesses do not inherit a `NODE_OPTIONS` override.
+An incompatible change to the known upstream seam fails closed and requires
+adapter review. Standalone binary overrides do not use this bundle adapter.
+The SDK transport boundary preserves original exception identity and cause;
+it must not replace a structured network error with a message-only error.
+`gemini-cli-policy.ts` is the shared classifier for native network retry,
+optional compression deferral, and worker diagnostics. The adapter itself
+never retries HTTP calls. A `workhouse_request` event carries only request phase,
+HTTP status, duration, and allowlisted failure codes. The worker retains the
+last 20 in `requestDiagnostics`, plus a request count and terminal
+`failureDetails`. Prompts, response bodies, credentials, URLs, and raw exception
+causes must not enter these diagnostic fields. Successful retries do not set a
+terminal task failure. A successful CLI result with neither assistant output
+nor tool execution is rejected; stderr is never used as an assistant answer.
+
+HTTP 400 model-turn rejection has its own `GEMINI_INVALID_TURN` error code;
+a genuine terminal HTTP 429 remains `VERTEX_QUOTA_EXHAUSTED`.
+
+For `vertex-agent`, the Compact action and `/compact`, `/compress`, or
+`/summarize` run local maintenance without a model request. Workhouse replays
+the native JSONL journal (message replacement, `$set.messages`, and rewinds),
+then masks function-response payloads larger than 2,048 characters in messages
+older than the last eight. User/assistant prose, call identities and arguments,
+and recent messages are retained. This is deterministic tool-output trimming,
+not a semantic summary. If no payload qualifies it reports a no-op.
+
+Before writing, the worker verifies a private byte-exact backup alongside the
+transcript, checks that the source has not changed, atomically replaces it, and
+reads it back. Generation and maintenance share an exclusive per-session lock;
+active sessions are rejected. A lock left by a forcibly killed worker fails
+closed and requires owner inspection before removal. Do not run an unmanaged
+interactive CLI on the same native session concurrently. Compaction emits a
+`context_compaction` event and records the backup path. The last API token
+reading is invalidated until a new Gemini message has actual token usage.
+
+Context usage comes from the last effective Gemini message's `tokens.input`,
+never the invocation's cumulative input counter. Missing/malformed transcripts
+produce unknown context usage. Cumulative `result.stats` remains the source
+for billable output usage. Structured error-severity events take precedence over
+stderr retries when `result.error.message` is empty. Explicit safety blocks,
+invalid streams and missing finish reasons have separate classifications; an
+empty stream alone does not identify a safety block or quota exhaustion.
+
+The default coding profile exposes question, managed-provider delegation and
+workspace-instruction tools through its authenticated MCP channel. Other
+profiles do not receive the delegation/instruction allowlist. MCP server-side
+ownership, access and workspace-instruction edit checks remain authoritative.
+
 The model catalog itself comes from the live Vertex publisher list, so a model
 Google adds to Vertex appears in the picker without a Workhouse change. The CLI
 has no self-updater; a new Gemini CLI release is picked up by re-running

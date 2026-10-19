@@ -27,10 +27,10 @@
   export let checkApplicationUpdate: () => void;
   export let applyApplicationUpdate: () => void;
   export let runtimeCards: RuntimeStatus[] = [];
-  export let runtimeBusy: "check" | "codex" | "claude" | null = null;
+  export let runtimeBusy: "check" | "codex" | "claude" | "grok" | null = null;
   export let runtimeNotice = "";
   export let checkUpdates: () => void;
-  export let updateRuntime: (provider: "codex" | "claude") => void;
+  export let updateRuntime: (provider: "codex" | "claude" | "grok") => void;
   export let onopenprovider: (provider: ProviderId) => void = () => {};
 </script>
 
@@ -70,7 +70,7 @@
           <span class="runtime-summary-copy"><strong>{item.name}</strong><small>{item.current ?? (item.management === "api" ? $t(item.configured ? "runtime.apiConfigured" : "runtime.apiMissing") : $t("common.unavailable"))}</small></span>
           <span class="runtime-badge" data-management={item.management}>{$t(item.management === "managed" ? "runtime.badge.managed" : item.management === "external" ? "runtime.badge.external" : "runtime.badge.api")}</span>
         </button>
-        {#if item.updateAvailable && item.canUpdate}<button type="button" class="runtime-update" disabled={Boolean(runtimeBusy)} onclick={() => updateRuntime(item.provider as "codex" | "claude")}>{$t(runtimeBusy === item.provider ? "runtime.updatingShort" : "common.update")}</button>{/if}
+        {#if item.updateAvailable && item.canUpdate}<button type="button" class="runtime-update" disabled={Boolean(runtimeBusy)} onclick={() => updateRuntime(item.provider as "codex" | "claude" | "grok")}>{$t(runtimeBusy === item.provider ? "runtime.updatingShort" : "common.update")}</button>{/if}
       </div>
     {/each}
   </div>

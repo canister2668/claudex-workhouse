@@ -21,6 +21,15 @@ describe("avatar outfits", () => {
     }
   });
 
+  it("offers Argon Code as one Gemini V5 character with all five costumes", () => {
+    const groups = groupOutfits(PROVIDER_EMOTION_OUTFITS.antigravity);
+    const argon = groups.find(group => group.series === "v5")?.characters.find(entry => entry.character === "Argon-code");
+    expect(argon?.label).toBe("Argon Code");
+    expect(argon?.members.map(member => member.id)).toEqual(["Argon-code", "Argon-code-dress", "Argon-code-swimsuit", "Argon-code-pajamas", "Argon-code-towel"]);
+    expect(argon?.members.every(member => member.variant === "chan")).toBe(true);
+    expect(defaultMember(argon!).id).toBe("Argon-code");
+  });
+
   it("keeps each provider's classic set first so the fallback does not move", () => {
     expect(PROVIDER_EMOTION_OUTFITS.codex[0]).toBe("Gpt-Codex");
     expect(PROVIDER_EMOTION_OUTFITS.claude[0]).toBe("normal");

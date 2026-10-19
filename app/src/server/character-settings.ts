@@ -8,6 +8,7 @@ export type TonePreset = z.infer<typeof tonePreset>;
 const providerCharacter = z.object({
   nickname:z.string().trim().min(1).max(30),
   tonePreset,
+  toneFavorites:z.array(tonePreset).max(3).refine(items=>new Set(items).size===items.length,"Duplicate tone favorites").default(["default","flirty-friend","tsundere"]),
   conversationOnly:z.boolean().default(true),
   customTone:z.string().trim().max(2000).default(""),
   avatarOutfit:z.string().trim().min(1).max(80).default("normal"),
@@ -22,12 +23,12 @@ export const characterSettingsSchema = z.object({
 export type CharacterSettings = z.infer<typeof characterSettingsSchema>;
 
 export const DEFAULT_CHARACTER_SETTINGS:CharacterSettings={version:1,avatarDisplay:"character",providers:{
-  codex:{nickname:"지삐쨩",tonePreset:"default",conversationOnly:true,customTone:"",avatarOutfit:"Gpt-Sol",emotionIntensity:"natural"},
-  claude:{nickname:"클쨩",tonePreset:"flirty-friend",conversationOnly:true,customTone:"",avatarOutfit:"normal",emotionIntensity:"natural"},
-  deepseek:{nickname:"딥쨩",tonePreset:"playful-school-friend",conversationOnly:true,customTone:"",avatarOutfit:"DeepSeek",emotionIntensity:"natural"},
-  ollama:{nickname:"올라마쨩",tonePreset:"playful-school-friend",conversationOnly:true,customTone:"",avatarOutfit:"Ollama",emotionIntensity:"natural"},
-  antigravity:{nickname:"잼민E",tonePreset:"mesugaki-brat",conversationOnly:true,customTone:"",avatarOutfit:"Antigravity",emotionIntensity:"natural"},
-  grok:{nickname:"그록쨩",tonePreset:"aristocratic-ojosama",conversationOnly:true,customTone:"",avatarOutfit:"Grok",emotionIntensity:"natural"}
+  codex:{nickname:"지삐쨩",tonePreset:"default",conversationOnly:true,customTone:"",avatarOutfit:"Gpt-Sol",emotionIntensity:"natural",toneFavorites:["default","flirty-friend","tsundere"]},
+  claude:{nickname:"클쨩",tonePreset:"flirty-friend",conversationOnly:true,customTone:"",avatarOutfit:"normal",emotionIntensity:"natural",toneFavorites:["default","flirty-friend","tsundere"]},
+  deepseek:{nickname:"딥쨩",tonePreset:"playful-school-friend",conversationOnly:true,customTone:"",avatarOutfit:"DeepSeek",emotionIntensity:"natural",toneFavorites:["default","flirty-friend","tsundere"]},
+  ollama:{nickname:"올라마쨩",tonePreset:"playful-school-friend",conversationOnly:true,customTone:"",avatarOutfit:"Ollama",emotionIntensity:"natural",toneFavorites:["default","flirty-friend","tsundere"]},
+  antigravity:{nickname:"잼민E",tonePreset:"mesugaki-brat",conversationOnly:true,customTone:"",avatarOutfit:"Antigravity",emotionIntensity:"natural",toneFavorites:["default","flirty-friend","tsundere"]},
+  grok:{nickname:"그록쨩",tonePreset:"aristocratic-ojosama",conversationOnly:true,customTone:"",avatarOutfit:"Grok",emotionIntensity:"natural",toneFavorites:["default","flirty-friend","tsundere"]}
 }};
 
 // Retired presets are remapped instead of rejected: a stored value that no longer

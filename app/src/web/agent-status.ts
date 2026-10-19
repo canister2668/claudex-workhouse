@@ -102,8 +102,8 @@ function latestSessions(rows:SessionRow[],provider:AgentProvider,accept:(status:
 
 export function activeSessions(rows:SessionRow[],provider:AgentProvider,limit=4){return latestSessions(rows,provider,status=>activeStatuses.has(status),limit);}
 
-export function recentCompletedSessions(rows: SessionRow[], provider: AgentProvider, limit = 4): AgentRecentSession[] {
-  return latestSessions(rows,provider,status=>status==="completed",limit);
+export function recentTerminalSessions(rows: SessionRow[], provider: AgentProvider, limit = 4): AgentRecentSession[] {
+  return latestSessions(rows,provider,status=>status==="completed"||status==="failed"||status==="stopped",limit);
 }
 
 export function taskForRecentSession<T extends SessionRow>(rows:T[],session:AgentRecentSession):T|null{

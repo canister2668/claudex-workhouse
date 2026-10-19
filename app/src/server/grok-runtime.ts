@@ -12,3 +12,9 @@ export function parseGrokModels(output:string):GrokModel[]{
   }
   return models;
 }
+
+// `grok update` repoints the `bin/grok` launcher at the new download and
+// leaves older `grok-<version>` files behind, so the launcher must outrank
+// them; picking the highest versioned name kept launching the stale binary
+// after every update.
+export const grokLauncherFirst=(a:string,b:string)=>{const launcher=(name:string)=>/^grok(?:\.exe)?$/i.test(name)?0:1;return launcher(a)-launcher(b)||b.localeCompare(a,undefined,{numeric:true});};

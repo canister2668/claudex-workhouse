@@ -2,7 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import {afterAll,describe,expect,it} from "vitest";
-import {classifyGeminiCliError,geminiApprovalMode,geminiCliArguments,geminiCliExitFailure,geminiCliResultFailure,geminiShellAvailable,resolveGeminiCliEntry,resolveGeminiSessionFile,ripgrepAvailable} from "../../src/server/gemini-cli-runtime";
+import {classifyGeminiCliError,geminiApprovalMode,geminiCliArguments,geminiCliExitFailure,geminiCliResultFailure,geminiCliCompactionRequested,geminiShellAvailable,resolveGeminiCliEntry,resolveGeminiSessionFile,ripgrepAvailable} from "../../src/server/gemini-cli-runtime";
 import {geminiContextUsage,geminiModelBreakdown,geminiOutputUsage,geminiToolEndEvent,geminiToolShape,geminiToolStartEvent,geminiToolSummary,geminiUsage} from "../../src/server/gemini-cli-events";
 
 /**
@@ -99,9 +99,12 @@ describe("Gemini CLI usage",()=>{
   it("does not invent a request count the CLI never publishes",()=>{
     expect(geminiOutputUsage(geminiUsage(RESULT_STATS))?.requestCount).toBeNull();
   });
-  it("reads context from the working model's prompt, not the router's",()=>{
-    const context=geminiContextUsage(geminiUsage(RESULT_STATS))!;
-    expect(context.usedTokens).toBe(13144);
+  it("separates context prompt size from cumulative billable input",()=>{
+    const context=geminiContextUsage(190059)!;
+    expect(context.usedTokens).toBe(190059);
+    expect(context.percent).toBe(19);
+    expect(geminiOutputUsage(geminiUsage({...RESULT_STATS,input_tokens:4721215,total_tokens:4800000}))?.inputTokens).toBe(4721215);
+    expect(geminiContextUsage(null)).toBeNull();
     expect(context.windowTokens).toBe(1_000_000);
   });
   it("returns nothing for an empty envelope instead of a zeroed reading",()=>{
@@ -155,5 +158,33 @@ describe("Gemini CLI session transcripts",()=>{
     fs.writeFileSync(path.join(chats,"session-2026-01-01T00-01-bbbbbbbb.jsonl"),`${JSON.stringify({sessionId:"bbbbbbbb-0000-0000-0000-000000000000"})}\n{}`);
     expect(resolveGeminiSessionFile(home,"bbbbbbbb-0000-0000-0000-000000000000","/work/ws")).toBe(path.join(chats,"session-2026-01-01T00-01-bbbbbbbb.jsonl"));
     expect(resolveGeminiSessionFile(home,"cccccccc-0000-0000-0000-000000000000","/work/ws")).toBeNull();
+  });
+});
+
+describe("Gemini CLI terminal diagnostics",()=>{
+  const empty="Model stream ended without a finish reason.";
+  const quota="Attempt 1 failed with status 429: RESOURCE_EXHAUSTED";
+  it.each([
+    ["Model stream ended due to safety settings (SAFETY) with empty response text.","GEMINI_SAFETY_BLOCKED"],
+    ["Model stream ended with empty response text.","GEMINI_INVALID_STREAM"],
+    ["Model stream ended with empty response text but contained reasoning thoughts.","GEMINI_INVALID_STREAM"],
+    ["Invalid stream: NO_RESPONSE_TEXT","GEMINI_INVALID_STREAM"],
+    ["Model stream ended with malformed function call.","GEMINI_INVALID_STREAM"]
+  ])("classifies the installed CLI's terminal message: %s",(message,code)=>{
+    expect(geminiCliResultFailure(message,quota).code).toBe(code);
+  });
+  it("uses the last concrete failure, including the reverse ordering",()=>{
+    expect(geminiCliResultFailure("",`${quota}\n${empty}`).code).toBe("GEMINI_CLI_INCOMPLETE_STREAM");
+    expect(geminiCliResultFailure("",`${empty}\n${quota}`).code).toBe("VERTEX_QUOTA_EXHAUSTED");
+    expect(geminiCliResultFailure("",`${quota}\n${empty}\n    at stream (file.js:12:9)`).code).toBe("GEMINI_CLI_INCOMPLETE_STREAM");
+  });
+  it("prefers an explicit result error over stderr retries",()=>{
+    expect(geminiCliResultFailure(empty,quota).code).toBe("GEMINI_CLI_INCOMPLETE_STREAM");
+    expect(geminiCliResultFailure("custom terminal failure",quota).message).toBe("custom terminal failure");
+  });
+  it("recognizes compression commands without misreading ordinary text",()=>{
+    for(const prompt of ["/compact"," /compress ","/summarize","/compact preserve the plan"])
+      expect(geminiCliCompactionRequested(prompt)).toBe(true);
+    for(const prompt of ["explain /compact","/compact-file","continue"])expect(geminiCliCompactionRequested(prompt)).toBe(false);
   });
 });

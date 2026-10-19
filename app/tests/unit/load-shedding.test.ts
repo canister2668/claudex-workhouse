@@ -17,6 +17,9 @@ describe("background load shedding",()=>{
     let calls=0;
     const manager=new PushManager(root(),{listPushTasks:async()=>{calls++;throw new DatabaseRequestError("overload","list_push_tasks","busy");}} as any);
     await new Promise(resolve=>setTimeout(resolve,30));
+    expect(calls).toBe(0);
+    manager.start();manager.start();
+    await new Promise(resolve=>setTimeout(resolve,30));
     expect(calls).toBe(1);
     await manager.close();
   });
@@ -199,6 +202,7 @@ describe("background load shedding",()=>{
 
   it("drops a tracked push task when the DB is terminal without a terminal spool event",async()=>{
     const directory=root(),task:any={id:"claude:tracked",provider:"claude",status:"running"},db={listPushTasks:async()=>[task],getSystemSetting:async()=>null,listPushSubscriptions:async()=>[]},manager=new PushManager(directory,db as any);
+    manager.start();
     await new Promise(resolve=>setTimeout(resolve,20));task.status="completed";await (manager as any).poll();expect((manager as any).sequences.size).toBe(0);await manager.close();
   });
 });

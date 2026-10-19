@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { activeAgentStatus, activeSessions, avatarSessionRows, avatarTaskStreamKey, chooseProviderRecent, collaborationRecentStatuses, prioritizeCollaborationStatus, recentCompletedSessions, taskForRecentSession, terminalEventSuperseded } from "../../src/web/agent-status.js";
+import { activeAgentStatus, activeSessions, avatarSessionRows, avatarTaskStreamKey, chooseProviderRecent, collaborationRecentStatuses, prioritizeCollaborationStatus, recentTerminalSessions, taskForRecentSession, terminalEventSuperseded } from "../../src/web/agent-status.js";
 import { createTaskState } from "../../src/web/task-state.js";
 
-describe("recent completed sessions", () => {
+describe("recent terminal sessions", () => {
   it("lets a fresh active snapshot replace an earlier terminal stream event",()=>{
     const recent={provider:"claude" as const,taskId:"claude:early",status:"running",title:"work",updatedAt:"2026-09-25T02:02:23.189Z"};
     expect(terminalEventSuperseded(recent,"2026-09-25T01:59:13.676Z")).toBe(true);
@@ -16,12 +16,27 @@ describe("recent completed sessions", () => {
       {id:"active-turn",provider:"codex" as const,status:"running",title:"active",updatedAt:"2026-07-14T03:00:00Z",threadId:"a",projectId:"deck"},
       {id:"claude",provider:"claude" as const,status:"completed",title:"other",updatedAt:"2026-07-14T04:00:00Z",threadId:"c",projectId:"deck"},
     ];
-    expect(recentCompletedSessions(rows,"codex")).toEqual([{provider:"codex",taskId:"new",status:"completed",title:"new",updatedAt:"2026-07-14T02:00:00Z",threadId:"b",projectId:"deck"}]);
+    expect(recentTerminalSessions(rows,"codex")).toEqual([{provider:"codex",taskId:"new",status:"completed",title:"new",updatedAt:"2026-07-14T02:00:00Z",threadId:"b",projectId:"deck"}]);
+  });
+
+  it("includes the latest failed turn without falling back to an older success",()=>{
+    const rows=[
+      {id:"old-success",provider:"antigravity" as const,status:"completed",title:"old",updatedAt:"2026-10-15T01:00:00Z",threadId:"same"},
+      {id:"latest-failure",provider:"antigravity" as const,status:"failed",title:"failed",updatedAt:"2026-10-15T03:00:00Z",threadId:"same"},
+      {id:"other-success",provider:"antigravity" as const,status:"completed",title:"done",updatedAt:"2026-10-15T02:00:00Z",threadId:"other"},
+      {id:"stopped",provider:"antigravity" as const,status:"stopped",title:"stopped",updatedAt:"2026-10-15T00:00:00Z"},
+    ];
+    const recent=recentTerminalSessions(rows,"antigravity",2);
+    expect(recent.map(row=>row.taskId)).toEqual(["latest-failure","other-success"]);
+    expect(recent[0].status).toBe("failed");
+    expect(taskForRecentSession(rows,recent[0])?.id).toBe("latest-failure");
+    expect(recentTerminalSessions(rows,"antigravity").map(row=>row.status)).toEqual(["failed","completed","stopped"]);
+    expect(activeSessions(rows,"antigravity")).toEqual([]);
   });
 
   it("caps the result", () => {
     const rows = Array.from({length:6},(_,i)=>({id:String(i),provider:"claude" as const,status:"completed",title:String(i),updatedAt:`2026-07-14T0${i}:00:00Z`}));
-    expect(recentCompletedSessions(rows,"claude",3)).toHaveLength(3);
+    expect(recentTerminalSessions(rows,"claude",3)).toHaveLength(3);
   });
 
   it("lists active sessions separately",()=>{
@@ -65,7 +80,7 @@ describe("recent completed sessions", () => {
       {id:"new",provider:"claude" as const,status:"running",title:"new",createdAt:"2026-07-25T11:00:00Z",updatedAt:"2026-07-25T11:01:00Z",threadId:"same"}
     ];
     expect(activeSessions(rows,"claude")).toEqual([expect.objectContaining({taskId:"new",status:"running"})]);
-    expect(recentCompletedSessions(rows,"claude")).toEqual([]);
+    expect(recentTerminalSessions(rows,"claude")).toEqual([]);
   });
 
   it("shows a follow-up snapshot as active without waiting for a list refresh",()=>{

@@ -1,4 +1,5 @@
 import { z } from "zod";
+import {TASK_CONTINUATION_INSTRUCTIONS} from "./task-continuation.js";
 import type {ClaudeModelCatalogItem} from "./claude-model-catalog.js";
 import type {GlobalModelSettings} from "./global-model-settings.js";
 import type {ProviderId} from "./types.js";
@@ -157,6 +158,7 @@ export function delegationDeveloperInstructions(settings:DelegationSettings,acti
     `- The active provider is ${providerName(activeProvider)}. Provider identity has priority: never substitute the active provider or its native subagents when the user explicitly names another provider.`,
     `- If the selected execution mechanism or configured model is unavailable, report that limitation instead of silently switching provider, model, or persistence mode.`,
     `\n# Turn boundary`,
+    `- ${TASK_CONTINUATION_INSTRUCTIONS}`,
     `- A Claudex Workhouse task is a single non-interactive turn. The provider process exits when you end the turn, so nothing re-invokes you afterwards: background shells, monitors, scheduled wakeups, watchers, and completion notifications cannot fire once the turn is over, and whatever they were going to report is lost.`,
     `- Therefore never end a turn with a promise to report later. Poll the work to completion inside the turn, or end with what you actually verified and state plainly which part is still unfinished and how the user can check it.`,
     ...(activeProvider==="claude"?[`

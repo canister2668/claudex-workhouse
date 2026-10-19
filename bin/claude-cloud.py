@@ -25,6 +25,9 @@ VIEW_RE = re.compile(r"View:\s*(https://\S+)")
 SESSION_RE = re.compile(r"\b((?:session|cse)_[A-Za-z0-9]+)\b")
 TITLE_RE = re.compile(r"Created cloud session:\s*(.+)")
 TIMEOUT_S = 300
+# The CLI otherwise starts cloud sessions on its own default model. Override with
+# a 5th argument or CLAUDE_CLOUD_MODEL; "default" leaves the CLI to choose.
+DEFAULT_MODEL = "claude-opus-5-5"
 
 
 def clean_terminal(value: bytes) -> str:
@@ -74,7 +77,7 @@ def failure_detail(text):
     return " ".join(lines[start:] if start is not None else lines[-6:])[:1200]
 
 
-def create(binary, cwd, task, bundle):
+def create(binary, cwd, task, bundle, model=None):
     pid, fd = pty.fork()
     if pid == 0:
         os.chdir(cwd)
@@ -93,7 +96,8 @@ def create(binary, cwd, task, bundle):
         env.pop("CLAUDE_CONFIG_DIR", None)
         if bundle:
             env["CCR_FORCE_BUNDLE"] = "1"
-        os.execvpe(binary, [binary, "--ax-screen-reader", "--no-chrome", "--cloud", task], env)
+        model_args = ["--model", model] if model else []
+        os.execvpe(binary, [binary, "--ax-screen-reader", "--no-chrome", *model_args, "--cloud", task], env)
 
     output = bytearray()
     trusted = False
@@ -139,8 +143,10 @@ def main():
         text = clean_terminal(sys.stdin.buffer.read())
         print(json.dumps({"created": parse_created(text), "error": failure_detail(text)}, ensure_ascii=False))
         return
-    if len(sys.argv) != 5 or sys.argv[4] not in ("bundle", "auto"):
-        raise SystemExit("usage: claude-cloud.py CLAUDE_BINARY REPOSITORY TASK bundle|auto | parse")
+    if len(sys.argv) not in (5, 6) or sys.argv[4] not in ("bundle", "auto"):
+        raise SystemExit("usage: claude-cloud.py CLAUDE_BINARY REPOSITORY TASK bundle|auto [MODEL|default] | parse")
+    model = sys.argv[5] if len(sys.argv) == 6 else os.environ.get("CLAUDE_CLOUD_MODEL") or DEFAULT_MODEL
+    model = None if model == "default" else model
     binary, directory, task, upload = os.path.abspath(sys.argv[1]), sys.argv[2], sys.argv[3], sys.argv[4]
     top = git(directory, "rev-parse", "--show-toplevel")
     if not top:
@@ -151,7 +157,7 @@ def main():
         print(json.dumps({"ok": False, "code": "REPOSITORY_CONTAINS_HOME", "error": f"{top} contains the Claude home {home}; the CLI refuses to upload it. Use a separate clone."}))
         return
     ensure_private_seed_directory(os.path.join(home, ".claude"))
-    text = create(binary, top, task, upload == "bundle")
+    text = create(binary, top, task, upload == "bundle", model)
     created = parse_created(text)
     if not created:
         print(json.dumps({"ok": False, "code": "CLOUD_SESSION_NOT_CREATED", "error": failure_detail(text) or "The CLI did not report a cloud session."}, ensure_ascii=False))
@@ -163,6 +169,7 @@ def main():
         "remote": git(top, "remote", "get-url", "origin"),
         "branch": git(top, "rev-parse", "--abbrev-ref", "HEAD"),
         "head": git(top, "rev-parse", "HEAD"),
+        "model": model,
     }, ensure_ascii=False))
 
 

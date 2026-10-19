@@ -2,6 +2,8 @@
   import { permissionLabel } from "./session-ui";
   import { t } from "./i18n";
   import ModelPicker from "./ModelPicker.svelte";
+  import { claudeFastModeModel } from "./claude-fast-mode";
+  import SpeedCostNotice from "./SpeedCostNotice.svelte";
   export let provider:"codex"|"claude"|"deepseek"|"ollama"|"antigravity"|"grok";
   export let models:Array<any>=[];
   export let permissions:Array<any>=[];
@@ -18,6 +20,7 @@
   // change has to re-validate both before the picker shows them.
   function chooseModel(id:string){
     model=id;
+    if(provider==="claude"&&!claudeFastModeModel(id))tier=null;
     if(provider!=="codex")return;
     const info=modelInfo();
     if(!info?.supportedReasoningEfforts?.some((item:any)=>item.reasoningEffort===effort))effort=info?.defaultReasoningEffort??"medium";
@@ -25,6 +28,7 @@
   }
 </script>
 
-<ModelPicker fields={["model","effort","tier"]} layout="stack" {provider} {models} efforts={provider==="codex"?(modelInfo()?.supportedReasoningEfforts??[]):efforts} hasPriority={provider==="codex"&&Boolean(modelInfo()?.serviceTiers?.some((item:any)=>item.id==="priority"))} bind:model bind:effort bind:tier idPrefix="session-settings" onmodel={chooseModel}/>
+<ModelPicker fields={["model","effort","tier"]} layout="stack" {provider} {models} efforts={provider==="codex"?(modelInfo()?.supportedReasoningEfforts??[]):efforts} hasPriority={provider==="codex"?Boolean(modelInfo()?.serviceTiers?.some((item:any)=>item.id==="priority")):provider==="claude"&&claudeFastModeModel(model)} bind:model bind:effort bind:tier idPrefix="session-settings" onmodel={chooseModel}/>
+<SpeedCostNotice {provider} {tier}/>
 {#if showPermission}<label>{$t("permission.label")}<div class="chips">{#each permissions as item}<button type="button" class:active={permission===item.id} class:danger-chip={item.id===":danger-full-access"} onclick={()=>permission=item.id}>{permissionLabel(item.id)}</button>{/each}</div></label>
 {#if permission===":danger-full-access"}<label class="danger-confirm"><input type="checkbox" bind:checked={danger}/>{$t("permission.unrestrictedDescription")}</label>{/if}{/if}

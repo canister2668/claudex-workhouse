@@ -8,7 +8,9 @@
   import { providerDisplayName } from "../provider-display";
   import { modelLabel } from "../session-ui";
   import ModelPicker from "../ModelPicker.svelte";
-  import { TONE_PRESETS, type CharacterSettings } from "../character-settings";
+  import type { CharacterSettings } from "../character-settings";
+  import ToneCardPicker from "../ToneCardPicker.svelte";
+  import { DEFAULT_TONE_FAVORITES } from "../tone-preview";
   import { isClaudeCatalogFallback, type ClaudeCatalogMeta } from "../claude-model-filter";
   import type { GlobalModelEntry, GlobalModelSettings } from "../global-model-shape";
   import type { AutomationLevel } from "../automation-level";
@@ -20,6 +22,8 @@
   import Switch from "../ui/Switch.svelte";
   import SettingsSection from "./SettingsSection.svelte";
   import ProviderConnectionCard from "./ProviderConnectionCard.svelte";
+  import ClaudeBillingCard from "./ClaudeBillingCard.svelte";
+  import SpeedCostNotice from "../SpeedCostNotice.svelte";
   import { PROVIDER_TABS, type ProviderTab } from "./settings-nav";
 
   type ProviderId = "codex" | "claude" | "deepseek" | "ollama" | "antigravity" | "grok";
@@ -126,13 +130,13 @@
   export let charactersLoading = false;
   export let charactersLoaded = false;
   // Runtime tab.
-  export let runtimeAutoUpdate: { version: 1; providers: Record<"codex" | "claude", boolean> };
-  export let runtimeBusy: "check" | "codex" | "claude" | null = null;
-  export let runtimeSettingsBusy: "codex" | "claude" | null = null;
+  export let runtimeAutoUpdate: { version: 1; providers: Record<"codex" | "claude" | "grok", boolean> };
+  export let runtimeBusy: "check" | "codex" | "claude" | "grok" | null = null;
+  export let runtimeSettingsBusy: "codex" | "claude" | "grok" | null = null;
   export let runtimeNotice = "";
   export let checkUpdates: () => void;
-  export let updateRuntime: (provider: "codex" | "claude") => void;
-  export let toggleRuntimeAutoUpdate: (provider: "codex" | "claude", enabled: boolean) => void;
+  export let updateRuntime: (provider: "codex" | "claude" | "grok") => void;
+  export let toggleRuntimeAutoUpdate: (provider: "codex" | "claude" | "grok", enabled: boolean) => void;
   // Delegation tab.
   export let delegationSettings: DelegationSettings;
   export let delegationLoading = false;
@@ -183,6 +187,7 @@
     {#if provider === "codex"}
       <SettingRow label={$t("workMode.label")} stacked><WorkModeChips provider="codex" value={globalCodexWorkMode} onchange={(mode) => chooseGlobalWorkMode("codex", mode)}/></SettingRow>
       <SettingRow label={$t("model.label")} stacked>{#if codexModels.length}<ModelPicker fields={["model","effort","tier"]} layout="stack" provider="codex" models={codexModels} efforts={codexModelInfo?.supportedReasoningEfforts ?? []} hasPriority={Boolean(codexModelInfo?.serviceTiers?.some((item: any) => item.id === "priority"))} bind:model={globalCodexModel} bind:effort={globalCodexEffort} bind:tier={globalCodexTier} idPrefix="defaults-codex" onmodel={() => globalCodexModelChanged()}/>{:else}<small class="field-warning">{$t("model.saveGlobalCodex")}</small>{/if}</SettingRow>
+      <SpeedCostNotice provider="codex" tier={globalCodexTier}/>
       <SettingRow label={$t("automation.level")} stacked><AutomationLevelChips provider="codex" value={globalCodexAutomation} onchange={(level) => chooseGlobalAutomation("codex", level)}/></SettingRow>
     {:else if provider === "claude"}
       <SettingRow label={$t("workMode.label")} stacked><WorkModeChips provider="claude" value={globalClaudeWorkMode} onchange={(mode) => chooseGlobalWorkMode("claude", mode)}/></SettingRow>
@@ -245,12 +250,13 @@
     <p class="provider-scope-notice">{$t("provider.connectionScope")}</p>
     {#if providerAuthNotice}<p class="runtime-notice" aria-live="polite">{providerAuthNotice}</p>{/if}
   </SettingsSection>
+  {#if provider === "claude"}<ClaudeBillingCard/>{/if}
 
 {:else if tab === "character"}
   <SettingsSection title={$t("settings.providerTab.character")} description={$t("character.scopeBody")}>
     {#if charactersLoading && !charactersLoaded}<p class="provider-waiting">{$t("character.loading")}</p>{/if}
     <SettingRow label={$t("character.nickname")} id="character-nickname"><input id="character-nickname" value={character.nickname} maxlength="30" oninput={(event) => updateCharacter(provider, { nickname: (event.currentTarget as HTMLInputElement).value })}/></SettingRow>
-    <SettingRow label={$t("character.toneLabel")}><select aria-label={$t("character.toneLabel")} value={character.tonePreset} onchange={(event) => updateCharacter(provider, { tonePreset: (event.currentTarget as HTMLSelectElement).value as any })}>{#each TONE_PRESETS as tone}<option value={tone.id}>{$t(`character.tone.${tone.id}`)}</option>{/each}</select></SettingRow>
+    <SettingRow label={$t("character.toneLabel")} stacked><ToneCardPicker outfit={character.avatarOutfit} selected={character.tonePreset} favorites={character.toneFavorites ?? [...DEFAULT_TONE_FAVORITES]} onselect={tonePreset=>updateCharacter(provider,{tonePreset})} onfavorites={toneFavorites=>updateCharacter(provider,{toneFavorites})}/></SettingRow>
     {#if character.tonePreset === "custom"}<SettingRow label={$t("character.customTone")} stacked><textarea rows="4" maxlength="2000" value={character.customTone} oninput={(event) => updateCharacter(provider, { customTone: (event.currentTarget as HTMLTextAreaElement).value })}></textarea></SettingRow>{/if}
     <SettingRow label={$t("character.conversationOnly")} help={$t("character.conversationOnlyBody")}><Switch checked={character.conversationOnly} label={$t("character.conversationOnly")} onchange={(checked) => updateCharacter(provider, { conversationOnly: checked })}/></SettingRow>
     {#if characterSettings.avatarDisplay === "character"}
@@ -270,7 +276,7 @@
           {#if item.management === "managed"}
             <small>{item.updateAvailable === true ? $t("runtime.latest", { version: item.latest ?? $t("common.unavailable") }) : $t(item.updateAvailable === false ? "runtime.latestVersion" : item.source?.includes("check-failed") ? "runtime.checkFailed" : item.managed ? "runtime.managedOfficial" : "runtime.managementUnknown")}</small>
           {:else if item.management === "external"}
-            <small>{$t(item.current ? "runtime.externalInstalled" : item.configured ? "runtime.externalVersionUnavailable" : "runtime.externalMissing")}</small>
+            <small>{item.updateAvailable === true ? $t("runtime.latest", { version: item.latest ?? $t("common.unavailable") }) : $t(item.updateAvailable === false ? "runtime.latestVersion" : item.current ? "runtime.externalInstalled" : item.configured ? "runtime.externalVersionUnavailable" : "runtime.externalMissing")}</small>
           {:else}
             <small>{$t(item.configured ? "runtime.apiConfigured" : "runtime.apiMissing")}</small>
           {/if}
@@ -278,9 +284,9 @@
         <span class="runtime-badge" data-management={item.management}>{$t(item.management === "managed" ? "runtime.badge.managed" : item.management === "external" ? "runtime.badge.external" : "runtime.badge.api")}</span>
         {#if item.checksum}<code title={item.checksum}>{item.checksumSource === "binary" ? "BIN SHA" : "SHA"} {item.checksum.slice(0, 12)}</code>{/if}
         {#if item.fault}<small class="runtime-fault">{item.fault}</small>{/if}
-        {#if item.management === "managed"}
-          <label class="runtime-auto-toggle"><span><strong>{$t("runtime.autoUpdate")}</strong><small>{$t(item.canUpdate ? "runtime.autoUpdateBody" : "runtime.autoUpdateUnavailable")}</small></span><input type="checkbox" checked={runtimeAutoUpdate.providers[item.provider as "codex" | "claude"]} disabled={!item.canUpdate || Boolean(runtimeSettingsBusy)} onchange={(event) => toggleRuntimeAutoUpdate(item.provider as "codex" | "claude", (event.currentTarget as HTMLInputElement).checked)}/></label>
-          {#if item.updateAvailable}<button type="button" class="runtime-update" disabled={Boolean(runtimeBusy)} onclick={() => updateRuntime(item.provider as "codex" | "claude")}>{$t(runtimeBusy === item.provider ? "runtime.updatingShort" : "common.update")}</button>{/if}
+        {#if item.management === "managed" || item.canUpdate}
+          <label class="runtime-auto-toggle"><span><strong>{$t("runtime.autoUpdate")}</strong><small>{$t(item.canUpdate ? "runtime.autoUpdateBody" : "runtime.autoUpdateUnavailable")}</small></span><input type="checkbox" checked={runtimeAutoUpdate.providers[item.provider as "codex" | "claude" | "grok"]} disabled={!item.canUpdate || Boolean(runtimeSettingsBusy)} onchange={(event) => toggleRuntimeAutoUpdate(item.provider as "codex" | "claude" | "grok", (event.currentTarget as HTMLInputElement).checked)}/></label>
+          {#if item.updateAvailable}<button type="button" class="runtime-update" disabled={Boolean(runtimeBusy)} onclick={() => updateRuntime(item.provider as "codex" | "claude" | "grok")}>{$t(runtimeBusy === item.provider ? "runtime.updatingShort" : "common.update")}</button>{/if}
         {:else}
           <small class="runtime-unmanaged">{$t(item.management === "external" ? "runtime.externalBody" : "runtime.apiBody")}</small>
         {/if}

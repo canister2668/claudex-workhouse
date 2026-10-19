@@ -1,8 +1,9 @@
 import { expect, test } from "@playwright/test";
 
-test("avatar session panel recovers from an empty cache without reloading the page",async({page})=>{
+for(const terminalStatus of ["completed","failed"]){
+test(`avatar session panel recovers ${terminalStatus} from an empty cache without reloading the page`,async({page})=>{
   const now=new Date().toISOString();
-  const task={id:"codex:avatar-refresh",provider:"codex",nativeId:"avatar-refresh",threadId:"33333333-3333-4333-8333-333333333333",projectId:"claudex-workhouse",title:"아바타에서 복구된 세션",prompt:"fixture",status:"completed",createdAt:now,updatedAt:now,result:"done",error:null,log:"",owned:true,ownership:"claudex-workhouse",source:"claudex-workhouse",executionHostId:"local",workspaceId:"workspace-test",metadata:{}};
+  const task={id:"codex:avatar-refresh",provider:"codex",nativeId:"avatar-refresh",threadId:"33333333-3333-4333-8333-333333333333",projectId:"claudex-workhouse",title:"아바타에서 복구된 세션",prompt:"fixture",status:terminalStatus,createdAt:now,updatedAt:now,result:"done",error:null,log:"",owned:true,ownership:"claudex-workhouse",source:"claudex-workhouse",executionHostId:"local",workspaceId:"workspace-test",metadata:{}};
   let providerReads=0;
   await page.route("**/api/**",async route=>{
     const url=new URL(route.request().url()),pathname=url.pathname,json=(value:unknown,status=200)=>route.fulfill({status,contentType:"application/json",body:JSON.stringify(value)});
@@ -10,7 +11,7 @@ test("avatar session panel recovers from an empty cache without reloading the pa
       if(url.searchParams.get("provider")==="codex"){
         providerReads++;
         if(providerReads===1)return json({tasks:[],partial:true,warnings:[{source:"codex",error:"synchronization_unavailable"}]});
-        return json({tasks:[task],partial:false,warnings:[]});
+        return json({tasks:[{...task,id:"codex:older-success",title:"이전 성공 작업",status:"completed",createdAt:"2026-01-01T00:00:00Z",updatedAt:"2026-01-01T00:00:00Z"},task],partial:false,warnings:[]});
       }
       return json({tasks:[],partial:false,warnings:[]});
     }
@@ -41,6 +42,12 @@ test("avatar session panel recovers from an empty cache without reloading the pa
   await panel.getByRole("button",{name:/Retry|다시 시도/}).click();
   await expect.poll(()=>providerReads).toBe(2);
   await expect(panel.getByRole("button",{name:/아바타에서 복구된 세션/})).toBeVisible();
+  await expect(panel.getByRole("button",{name:/이전 성공 작업/})).toHaveCount(0);
+  if(terminalStatus==="failed"){
+    const failed=panel.getByRole("button",{name:/아바타에서 복구된 세션/});
+    await expect(failed).toContainText(/Failed|실패/);
+    await expect(failed.locator(".recent-check")).toHaveText("!");
+  }
 
   // On phones the agent popover is a modal sheet over a backdrop; dismiss it
   // before switching views (the desktop popover is non-modal and stays open).
@@ -51,6 +58,7 @@ test("avatar session panel recovers from an empty cache without reloading the pa
   await page.locator(".agent-popover").getByRole("button",{name:/아바타에서 복구된 세션/}).click();
   await expect(page.locator(".board-page")).toBeHidden();
 });
+}
 
 test("home and Codex avatar use the shared startup snapshot before slow synchronization",async({page})=>{
   const now=new Date().toISOString(),task={id:"codex:startup-active",provider:"codex",nativeId:"startup-active",threadId:"44444444-4444-4444-8444-444444444444",projectId:"claudex-workhouse",title:"즉시 보이는 Codex 작업",prompt:"fixture",status:"running",createdAt:now,updatedAt:now,result:null,error:null,log:"working",owned:true,ownership:"claudex-workhouse",source:"claudex-workhouse",executionHostId:"local",workspaceId:"workspace-test",metadata:{}};

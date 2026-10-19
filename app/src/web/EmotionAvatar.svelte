@@ -42,6 +42,8 @@
   export let externalState:{key?:string;emotion:string;line:string;statusLine:string;outfit?:string;action?:ExternalAction}|null=null;
   export let onExternalAction:((action:ExternalAction)=>void)|null=null;
   export let onPanelClick:(()=>void)|null=null;
+  // The person has seen this task's failure: show the neutral face, not the outcome.
+  export let acknowledged=false;
 
   type EmotionState = { emotion: string; line: string; statusLine: string; lineKey?: string; statusKey?: string; outfit: string; source?: string; sessionId?: string; taskId?: string; timestamp?: number };
   let state: EmotionState = { emotion: "neutral", line: "", statusLine: "", outfit: "normal" };
@@ -127,12 +129,12 @@
   $: latestOutfit=ctxEngine==="codex"&&bootstrapStatus!=="ready"?codexAvatar:latestProviderState.outfit;
   $: requestedOutfit=externalState?.outfit?clean(externalState.outfit,"normal"):localOutfit?.provider===ctxEngine?clean(localOutfit.outfit,outfits[0]??"normal"):clean(latestOutfit,outfits[0]??"normal");
   $: outfit=outfits.includes(requestedOutfit)?requestedOutfit:outfits[0]??"normal";
-  $: emotion = externalState ? clean(externalState.emotion,"neutral") : matchingProviderHook ? clean(providerState.emotion,"neutral") : statusEmotion(context?.status);
+  $: emotion = externalState ? clean(externalState.emotion,"neutral") : acknowledged ? "neutral" : matchingProviderHook ? clean(providerState.emotion,"neutral") : statusEmotion(context?.status);
   // Worker and hook copy arrives as a translation key; model-authored lines have no
   // key and are shown exactly as written. A key with no dictionary entry falls back
   // to the literal the writer stored rather than rendering the raw key.
   // `$t` is passed in so the reactive statement re-runs when the language changes.
-  $: line = externalState ? externalState.line : matchingProviderHook ? localizedEmotionCopy($t, providerState.lineKey, providerState.line) : codexLine(emotion);
+  $: line = externalState ? externalState.line : acknowledged ? "" : matchingProviderHook ? localizedEmotionCopy($t, providerState.lineKey, providerState.line) : codexLine(emotion);
   $: statusLine = externalState ? externalState.statusLine : matchingProviderHook ? localizedEmotionCopy($t, providerState.statusKey, providerState.statusLine) : (context?.status ?? "");
   $: noticeKey=avatarNoticeKey({engine:ctxEngine,sessionId:externalState?.key??context?.sessionId,status:context?.status,outfit,emotion,line,statusLine});
   let lastNoticeKey="";

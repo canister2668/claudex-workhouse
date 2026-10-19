@@ -59,6 +59,13 @@ export class ProviderAvatarSettings {
       return{...result,provider,state:this.watchers[provider].get() as EmotionState};
     });
   }
+  favorites(provider:ProviderId,favorites:CharacterSettings["providers"][ProviderId]["toneFavorites"]){
+    return this.exclusive(async()=>{
+      const current=(await this.read()).settings;
+      const settings=normalizeCharacterSettings({...current,providers:{...current.providers,[provider]:{...current.providers[provider],toneFavorites:favorites}}});
+      return this.apply(settings,new Date().toISOString());
+    });
+  }
   reconcile(){
     return this.exclusive(async()=>{
       const [stored,migration]=await Promise.all([this.store.getSystemSetting(SETTINGS_KEY),this.store.getSystemSetting(MIGRATION_KEY)]);

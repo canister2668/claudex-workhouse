@@ -103,6 +103,13 @@ export function markSeen<P extends string>(state: ArrangementState<P>, provider:
   return { ...state, unseen, active: state.active.filter(item => item !== provider) };
 }
 
+// A failure the person has already looked at -- or that was old news on load,
+// or a stop they asked for -- is settled. The header face returns to neutral
+// instead of wearing the failure until the next task starts.
+export function outcomeAcknowledged(phase: AgentPhase, unseen?: "done" | "failed"): boolean {
+  return (phase === "failed" || phase === "stopped") && !unseen;
+}
+
 // Pile keeps the declared provider order so resting agents never shuffle.
 export function pileOf<P extends string>(state: ArrangementState<P>, providers: P[]): P[] {
   return providers.filter(provider => !state.active.includes(provider));

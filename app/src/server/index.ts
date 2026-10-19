@@ -1,4 +1,5 @@
 import { asyncAnswerPrompt, listAsyncUserInputs } from "./async-user-input.js";
+import {queuedTaskContinuation} from "./task-continuation.js";
 import {EXECUTION_DEFAULTS_KEY,executionDefaultsSchema,applyExecutionDefaults,effectiveDelegationSettings,saveExecutionDefaults} from "./execution-defaults.js";
 // SPDX-License-Identifier: AGPL-3.0-only
 // This file is part of Claudex Workhouse.
@@ -39,7 +40,7 @@ import { claudeTranscriptEvents, resolveTranscriptFile } from "./claude-transcri
 import { EmotionWatcher, PROVIDER_EMOTION_OUTFITS } from "./emotion.js";
 import { ProviderAvatarSettings } from "./provider-avatar-settings.js";
 import { resetCodexAppServerPool, setCodexAppServerDelegate, withCodexAppServer } from "./codex/app-server.js";
-import { applyRuntimeUpdate, installRuntime, localRuntimeStatuses, managedRuntimeBinary } from "./runtime-updates.js";
+import { applyRuntimeUpdate, installRuntime, localRuntimeStatuses, managedRuntimeBinary, updateAvailable, UPDATABLE_RUNTIME_PROVIDERS, type UpdatableRuntimeProvider } from "./runtime-updates.js";
 import { ProviderStatusCache } from "./provider-status-cache.js";
 import { setupProviderReadiness } from "./setup-readiness.js";
 import { externalRuntimeStatuses } from "./external-runtime-status.js";
@@ -51,9 +52,12 @@ import {registerExternalMcpProxy} from "./external-mcp-proxy.js";
 import { cleanupStreamEvents, mergeStreamAgentLifecycle, readStreamAgentLifecycle, readStreamEvents, readStreamFileChanges, sseResumeSequence, staleClaudeTerminalSequences, STREAM_REPLAY_LIMIT } from "./stream-events.js";
 import {mergePersistedImageOutputs,persistedImageOutputEvents,persistedImageOutputsFromEvents} from "./image-outputs.js";
 import { codexQuotaForModel, mapAntigravityQuotaError, mapClaudeQuota, mapCodexQuota, mapDeepseekBalance, mapGrokQuota, mapOllamaPlan, mapOllamaQuota, quotaCacheDuration, readFreshCodexRateLimits, restorableClaudeQuota, type ProviderBalance, type ProviderQuota } from "./quota.js";
+import { createClaudeResetCreditsReader } from "./claude-reset-credits.js";
 import { ProviderAuthManager, type AuthProvider, type LoginMethod } from "./provider-auth.js";
 import { HostWorkspaceManager, LOCAL_HOST_ID } from "./host-workspaces.js";
 import { registerExternalParticipantRoutes } from "./external-participant.js";
+import type { ParticipantProviderCatalog } from "./external-participant-tasks.js";
+import { claudeModelSupportsFastMode } from "./claude-fast-mode.js";
 import { ClaudeCloudSessions, CloudCreditConfirmationRequiredError, cloudCreditNeedsConfirmation, readCloudCredit } from "./claude-cloud.js";
 import { WorkerHub } from "./worker-hub.js";
 import{DesktopWorkerClient}from"./desktop-worker/client.js";
@@ -73,6 +77,7 @@ import { assertAutomationSupported, automationLevel, automationLevelForNewTask, 
 import { CollaborationEventBus } from "./collaboration/events.js";
 import { CollaborationOrchestrator } from "./collaboration/orchestrator.js";
 import { RelayArtifactStore } from "./collaboration/relay-artifacts.js";
+import { SessionToneSettings, sessionToneInput } from "./session-tone.js";
 import { characterPrompt, characterSettingsSchema, characterSettingsWithTone, DEFAULT_CHARACTER_SETTINGS, migrateTonePreset, normalizeCharacterSettings, tonePreset } from "./character-settings.js";
 import { localizedTaskSuffix, normalizeStoredLocale, uiLocaleSettingsSchema } from "./ui-locale.js";
 import { applyGlobalDelegationModels, compatibleDelegationDefaultsSchema, DEFAULT_DELEGATION_SETTINGS, delegationSettingsSchema, normalizeDelegationSettings, validateDelegationSettings } from "./delegation-settings.js";
@@ -106,6 +111,7 @@ import { renameSessionTitle } from "./session-title.js";
 import {createThreadTurnGate} from "./session-turn.js";
 import {createWorkspaceInstructionSnapshot,MAX_WORKSPACE_INSTRUCTION_FILE_BYTES,normalizeWorkspaceInstructionProfile,ownerEditedWorkspaceInstructionProfile,promptWithWorkspaceInstructions,repositoryWorkspaceInstructions,workspaceInstructionCompactionMetadata,workspaceInstructionFollowUpMetadata,workspaceInstructionRecoveryMetadata,workspaceInstructionSettingKey,workspaceInstructionSnapshotFromMetadata,workspaceInstructionTaskTitle} from "./workspace-instructions.js";
 import {claudeExecutionSettingsSchema,DEFAULT_CLAUDE_EXECUTION_SETTINGS,normalizeClaudeExecutionSettings} from "./claude-execution-settings.js";
+import {claudeBillingPublicSettings,claudeBillingUpdateSchema,claudeCreditStatus,claudeUsesApiCredits,saveClaudeBillingSettings,type ClaudeCreditStatus} from "./claude-billing.js";
 import {ProtonDriveCli,ProtonDriveLoginManager} from "./proton-drive-cli.js";
 import {protonDriveSettingsSchema,normalizeProtonDriveSettings} from "./proton-drive-settings.js";
 import {ProtonDriveUploadService} from "./proton-drive-upload.js";
@@ -482,7 +488,7 @@ const claudeProvider=new ClaudeProvider(config, db);
 const deepseekProvider=new AnthropicCompatibleProvider("deepseek",config,db);
 const ollamaProvider=new AnthropicCompatibleProvider("ollama",config,db);
 const antigravityProvider=new AntigravityProvider(config,db);
-const grokProvider=new GrokProvider(config,db);
+const grokProvider=new GrokProvider(config,db,reason=>{void runtimeUpdates.requireUpdate("grok",reason).then(started=>started&&db.appendAudit({createdAt:new Date().toISOString(),actor:"system",action:"grok-runtime-required-update",provider:"grok",taskId:null,projectId:null,outcome:"success",detail:reason.slice(0,200)})).catch(()=>{});});
 providers.set("codex", codexProvider);
 providers.set("claude", claudeProvider);
 providers.set("antigravity",antigravityProvider);
@@ -677,6 +683,10 @@ const collaboration=new CollaborationOrchestrator(db,providers,workerHub,collabo
 },outfit=>emotion.assetCatalog()[outfit]??[],providerId=>({codex:codexEmotion,claude:emotion,deepseek:deepseekEmotion,ollama:ollamaEmotion,antigravity:antigravityEmotion,grok:grokEmotion}[providerId].get().outfit));
 const featureHealth={core:{tier:"guaranteed",status:"ready"},collaboration:{tier:"advanced",status:"ready",recoveryError:null as string|null},handoff:{tier:"advanced",status:"ready"},conversation:{tier:"experimental",status:"ready"},character:{tier:"experimental",status:"ready"}};
 async function isolatedCharacterPrompt(providerId:ProviderId,conversation=false,toneOverride?:{tonePreset:z.infer<typeof tonePreset>;customTone?:string}){try{const settings=normalizeCharacterSettings((await db.getSystemSetting("characters.providers"))?.value);return characterPrompt(toneOverride?characterSettingsWithTone(settings,providerId,toneOverride):settings,providerId,conversation);}catch(error){featureHealth.character.status="degraded";await db.appendAudit({createdAt:new Date().toISOString(),actor:"system",action:"character-module-fallback",provider:providerId,taskId:null,projectId:null,outcome:"degraded",detail:error instanceof Error?error.message:String(error)}).catch(()=>{});const settings=toneOverride?characterSettingsWithTone(DEFAULT_CHARACTER_SETTINGS,providerId,toneOverride):DEFAULT_CHARACTER_SETTINGS;return characterPrompt(settings,providerId,conversation);}}
+const sessionTones=new SessionToneSettings(db,async()=>normalizeCharacterSettings((await db.getSystemSetting("characters.providers"))?.value));
+async function sendTaskMessage(task:DeckTask,prompt:string){
+  return sessionTones.dispatch(task,prompt,styled=>provider(task.provider).sendMessage(task,workspacePromptForTask(task,styled)));
+}
 async function currentUiLocale(){return normalizeStoredLocale((await db.getSystemSetting("ui.locale").catch(()=>null))?.value)??"ko";}
 async function claudeRemoteExecutionSettings(providerId:ProviderId){if(providerId!=="claude")return{};const stored=await db.getSystemSetting("claude.execution").catch(()=>null);return{claudeSwitchModelsOnFlag:normalizeClaudeExecutionSettings(stored?.value).switchModelsOnFlag};}
 const handoffs=new HandoffManager(config.dataRoot,db,hostWorkspaces,workerHub,async({source,targetHostId,targetWorkspace,targetProvider,targetModel,targetReasoningEffort,targetServiceTier,prompt,kind,artifactId,locale})=>{
@@ -746,6 +756,8 @@ const taskListQuery = z.object({
   view:z.enum(["summary","none"]).optional()
 });
 const promptBody = z.object({ prompt: z.string().trim().min(1).max(config.promptMaxLength) });
+// Non-Codex runtimes share Claude's effort names; Antigravity stops at high.
+function compatibleReasoningEfforts(provider:ProviderId){return provider==="antigravity"?["low","medium","high"]:[...ClaudeProvider.validEfforts];}
 const createBody = promptBody.extend({
   provider: providerParam, projectId: z.string().regex(/^[a-z0-9-]+$/), title: z.string().trim().max(100).optional(),
   executionHostId:z.string().min(1).max(100).optional(),workspaceId:z.string().min(1).max(100),
@@ -754,9 +766,10 @@ const createBody = promptBody.extend({
   googleSearchMode:z.enum(["off","auto","always"]).optional(),
   dangerConfirmation:z.boolean().optional(),fullAccessAcknowledged:z.boolean().optional(),acknowledgementVersion:z.number().int().optional()
 }).superRefine((value, context) => {
-  if (value.provider !== "codex" && value.serviceTier) context.addIssue({ code:z.ZodIssueCode.custom, message:"Service tier is a Codex-only setting." });
+  // Claude takes only "priority", which runs Opus in fast mode.
+  if (value.provider !== "codex" && value.serviceTier && !(value.provider==="claude"&&value.serviceTier==="priority")) context.addIssue({ code:z.ZodIssueCode.custom, message:"Service tier is a Codex setting; Claude accepts only priority (fast mode)." });
   if (value.provider !== "antigravity" && value.googleSearchMode) context.addIssue({ code:z.ZodIssueCode.custom, message:"Google Search mode is an Antigravity-only setting." });
-  if (value.provider !== "codex" && value.reasoningEffort && value.reasoningEffort !== "default" && (!ClaudeProvider.validEfforts.has(value.reasoningEffort) || value.provider === "antigravity" && !["low","medium","high"].includes(value.reasoningEffort))) context.addIssue({ code:z.ZodIssueCode.custom, message:"Unknown compatible-runtime reasoning effort." });
+  if (value.provider !== "codex" && value.reasoningEffort && value.reasoningEffort !== "default" && !compatibleReasoningEfforts(value.provider).includes(value.reasoningEffort)) context.addIssue({ code:z.ZodIssueCode.custom, message:"Unknown compatible-runtime reasoning effort." });
   if (value.provider !== "codex" && value.permissionProfile && !ClaudeProvider.validProfiles.has(value.permissionProfile)) context.addIssue({ code:z.ZodIssueCode.custom, message:"Unknown compatible-runtime permission profile." });
   if (value.provider === "codex" && value.permissionProfile && !isPermissionProfile("codex",value.permissionProfile)) context.addIssue({ code:z.ZodIssueCode.custom, message:"Unknown Codex permission profile." });
   if ((value.permissionProfile === ":danger-full-access"||value.automationLevel==="full") && !fullAccessAcknowledgementValid(value)) context.addIssue({ code:z.ZodIssueCode.custom, message:"Danger-full-access requires fullAccessAcknowledged=true and acknowledgementVersion=1." });
@@ -878,8 +891,11 @@ async function remoteTaskCommand(task:DeckTask,command:"provider.task.status"|"p
   if(executionCommand&&task.workspaceId)await hostWorkspaces.requireWorkspace(task.workspaceId,task.executionHostId);
   if(executionCommand&&task.executionHostId===LOCAL_HOST_ID)await refreshManagedLocalWorkerConfig();
   const executionSettings=executionCommand?{model:task.requestedModel,reasoningEffort:task.requestedReasoningEffort,serviceTier:task.requestedServiceTier,permissionProfile:task.permissionProfile,workMode:task.metadata?.workMode??"default",automationLevel:automationLevel(task.metadata?.automationLevel,task.permissionProfile)}:{};
-  const executionPayload=executionCommand&&typeof payload.prompt==="string"?{...payload,prompt:workspacePromptForTask(task,payload.prompt)}:payload;
-  const result=await workerHub.request(task.executionHostId,command,{taskId:task.hostTaskId??task.id,provider:task.provider,workspaceId:task.workspaceId,...executionSettings,...executionPayload,...(executionCommand?await claudeRemoteExecutionSettings(task.provider):{})}) as any;
+  const send=async(prompt?:string)=>{
+    const executionPayload=executionCommand&&typeof prompt==="string"?{...payload,prompt:workspacePromptForTask(task,prompt)}:payload;
+    return await workerHub.request(task.executionHostId!,command,{taskId:task.hostTaskId??task.id,provider:task.provider,workspaceId:task.workspaceId,...executionSettings,...executionPayload,...(executionCommand?await claudeRemoteExecutionSettings(task.provider):{})}) as any;
+  };
+  const result=command==="provider.session.resume"&&typeof payload.prompt==="string"?await sessionTones.dispatch(task,payload.prompt,send):await send(typeof payload.prompt==="string"?payload.prompt:undefined);
   return db.upsertTask({...task,status:result?.status??task.status,threadId:result?.threadId??task.threadId,providerSessionId:result?.threadId??task.providerSessionId,result:result?.result??task.result,error:result?.error??null,updatedAt:result?.updatedAt??new Date().toISOString(),metadata:{...(command==="provider.session.resume"?workspaceInstructionFollowUpMetadata(withoutLegacyWorkspaceApprovalMetadata(task.metadata),undefined):withoutLegacyWorkspaceApprovalMetadata(task.metadata)),...(result?.errorCategory!==undefined?{errorCategory:result.errorCategory}:{}),...(result?.contextUsage!==undefined?{contextUsage:result.contextUsage}:{}),contextCapabilities:result?.contextCapabilities??task.metadata?.contextCapabilities,...(result?.interruptionCause!==undefined?{interruptionCause:result.interruptionCause}:{}),...(result?.interruptionDetectedAt!==undefined?{interruptionDetectedAt:result.interruptionDetectedAt}:{}),...(result?.executionPolicy?{requestedAutomation:result.executionPolicy.requestedAutomation,effectiveSandbox:result.executionPolicy.effectiveSandbox,effectiveApprovalPolicy:result.executionPolicy.effectiveApprovalPolicy,executionBackend:result.executionPolicy.executionBackend,executionUiLabel:result.executionPolicy.uiLabel}:{})}});
 }
 async function latestQueuedThreadTask(providerId:ProviderId,threadId:string){
@@ -917,10 +933,10 @@ async function dispatchQueuedMessage(queueId:string,sendNow=false,confirmedProvi
       source=source.executionHostId&&executionHostUsesWorker(source.executionHostId)?await remoteTaskCommand(source,"provider.task.stop"):await provider(source.provider).stopTask(source);
     }
     source=await applyPendingTaskLocation(source);
-
+    const continuation=queuedTaskContinuation(source,claimed.prompt);
     providerDispatchStarted=true;
-    let next=source.executionHostId&&executionHostUsesWorker(source.executionHostId)?await remoteTaskCommand(source,"provider.session.resume",{prompt:claimed.prompt,model:source.requestedModel,reasoningEffort:source.requestedReasoningEffort,serviceTier:source.requestedServiceTier,permissionProfile:source.permissionProfile,workMode:source.metadata?.workMode??"default",automationLevel:automationLevel(source.metadata?.automationLevel,source.permissionProfile)}):await provider(source.provider).sendMessage(source,workspacePromptForTask(source,claimed.prompt));
-    next=await db.upsertTask({...next,...(next.id!==source.id?{prompt:claimed.prompt}:{}),metadata:{...withoutLegacyWorkspaceApprovalMetadata(source.metadata),...withoutLegacyWorkspaceApprovalMetadata(next.metadata)}});
+    let next=source.executionHostId&&executionHostUsesWorker(source.executionHostId)?await remoteTaskCommand(source,"provider.session.resume",{prompt:continuation.prompt,model:source.requestedModel,reasoningEffort:source.requestedReasoningEffort,serviceTier:source.requestedServiceTier,permissionProfile:source.permissionProfile,workMode:source.metadata?.workMode??"default",automationLevel:automationLevel(source.metadata?.automationLevel,source.permissionProfile)}):await sendTaskMessage(source,continuation.prompt);
+    next=await db.upsertTask({...next,prompt:claimed.prompt,metadata:{...withoutLegacyWorkspaceApprovalMetadata(source.metadata),...withoutLegacyWorkspaceApprovalMetadata(next.metadata),...continuation.metadata}});
     // A follow-up turn is a new task row. Without publishing it the in-memory
     // list snapshot — the only list the browser polls — keeps reporting the
     // finished turn, so an open session cannot follow the turn that is really
@@ -1655,6 +1671,17 @@ app.put("/api/system-settings/mcp-servers",{config:{rateLimit:{max:10,timeWindow
   return{settings:publicMcpRegistrySettings(body.settings,mcpSecretStore),providerSupport:{...externalMcpProviderSupport(),grok:false},updatedAt};
 }));});
 app.get("/api/system-settings/characters",async()=>avatarSettings.read());
+app.put("/api/system-settings/characters/:provider/tone-favorites",async(request)=>{
+  const {provider:providerId}=z.object({provider:z.enum(["codex","claude","deepseek","ollama","antigravity","grok"])}).parse(request.params);
+  const {favorites}=z.object({favorites:z.array(tonePreset).max(3).refine(items=>new Set(items).size===items.length)}).parse(request.body);
+  return idempotent(request,"tone-favorites",{providerId,favorites},()=>avatarSettings.favorites(providerId,favorites));
+});
+app.get("/api/tasks/:provider/:taskId/tone",async(request)=>{const {task}=await taskFromParams(request.params);return{...await sessionTones.read(task),editable:task.owned===true,title:task.title};});
+app.put("/api/tasks/:provider/:taskId/tone",async(request)=>{
+  const {task}=await taskFromParams(request.params),input=sessionToneInput.parse(request.body);
+  if(!task.owned)throw Object.assign(new Error("This session is not controlled by Workhouse."),{statusCode:403});
+  return idempotent(request,"session-tone",{taskId:task.id,...input},()=>sessionTones.select(task,input));
+});
 app.put("/api/system-settings/characters",async(request)=>{const settings=characterSettingsSchema.parse(request.body);return idempotent(request,"character-settings",settings,()=>avatarSettings.save(settings));});
 app.get("/api/system-settings/prompt-presets",async(request)=>{
   const stored=await db.getSystemSetting("ui.prompt-presets");
@@ -1688,6 +1715,8 @@ app.get("/api/system-settings/antigravity-execution",async()=>{const stored=awai
 app.put("/api/system-settings/antigravity-execution",async(request)=>{const settings=antigravityExecutionSettingsSchema.parse(request.body);if(usesVertexCredentials(settings.backend)&&settings.vertex.credentialsPath){let stat:fs.Stats;try{stat=fs.statSync(settings.vertex.credentialsPath);fs.accessSync(settings.vertex.credentialsPath,fs.constants.R_OK);}catch{throw Object.assign(new Error("The configured Vertex ADC credentials file is not readable."),{statusCode:400,code:"VERTEX_ADC_UNREADABLE"});}if(!stat.isFile())throw Object.assign(new Error("The configured Vertex ADC credentials path is not a file."),{statusCode:400,code:"VERTEX_ADC_NOT_FILE"});}return idempotent(request,"antigravity-execution-settings",settings,async()=>{const updatedAt=new Date().toISOString();await db.putSystemSetting("antigravity.execution",settings,updatedAt);quotaCache=null;await db.appendAudit({createdAt:updatedAt,actor:(request as any).actor,action:"antigravity-execution-settings",provider:"antigravity",taskId:null,projectId:null,outcome:"success",detail:usesVertexCredentials(settings.backend)?`backend=${settings.backend};project=${settings.vertex.projectId};location=${settings.vertex.location};adc=${settings.vertex.credentialsPath?"file":"environment"}`:"backend=consumer"});return{settings,updatedAt};});});
 app.post("/api/system-settings/antigravity-execution/credentials",{config:{rateLimit:{max:5,timeWindow:"10 minutes"}}},async(request)=>{const query=z.object({projectId:z.string().trim().max(128).optional(),location:z.string().trim().max(64).optional()}).parse(request.query),part=await request.file({limits:{files:1,fileSize:1024*1024,fields:0}});if(!part)throw Object.assign(new Error("Select a Google credentials JSON file."),{statusCode:400,code:"VERTEX_CREDENTIALS_REQUIRED"});if(!part.filename.toLowerCase().endsWith(".json"))throw Object.assign(new Error("The Google credentials file must use the .json extension."),{statusCode:400,code:"VERTEX_CREDENTIALS_NOT_JSON"});const buffer=await part.toBuffer();if(!buffer.length||buffer.length>1024*1024)throw Object.assign(new Error("The Google credentials JSON must be between 1 byte and 1 MiB."),{statusCode:400,code:"VERTEX_CREDENTIALS_SIZE"});let value:unknown;try{value=JSON.parse(buffer.toString("utf8").replace(/^\uFEFF/,""));}catch{throw Object.assign(new Error("The uploaded Google credentials file is not valid JSON."),{statusCode:400,code:"VERTEX_CREDENTIALS_INVALID_JSON"});}let summary;try{summary=parseGoogleCredentialJson(value);}catch(error){throw Object.assign(error instanceof Error?error:new Error(String(error)),{statusCode:400,code:"VERTEX_CREDENTIALS_INVALID"});}if(summary.type!=="service_account")throw Object.assign(new Error("Vertex direct mode currently requires a service_account key JSON."),{statusCode:400,code:"VERTEX_SERVICE_ACCOUNT_REQUIRED"});const digest=crypto.createHash("sha256").update(buffer).digest("hex");return idempotent(request,"antigravity-vertex-credentials",{digest,type:summary.type},async()=>{const stored=await db.getSystemSetting("antigravity.execution"),current=stored?normalizeAntigravityExecutionSettings(stored.value):DEFAULT_ANTIGRAVITY_EXECUTION,home=antigravityHome(config,"vertex"),directory=path.join(home,"credentials"),destination=path.join(directory,"google-credentials.json"),projectId=summary.projectId??query.projectId??current.vertex.projectId;fs.mkdirSync(directory,{recursive:true,mode:0o700});try{fs.chmodSync(directory,0o700);}catch{}const settings=antigravityExecutionSettingsSchema.parse({version:1,backend:current.backend==="vertex-agent"?"vertex-agent":"vertex",vertex:{projectId,location:query.location||current.vertex.location||"global",credentialsPath:destination,creditsUrl:current.vertex.creditsUrl}}),temporary=path.join(directory,`.google-credentials.${crypto.randomUUID()}.tmp`);try{fs.writeFileSync(temporary,buffer,{mode:0o600,flag:"wx"});fs.renameSync(temporary,destination);fs.chmodSync(destination,0o600);}finally{try{if(fs.existsSync(temporary))fs.unlinkSync(temporary);}catch{}}const updatedAt=new Date().toISOString();await db.putSystemSetting("antigravity.execution",settings,updatedAt);quotaCache=null;await db.appendAudit({createdAt:updatedAt,actor:(request as any).actor,action:"antigravity-vertex-credentials-upload",provider:"antigravity",taskId:null,projectId:settings.vertex.projectId,outcome:"success",detail:`type=${summary.type};bytes=${buffer.length};sha256=${digest.slice(0,12)}`});return{settings,updatedAt,credential:{configured:true,type:summary.type,accountLabel:summary.accountLabel,fileName:"google-credentials.json"}};});});
 app.post("/api/system-settings/antigravity-execution/test",async()=>{const stored=await db.getSystemSetting("antigravity.execution"),settings=stored?normalizeAntigravityExecutionSettings(stored.value):DEFAULT_ANTIGRAVITY_EXECUTION;const readiness=settings.backend==="vertex-agent"?antigravity.geminiCliReadiness(settings):null;try{const models=await antigravity.getModels(true);return{ok:models.length>0&&(!readiness||readiness.installed),backend:settings.backend,models:models.length,...(readiness?{geminiCli:readiness,...(readiness.installed?{}:{error:"The Gemini CLI is not installed for this Workhouse runtime."})}:{})};}catch(error){return{ok:false,backend:settings.backend,models:0,...(readiness?{geminiCli:readiness}:{}),error:error instanceof Error?sanitizeSensitiveText(error.message):String(error)};}});
+app.get("/api/system-settings/claude-billing",async()=>({settings:await claudeBillingPublicSettings(config.dataRoot)}));
+app.put("/api/system-settings/claude-billing",{config:{rateLimit:{max:20,timeWindow:"10 minutes"}}},async(request)=>{const body=claudeBillingUpdateSchema.parse(request.body);return idempotent(request,"claude-billing-settings",{...body,apiKey:body.apiKey?"[set]":undefined,adminKey:body.adminKey?"[set]":undefined},async()=>{const settings=await saveClaudeBillingSettings(config.dataRoot,body),updatedAt=new Date().toISOString();await db.appendAudit({createdAt:updatedAt,actor:(request as any).actor,action:"claude-billing-settings",provider:"claude",taskId:null,projectId:null,outcome:"success",detail:`mode=${settings.mode} apiKeyConfigured=${settings.apiKeyConfigured} adminKeyConfigured=${settings.adminKeyConfigured}`});return{settings,updatedAt};});});
 app.get("/api/system-settings/compatible-providers",async()=>({settings:{deepseek:compatibleProviderPublicSettings("deepseek",config.dataRoot),ollama:compatibleProviderPublicSettings("ollama",config.dataRoot)}}));
 app.put("/api/system-settings/compatible-providers/:provider",{config:{rateLimit:{max:10,timeWindow:"10 minutes"}}},async(request)=>{const{provider}=z.object({provider:z.enum(["deepseek","ollama"])}).parse(request.params),body=z.object({baseUrl:z.string().trim().min(1).max(2048),secret:z.string().max(4096).optional(),clearSecret:z.boolean().optional()}).parse(request.body);return idempotent(request,`compatible-provider-settings:${provider}`,body,async()=>{const settings=saveCompatibleProviderSettings(config.dataRoot,provider,body),updatedAt=new Date().toISOString();await db.appendAudit({createdAt:updatedAt,actor:(request as any).actor,action:"compatible-provider-settings",provider,taskId:null,projectId:null,outcome:"success",detail:`baseOrigin=${new URL(settings.baseUrl).origin};secretChanged=${Boolean(body.secret||body.clearSecret)}`});return{settings,updatedAt};});});
 app.get("/api/system-settings/models",async(request)=>{const query=z.object({snapshot:z.enum(["true","false"]).transform(value=>value==="true").optional()}).parse(request.query),stored=await db.getSystemSetting("models.global-catalog"),saved=globalModelSettingsSchema.safeParse(stored?.value);if(query.snapshot&&saved.success){const settings=saved.data,candidates=Object.fromEntries((["codex","claude","deepseek","ollama","antigravity","grok"] as ProviderId[]).map(provider=>[provider,settings[provider].models]));return{settings,candidates,catalogs:null,updatedAt:stored?.updatedAt??null,snapshot:true};}const{codexCatalog,claudeCatalog,deepseekModels,ollamaModels,antigravityModels,grokModels,candidates}=await currentModelCatalogs(),settings=normalizeGlobalModelSettings(stored?.value,candidates),antigravityExecution=normalizeAntigravityExecutionSettings((await db.getSystemSetting("antigravity.execution"))?.value);let updatedAt=stored?.updatedAt??null;if(!stored||JSON.stringify(stored.value)!==JSON.stringify(settings)){updatedAt=new Date().toISOString();await db.putSystemSetting("models.global-catalog",settings,updatedAt);}return{settings,candidates,catalogs:{codex:{fetchedAt:codexCatalog.fetchedAt,stale:codexCatalog.stale},claude:{fetchedAt:claudeCatalog.fetchedAt,stale:claudeCatalog.stale,source:claudeCatalog.source},deepseek:{count:deepseekModels.length,source:"deepseek-api"},ollama:{count:ollamaModels.length,source:"ollama"},antigravity:{count:antigravityModels.length,source:usesVertexCredentials(antigravityExecution.backend)?"vertex-api":"antigravity-cli"},grok:{count:grokModels.length,source:"grok-cli"}},updatedAt,snapshot:false};});
@@ -1847,9 +1876,18 @@ app.get("/api/provider-connections/:provider/attempts/:attemptId/events",{config
   const heartbeat=setInterval(()=>{if(!closed&&!response.destroyed)response.write(`: heartbeat ${Date.now()}\n\n`);},15000);heartbeat.unref?.();request.raw.once("close",close);response.once("close",close);response.once("error",close);
 });
 let lastRuntimeCheck:Awaited<ReturnType<typeof localRuntimeStatuses>>|null=null;
+// External CLIs that update themselves (Grok) keep their live `--version`
+// from the status row and take the latest-version fields from the newest
+// check, whether a manual one or the coordinator's background run.
+function withLatestCheck<T extends {provider:string;current:string|null}>(item:T):T{
+  const candidates=[lastRuntimeCheck,runtimeUpdates.lastChecked()].map(list=>list?.find(cached=>cached.provider===item.provider)).filter((value):value is NonNullable<typeof value>=>Boolean(value));
+  const checked=candidates.sort((a,b)=>Date.parse(b.checkedAt??"")-Date.parse(a.checkedAt??""))[0];
+  if(!checked)return item;
+  return{...item,latest:checked.latest,updateAvailable:updateAvailable(item.current,checked.latest)??checked.updateAvailable,checkedAt:checked.checkedAt,canUpdate:checked.canUpdate,source:checked.source};
+}
 async function displayedRuntimeStatuses(){
   const local=await localRuntimeStatuses(config.appRoot,config.dataRoot);
-  const external=await externalRuntimeStatuses(config.appRoot,config.dataRoot,local).catch(()=>[]);
+  const external=(await externalRuntimeStatuses(config.appRoot,config.dataRoot,local).catch(()=>[])).map(item=>item.provider==="grok"?withLatestCheck(item):item);
   if(!managedLocalWorkerRequired)return[...local.map(item=>({...item,...lastRuntimeCheck?.find(cached=>cached.provider===item.provider)})),...external];
   const status=await workerProviderStatus().catch(()=>null) as any;
   // The Worker enforces one capability table at launch. Attaching the matching
@@ -1863,9 +1901,9 @@ async function displayedRuntimeStatuses(){
 app.get("/api/runtime-updates",async()=>({runtimes:await displayedRuntimeStatuses(),autoUpdate:runtimeUpdates.settings()}));
 app.post("/api/runtime-updates/check",{config:{rateLimit:{max:10,timeWindow:"10 minutes"}}},async()=>{lastRuntimeCheck=await runtimeUpdates.checkNow();return{runtimes:await displayedRuntimeStatuses(),autoUpdate:runtimeUpdates.settings()};});
 app.put("/api/runtime-updates/settings",async(request)=>{
-  const body=z.object({version:z.literal(1).default(1),providers:z.object({codex:z.boolean(),claude:z.boolean()})}).parse(request.body);
+  const body=z.object({version:z.literal(1).default(1),providers:z.object({codex:z.boolean(),claude:z.boolean(),grok:z.boolean().optional()})}).parse(request.body);
   const autoUpdate=await runtimeUpdates.setSettings(normalizeRuntimeAutoUpdate(body));
-  await audit(request,"runtime-auto-update-settings","success",undefined,`codex=${autoUpdate.providers.codex};claude=${autoUpdate.providers.claude}`);
+  await audit(request,"runtime-auto-update-settings","success",undefined,`codex=${autoUpdate.providers.codex};claude=${autoUpdate.providers.claude};grok=${autoUpdate.providers.grok}`);
   return{autoUpdate};
 });
 let runtimeUpdateStreams=0;
@@ -1890,7 +1928,7 @@ app.get("/api/model-catalog/events",{config:{rateLimit:{max:20,timeWindow:"5 min
   const close=()=>{if(closed)return;closed=true;unsubscribe();clearInterval(heartbeat);modelCatalogStreams=Math.max(0,modelCatalogStreams-1);};request.raw.once("close",close);response.once("close",close);response.once("error",close);
 });
 app.post("/api/runtime-updates/:provider",{config:{rateLimit:{max:3,timeWindow:"10 minutes"}}},async(request)=>{
-  const provider=authProviderParam.parse((request.params as any).provider);z.object({confirm:z.literal(true)}).parse(request.body);
+  const provider=z.enum(UPDATABLE_RUNTIME_PROVIDERS as [UpdatableRuntimeProvider,...UpdatableRuntimeProvider[]]).parse((request.params as any).provider);z.object({confirm:z.literal(true)}).parse(request.body);
   lastRuntimeCheck=await runtimeMutation(()=>applyRuntimeUpdate(config.appRoot,provider,config.dataRoot));const runtimes=await displayedRuntimeStatuses();
   if(provider==="codex")resetCodexAppServerPool();
   await refreshModelCatalogsAfterRuntimeUpdate().catch(()=>{});
@@ -1984,7 +2022,7 @@ app.get("/api/share-target/:token",async(request)=>{
 // Usage readout: Claude through the official CLI's /usage screen in an isolated
 // safe-mode PTY, Codex through app-server account/rateLimits/read. Cached 60s.
 type ObservedProviderUsage={inputTokens:number;outputTokens:number;totalTokens:number;taskCount:number;periodDays:number;updatedAt:string|null};
-type QuotaResult = ProviderQuota & { error: "rate_limited" | "unavailable" | null; retryAt: string | null; usage?:ObservedProviderUsage|null; limitsAvailable?:boolean; balance?:ProviderBalance|null; quotaMode?:"vertex-credit"; projectId?:string; location?:string; creditsUrl?:string };
+type QuotaResult = ProviderQuota & { error: "rate_limited" | "unavailable" | null; retryAt: string | null; usage?:ObservedProviderUsage|null; limitsAvailable?:boolean; balance?:ProviderBalance|null; quotaMode?:"vertex-credit"|"api-credit"; projectId?:string; location?:string; creditsUrl?:string; apiCredit?:ClaudeCreditStatus };
 type QuotaData={claude:QuotaResult;codex:QuotaResult;antigravity:QuotaResult;deepseek:QuotaResult;ollama:QuotaResult;grok:QuotaResult;fetchedAt:string};
 let quotaCache: { data: QuotaData; at: number } | null = null;
 let quotaPending: Promise<QuotaData> | null = null;
@@ -2077,6 +2115,7 @@ async function ollamaQuota(): Promise<QuotaResult> {
   } catch { return failed("unavailable"); }
 }
 let lastClaudeQuota: ProviderQuota | null = null;
+const claudeResetCredits=createClaudeResetCreditsReader({claudeBinary:config.claudeBinary,cwd:config.appRoot});
 // A throttled usage endpoint stays throttled while the 10s "unavailable" cache
 // keeps launching probes. Hold the probe off for a full window instead, and
 // keep serving the last reading so the panel shows usage rather than nothing.
@@ -2179,7 +2218,8 @@ async function currentQuotaData(allowStale=false):Promise<QuotaData>{
 }
 async function refreshQuotaData():Promise<QuotaData>{
   if(quotaPending)return quotaPending;
-  quotaPending=Promise.all([claudeQuota(),codexQuota(),antigravityQuota(),deepseekQuota(),ollamaQuota(),grokQuota()]).then(([claude,codexUsage,antigravity,deepseek,ollama,grok])=>{
+  quotaPending=Promise.all([claudeQuota(),codexQuota(),antigravityQuota(),deepseekQuota(),ollamaQuota(),grokQuota(),claudeResetCredits.current().catch(()=>null)]).then(([claudeUsage,codexUsage,antigravity,deepseek,ollama,grok,claudeResets])=>{
+    const claude=claudeResets?{...claudeUsage,resetCredits:claudeResets}:claudeUsage;
     const data={claude,codex:codexUsage,antigravity,deepseek,ollama,grok,fetchedAt:new Date().toISOString()};
     quotaCache={data,at:Date.now()};return data;
   }).finally(()=>{quotaPending=null;});
@@ -2193,7 +2233,7 @@ async function requirePaidCreditConsent(request:FastifyRequest,providersToCheck:
   return assertPaidCreditConsent(providersToCheck,confirmedPaidCreditProviders(request));
 }
 async function assertPaidCreditConsent(providersToCheck:ProviderId[],confirmed=new Set<ProviderId>()){
-  const unique=[...new Set(providersToCheck)],remaining=unique.filter((providerId):providerId is "codex"|"claude"|"grok"=>(providerId==="codex"||providerId==="claude"||providerId==="grok")&&!confirmed.has(providerId));
+  const claudeOnApi=claudeUsesApiCredits(config.dataRoot),unique=[...new Set(providersToCheck)].filter(providerId=>!(providerId==="claude"&&claudeOnApi)),remaining=unique.filter((providerId):providerId is "codex"|"claude"|"grok"=>(providerId==="codex"||providerId==="claude"||providerId==="grok")&&!confirmed.has(providerId));
   if(!remaining.length)return;
   const stored=await db.getSystemSetting("billing.credit-usage"),settings=stored?normalizeCreditUsageSettings(stored.value):DEFAULT_CREDIT_USAGE_SETTINGS;
   if(settings.allowPaidCredits)return;
@@ -2261,7 +2301,7 @@ async function pumpCreditConsentWaits(){
   if(creditResumePumpBusy)return;creditResumePumpBusy=true;
   try{
     const stored=await db.getSystemSetting("billing.credit-usage"),settings=stored?normalizeCreditUsageSettings(stored.value):DEFAULT_CREDIT_USAGE_SETTINGS,quota=settings.allowPaidCredits?null:await currentQuotaData();
-    const canRun=async(providerId:ProviderId)=>providerId!=="codex"&&providerId!=="claude"&&providerId!=="grok"?true:settings.allowPaidCredits||!quotaStateBlocksPaidCredits(providerQuotaState(quota?.[providerId]));
+    const canRun=async(providerId:ProviderId)=>providerId!=="codex"&&providerId!=="claude"&&providerId!=="grok"||(providerId==="claude"&&claudeUsesApiCredits(config.dataRoot))?true:settings.allowPaidCredits||!quotaStateBlocksPaidCredits(providerQuotaState(quota?.[providerId]));
     for(const item of await db.listCreditWaitingSessionMessages(100))if(await canRun(item.provider))await db.clearSessionMessageCreditWait(item.id,new Date().toISOString());
     await collaboration.resumeCreditWaiting(canRun);
     void pumpSessionMessageQueue();
@@ -2270,7 +2310,14 @@ async function pumpCreditConsentWaits(){
   catch(error){app.log.warn({err:sanitizeSensitiveObject(error)},"Skipping a paid-credit resume pump.");}
   finally{creditResumePumpBusy=false;}
 }
-app.get("/api/quota", async () => currentQuotaData());
+// In API-credit mode the subscription windows no longer limit Claude tasks,
+// so the usage panel shows the Console credit for Claude instead.
+async function withClaudeCreditQuota(data:QuotaData):Promise<QuotaData>{
+  if(!claudeUsesApiCredits(config.dataRoot))return data;
+  const credit=await claudeCreditStatus(config.dataRoot);
+  return{...data,claude:{fiveHour:null,sevenDay:null,status:"ok",plan:"API",error:null,retryAt:null,limitsAvailable:true,quotaMode:"api-credit",apiCredit:credit,exhausted:false}};
+}
+app.get("/api/quota", async () => withClaudeCreditQuota(await currentQuotaData()));
 app.get("/api/quota-reservations",async()=>({reservations:(await db.listQuotaTaskReservations({includeTerminal:false,includeFailed:true,limit:200})).map(publicQuotaReservation)}));
 app.post("/api/quota-reservations",{config:{rateLimit:{max:6,timeWindow:"1 minute"}}},async(request)=>{
   const body=createBody.parse(request.body);
@@ -2322,7 +2369,7 @@ app.post("/api/quota-reservations/:reservationId/retry",async(request)=>{
 
 registerEmotionMcp(app, { watcher: emotion, codexWatcher: codexEmotion, deepseekWatcher:deepseekEmotion, ollamaWatcher:ollamaEmotion, antigravityWatcher:antigravityEmotion,grokWatcher:grokEmotion, stateFile: config.emotionStateFile, assetsDir:config.emotionAssetsDir, baseUrl: config.emotionAssetBaseUrl,selectOutfit:async(provider,outfit)=>{await avatarSettings.select(provider,outfit);} });
 registerExternalMcpProxy(app,{db,secrets:mcpSecretStore});
-const managedProviderBridge=new ManagedProviderBridge(db,collaboration,async task=>task.executionHostId&&executionHostUsesWorker(task.executionHostId)?remoteTaskCommand(task,"provider.task.status"):db.upsertTask(await provider(task.provider).getTask(task)),async(task,prompt)=>withThreadTurn(task.provider,task.threadId,async()=>{if(task.executionHostId&&executionHostUsesWorker(task.executionHostId))return remoteTaskCommand(task,"provider.session.resume",{prompt});const next=await provider(task.provider).sendMessage(task,workspacePromptForTask(task,prompt));return db.upsertTask({...next,...(next.id!==task.id?{prompt}:{}),metadata:workspaceInstructionFollowUpMetadata(task.metadata,next.metadata)});}),async(providerId,model)=>{await assertPaidCreditConsent([providerId]);await requireGlobalModel(providerId,model);},async()=>{
+const managedProviderBridge=new ManagedProviderBridge(db,collaboration,async task=>task.executionHostId&&executionHostUsesWorker(task.executionHostId)?remoteTaskCommand(task,"provider.task.status"):db.upsertTask(await provider(task.provider).getTask(task)),async(task,prompt)=>withThreadTurn(task.provider,task.threadId,async()=>{if(task.executionHostId&&executionHostUsesWorker(task.executionHostId))return remoteTaskCommand(task,"provider.session.resume",{prompt});const next=await sendTaskMessage(task,prompt);return db.upsertTask({...next,...(next.id!==task.id?{prompt}:{}),metadata:workspaceInstructionFollowUpMetadata(task.metadata,next.metadata)});}),async(providerId,model)=>{await assertPaidCreditConsent([providerId]);await requireGlobalModel(providerId,model);},async()=>{
   const stored=await db.getSystemSetting("models.global-catalog"),parsed=globalModelSettingsSchema.safeParse(stored?.value);
   return{settings:parsed.success?parsed.data:(await globalModelSettings()).settings,updatedAt:stored?.updatedAt??null};
 });
@@ -2545,10 +2592,10 @@ app.post("/api/workspaces/:workspaceId/files/edit/read",{config:{rateLimit:{max:
 app.put("/api/workspaces/:workspaceId/files/write",{bodyLimit:768*1024,config:{rateLimit:{max:30,timeWindow:"1 minute"}}},async(request)=>{const {workspaceId}=z.object({workspaceId:z.string().min(1).max(100)}).parse(request.params),body=z.object({fileId:z.string().min(1).max(2048),content:z.string().max(MAX_EDITABLE_WORKSPACE_FILE_BYTES),expectedRevision:z.string().regex(/^[a-f0-9]{64}$/),expectedCurrentRevision:z.string().regex(/^[a-f0-9]{64}$/).optional()}).parse(request.body);if(Buffer.byteLength(body.content,"utf8")>MAX_EDITABLE_WORKSPACE_FILE_BYTES)throw Object.assign(new Error("Edited file exceeds the 256 KiB limit."),{statusCode:413,code:"WORKSPACE_FILE_EDIT_TOO_LARGE"});const workspace=await hostWorkspaces.requireWorkspace(workspaceId);return idempotent(request,`workspace-file-write:${workspaceId}`,body,async()=>{const result:any=workspace.hostId===LOCAL_HOST_ID?await hostWorkspaces.writeWorkspaceFile(workspaceId,body):await workerHub.request(workspace.hostId,"workspace.files.write",{workspaceId,...body});if(workspace.hostId!==LOCAL_HOST_ID&&result?.status){const timestamp=new Date().toISOString();await db.upsertWorkspace({...workspace,gitRemote:result.status.remote??null,defaultBranch:result.status.branch??null,lastKnownCommit:result.status.commit??null,lastGitStatus:result.status,lastVerifiedAt:timestamp,updatedAt:timestamp});}await db.appendAudit({createdAt:new Date().toISOString(),actor:(request as any).actor,action:"workspace-file-write",provider:null,taskId:null,projectId:workspace.projectId,hostId:workspace.hostId,workspaceId:workspace.id,outcome:"success",detail:`path=${String(result.relativePath??"").slice(0,300)};before=${String(result.previousRevision??"").slice(0,64)};after=${String(result.revision??"").slice(0,64)};bytes=${Number(result.byteLength)||0}`});return result;});});
 app.post("/api/workspaces/:workspaceId/files/read",{config:{rateLimit:{max:60,timeWindow:"1 minute"}}},async(request)=>{const {workspaceId}=z.object({workspaceId:z.string().min(1).max(100)}).parse(request.params);const body=z.object({fileId:z.string().min(1).max(2048),offset:z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).default(0),limit:z.number().int().min(1).max(128*1024).default(65536),confirmSensitive:z.boolean().default(false)}).parse(request.body);return authIdempotent(request,`workspace-file-read:${workspaceId}`,body,async()=>{const workspace=await hostWorkspaces.requireWorkspace(workspaceId);return workspace.hostId===LOCAL_HOST_ID?hostWorkspaces.readWorkspaceFile(workspaceId,body.fileId,body.offset,body.limit,body.confirmSensitive):workerHub.request(workspace.hostId,"workspace.files.read",{workspaceId,...body});});});
 app.post("/api/workspaces/:workspaceId/files/html-preview",{config:{rateLimit:{max:20,timeWindow:"1 minute"}}},async(request)=>{
-  const {workspaceId}=z.object({workspaceId:z.string().min(1).max(100)}).parse(request.params),body=z.object({fileId:z.string().min(1).max(2048),confirmSensitive:z.boolean().default(false)}).parse(request.body),workspace=await hostWorkspaces.requireWorkspace(workspaceId),actor=(request as any).actor;
+  const {workspaceId}=z.object({workspaceId:z.string().min(1).max(100)}).parse(request.params),body=z.object({fileId:z.string().min(1).max(2048),confirmSensitive:z.boolean().default(false),imageReferences:z.array(z.string().max(4096)).max(200).default([])}).parse(request.body),workspace=await hostWorkspaces.requireWorkspace(workspaceId),actor=(request as any).actor;
   if(workspace.hostId!==LOCAL_HOST_ID)throw Object.assign(new Error("HTML preview is available only for local workspaces."),{statusCode:409,code:"HTML_PREVIEW_LOCAL_ONLY"});
   try{
-    const result=await hostWorkspaces.readHtmlPreview(workspaceId,body.fileId,body.confirmSensitive);
+    const result=await hostWorkspaces.readHtmlPreview(workspaceId,body.fileId,body.confirmSensitive,body.imageReferences);
     await db.appendAudit({createdAt:new Date().toISOString(),actor,action:"workspace-html-preview-read",provider:null,taskId:null,projectId:workspace.projectId,hostId:workspace.hostId,workspaceId:workspace.id,outcome:"success",detail:`path=${result.relativePath};bytes=${result.byteLength}`}).catch(()=>{});
     return result;
   }catch(error){
@@ -2773,7 +2820,7 @@ async function createTaskFromBody(body:CreateTaskBody,requestedNativeId?:string,
     if(!executionHostUsesWorker(selection.hostId)){
       const stat=fs.statSync(selection.workspace.canonicalPath);if(!stat.isDirectory())throw Object.assign(new Error("Workspace is not a directory."),{code:"ENOTDIR"});fs.accessSync(selection.workspace.canonicalPath,fs.constants.R_OK|fs.constants.X_OK);
       const configured=config.projects.find(item=>item.id===targetProjectId),project={id:targetProjectId,name:configured?.name??selection.workspace.displayName,path:selection.workspace.canonicalPath,realPath:selection.workspace.canonicalPath,enabled:true,error:null};
-      const created=await provider(body.provider).createTask({ project, prompt: providerPrompt, title:taskTitle,executionHostId:selection.hostId,workspaceId:selection.workspace.id,requestedNativeId,workMode:body.workMode,runtimeProfile:taskRuntimeProfile,automationLevel:level,googleSearchMode:body.provider==="antigravity"?body.googleSearchMode??"off":undefined,...boardContext, ...(body.provider === "codex" ? { model:body.model,reasoningEffort:body.reasoningEffort,serviceTier:body.serviceTier,permissionProfile } : { permissionProfile, model:body.model, reasoningEffort:body.reasoningEffort }) });
+      const created=await provider(body.provider).createTask({ project, prompt: providerPrompt, title:taskTitle,executionHostId:selection.hostId,workspaceId:selection.workspace.id,requestedNativeId,workMode:body.workMode,runtimeProfile:taskRuntimeProfile,automationLevel:level,googleSearchMode:body.provider==="antigravity"?body.googleSearchMode??"off":undefined,...boardContext, ...(body.provider === "codex" ? { model:body.model,reasoningEffort:body.reasoningEffort,serviceTier:body.serviceTier,permissionProfile } : { permissionProfile, model:body.model, reasoningEffort:body.reasoningEffort,...(body.provider==="claude"&&body.serviceTier==="priority"?{serviceTier:"priority"}:{}) }) });
       item=await db.upsertTask({...created,prompt:body.prompt,executionHostId:LOCAL_HOST_ID,workspaceId:selection.workspace.id,providerSessionId:created.threadId,metadata:{...withoutLegacyWorkspaceApprovalMetadata(created.metadata),characterSnapshot,workspaceInstructionSnapshot,...taskMetadataExtension}});
     }else{
       const host=await db.getHost(selection.hostId);if(!host||host.disabledAt||host.revokedAt)throw Object.assign(new Error("Execution host is unavailable."),{statusCode:503});
@@ -2787,17 +2834,39 @@ async function createTaskFromBody(body:CreateTaskBody,requestedNativeId?:string,
     return publishTaskSnapshot(item);
 }
 const collaborationBoard=new CollaborationBoardService(db);
+// Participant model choices come from the same sources the create form and
+// createBody validation use: the owner's enabled catalog, the Codex runtime
+// catalog for per-model efforts and tiers, and the compatible-runtime effort set.
+async function participantModelCatalogs(providers:ProviderId[]):Promise<ParticipantProviderCatalog[]>{
+  const stored=await db.getSystemSetting("models.global-catalog"),parsed=globalModelSettingsSchema.safeParse(stored?.value),settings=parsed.success?parsed.data:(await globalModelSettings()).settings,delegation=await effectiveDelegationSettings(db);
+  const codexModels=providers.includes("codex")?((await codex.getModels()).models as any[]).filter(item=>!item.hidden):[],codexBase=codexModels.find(item=>item.isDefault)??codexModels[0];
+  return providers.map(provider=>{
+    const defaults=delegation[provider] as {model:string|null;reasoningEffort:string|null;serviceTier?:string|null};
+    const models=settings[provider].models.map(entry=>{
+      if(provider==="codex"){const runtime=codexModels.find(item=>item.id===entry.id)??(entry.source==="custom"?codexBase:undefined);return{id:entry.id,displayName:entry.displayName,reasoningEfforts:(runtime?.supportedReasoningEfforts??[]).map((item:any)=>item.reasoningEffort),defaultReasoningEffort:runtime?.defaultReasoningEffort??null,serviceTiers:(runtime?.serviceTiers??[]).map((item:any)=>item.id)};}
+      return{id:entry.id,displayName:entry.displayName,reasoningEfforts:compatibleReasoningEfforts(provider),defaultReasoningEffort:null,serviceTiers:provider==="claude"&&claudeModelSupportsFastMode(entry.id)?["priority"]:[]};
+    });
+    const defaultModel=defaults.model&&defaults.model!=="default"?defaults.model:provider==="codex"?codexModels.find(item=>item.isDefault&&models.some(model=>model.id===item.id))?.id??models[0]?.id??null:models[0]?.id??null;
+    return{provider,defaultModel,defaultReasoningEffort:defaults.reasoningEffort&&defaults.reasoningEffort!=="default"?defaults.reasoningEffort:null,defaultServiceTier:provider==="codex"?defaults.serviceTier??null:null,models};
+  });
+}
 registerExternalParticipantRoutes(app,{db,workspaces:hostWorkspaces,dataRoot:config.dataRoot,executor:{
-  create:async({workspaceId,prompt,title,nativeId,execution})=>{
-    const workspace=await hostWorkspaces.requireWorkspace(workspaceId,LOCAL_HOST_ID),defaults=(await effectiveDelegationSettings(db))[execution.provider];
-    await assertPaidCreditConsent([execution.provider]);
-    return createTaskFromBody(createBody.parse({provider:execution.provider,projectId:workspace.projectId,workspaceId,executionHostId:LOCAL_HOST_ID,prompt,title,model:defaults.model,reasoningEffort:defaults.reasoningEffort,serviceTier:execution.provider==="codex"?(defaults as typeof DEFAULT_DELEGATION_SETTINGS.codex).serviceTier:null,automationLevel:execution.automationLevel,workMode:"default"}),nativeId);
+  create:async({workspaceId,prompt,title,nativeId,execution,selection})=>{
+    const provider=selection.provider,workspace=await hostWorkspaces.requireWorkspace(workspaceId,LOCAL_HOST_ID),defaults=(await effectiveDelegationSettings(db))[provider] as {model:string|null;reasoningEffort:string|null;serviceTier?:string|null};
+    // Delegation effort and tier belong to the delegation model; another model starts from its provider default.
+    const model=selection.model===undefined?defaults.model:selection.model,sameModel=selection.model===undefined||selection.model===defaults.model;
+    const reasoningEffort=selection.reasoningEffort!==undefined?selection.reasoningEffort:sameModel?defaults.reasoningEffort:null;
+    const serviceTier=selection.serviceTier!==undefined?selection.serviceTier:provider==="codex"&&sameModel?defaults.serviceTier??null:null;
+    if(provider==="claude"&&serviceTier==="priority"&&!claudeModelSupportsFastMode(model))throw Object.assign(new Error("Fast mode is not available for the selected Claude model."),{statusCode:400,code:"EXTERNAL_SERVICE_TIER_UNSUPPORTED"});
+    await assertPaidCreditConsent([provider]);await requireGlobalModel(provider,model);
+    return createTaskFromBody(createBody.parse({provider,projectId:workspace.projectId,workspaceId,executionHostId:LOCAL_HOST_ID,prompt,title,model,reasoningEffort,serviceTier,automationLevel:execution.automationLevel,workMode:"default"}),nativeId);
   },
+  models:participantModelCatalogs,
   refresh:async task=>publishTaskSnapshot(task.executionHostId&&executionHostUsesWorker(task.executionHostId)?await remoteTaskCommand(task,"provider.task.status"):await db.upsertTask(await provider(task.provider).getTask(task))),
   resume:async(task,prompt)=>{
     await assertPaidCreditConsent([task.provider]);await requireGlobalModel(task.provider,task.requestedModel);
     return withThreadTurn(task.provider,task.threadId,async()=>{
-      const next=task.executionHostId&&executionHostUsesWorker(task.executionHostId)?await remoteTaskCommand(task,"provider.session.resume",{prompt,model:task.requestedModel,reasoningEffort:task.requestedReasoningEffort,serviceTier:task.requestedServiceTier,permissionProfile:task.permissionProfile,workMode:task.metadata?.workMode??"default",automationLevel:task.metadata?.automationLevel}):await provider(task.provider).sendMessage(task,workspacePromptForTask(task,prompt));
+      const next=task.executionHostId&&executionHostUsesWorker(task.executionHostId)?await remoteTaskCommand(task,"provider.session.resume",{prompt,model:task.requestedModel,reasoningEffort:task.requestedReasoningEffort,serviceTier:task.requestedServiceTier,permissionProfile:task.permissionProfile,workMode:task.metadata?.workMode??"default",automationLevel:task.metadata?.automationLevel}):await sendTaskMessage(task,prompt);
       return publishTaskSnapshot(await db.upsertTask({...next,...(next.id!==task.id?{prompt}:{}),metadata:workspaceInstructionFollowUpMetadata(task.metadata,next.metadata)}));
     });
   }
@@ -2828,7 +2897,7 @@ const boardActions={
     const linked=await db.listTasksByWorkChainIds([chainId]),selected=selectBoardResumeTask(linked),taskId=z.string().min(1).max(200).parse(raw.taskId??selected?.id),prompt=z.string().trim().min(1).max(config.promptMaxLength).parse(raw.prompt??"Continue this work from the latest persisted state."),task=await db.getTask(taskId);if(!task||task.workChainId!==chainId||!isBoardWorkTask(task))throw Object.assign(new Error("No implementer or revision session is linked to this collaboration board card."),{statusCode:409,code:"BOARD_RESUME_NO_WORK_SESSION"});
     const source=await applyPendingTaskLocation(task);
     const next=await withThreadTurn(source.provider,source.threadId,async()=>{
-      let resumed=boardResumeUsesWorkerHost(source,executionHostUsesWorker)?await remoteTaskCommand(source,"provider.session.resume",{prompt,model:source.requestedModel,reasoningEffort:source.requestedReasoningEffort,serviceTier:source.requestedServiceTier,permissionProfile:source.permissionProfile,workMode:source.metadata?.workMode??"default",automationLevel:automationLevel(source.metadata?.automationLevel,source.permissionProfile)}):await provider(source.provider).sendMessage(source,workspacePromptForTask(source,prompt));
+      let resumed=boardResumeUsesWorkerHost(source,executionHostUsesWorker)?await remoteTaskCommand(source,"provider.session.resume",{prompt,model:source.requestedModel,reasoningEffort:source.requestedReasoningEffort,serviceTier:source.requestedServiceTier,permissionProfile:source.permissionProfile,workMode:source.metadata?.workMode??"default",automationLevel:automationLevel(source.metadata?.automationLevel,source.permissionProfile)}):await sendTaskMessage(source,prompt);
       return publishTaskSnapshot(await db.upsertTask({...resumed,...(resumed.id!==source.id?{prompt}:{}),metadata:{...withoutLegacyWorkspaceApprovalMetadata(source.metadata),...withoutLegacyWorkspaceApprovalMetadata(resumed.metadata)}}));
     });
     return{task:next};
@@ -3158,7 +3227,7 @@ app.post("/api/tasks/:provider/:taskId/recovery",{config:{rateLimit:{max:6,timeW
         providerDispatchStarted=true;
         return source.executionHostId&&executionHostUsesWorker(source.executionHostId)
           ?await remoteTaskCommand(source,"provider.session.resume",{prompt:body.prompt,expectedThreadId:source.threadId,model:source.requestedModel,reasoningEffort:source.requestedReasoningEffort,serviceTier:source.requestedServiceTier,permissionProfile:source.permissionProfile,workMode:source.metadata?.workMode??"default",automationLevel:source.metadata?.automationLevel})
-          :await item.provider.sendMessage(source,workspacePromptForTask(source,body.prompt));
+          :await sendTaskMessage(source,body.prompt);
       });
       assertRecoveryThread(source.threadId!,next.threadId);
       next=await db.upsertTask({...next,...(next.id!==source.id?{prompt:body.prompt}:{}),metadata:{...workspaceInstructionRecoveryMetadata(source.metadata,next.metadata),recoveredFromTaskId:sourceTask.id,recoveryCause:preview.cause,recoveryAttemptId:attemptId,permissionDowngraded:preview.permissionDowngraded}});
@@ -3187,7 +3256,7 @@ app.post("/api/tasks/:provider/:taskId/messages", async (request) => {
   return idempotent(request, `message:${item.task.id}`, body, async () => {
     const source=await applyPendingTaskLocation(item.task);
     return withThreadTurn(source.provider,source.threadId,async()=>{
-      let next = source.executionHostId&&executionHostUsesWorker(source.executionHostId)?await remoteTaskCommand(source,"provider.session.resume",{prompt:body.prompt,model:source.requestedModel,reasoningEffort:source.requestedReasoningEffort,serviceTier:source.requestedServiceTier,permissionProfile:source.permissionProfile,workMode:source.metadata?.workMode??"default",automationLevel:automationLevel(source.metadata?.automationLevel,source.permissionProfile)}):await item.provider.sendMessage(source,workspacePromptForTask(source,body.prompt));
+      let next = source.executionHostId&&executionHostUsesWorker(source.executionHostId)?await remoteTaskCommand(source,"provider.session.resume",{prompt:body.prompt,model:source.requestedModel,reasoningEffort:source.requestedReasoningEffort,serviceTier:source.requestedServiceTier,permissionProfile:source.permissionProfile,workMode:source.metadata?.workMode??"default",automationLevel:automationLevel(source.metadata?.automationLevel,source.permissionProfile)}):await sendTaskMessage(source,body.prompt);
       next=publishTaskSnapshot(await db.upsertTask({...next,...(next.id!==source.id?{prompt:body.prompt}:{}),metadata:{...withoutLegacyWorkspaceApprovalMetadata(source.metadata),...withoutLegacyWorkspaceApprovalMetadata(next.metadata)}}));
       await audit(request, "message", "success", next);
       return { task: next };
@@ -3256,7 +3325,7 @@ app.post("/api/tasks/:provider/:taskId/fork", async (request) => {
   });
 });
 app.patch("/api/tasks/claude/:taskId/settings", async (request) => {
-  const body = z.object({ model:z.string().min(1).max(100).nullable().optional(), reasoningEffort:z.string().min(1).max(30).nullable().optional(), permissionProfile:z.string().min(1).max(80).nullable().optional(), workMode:z.enum(["default","plan"]).optional(),automationLevel:z.enum(["full","auto","confirm","read"]).optional(), dangerConfirmation:z.boolean().optional(),...sessionLocationFields }).superRefine((v,c)=>{
+  const body = z.object({ model:z.string().min(1).max(100).nullable().optional(), reasoningEffort:z.string().min(1).max(30).nullable().optional(), serviceTier:z.literal("priority").nullable().optional(), permissionProfile:z.string().min(1).max(80).nullable().optional(), workMode:z.enum(["default","plan"]).optional(),automationLevel:z.enum(["full","auto","confirm","read"]).optional(), dangerConfirmation:z.boolean().optional(),...sessionLocationFields }).superRefine((v,c)=>{
     if (v.reasoningEffort && v.reasoningEffort !== "default" && !ClaudeProvider.validEfforts.has(v.reasoningEffort)) c.addIssue({ code:z.ZodIssueCode.custom, message:"Unknown Claude reasoning effort." });
     if (v.permissionProfile && !ClaudeProvider.validProfiles.has(v.permissionProfile)) c.addIssue({ code:z.ZodIssueCode.custom, message:"Unknown Claude permission profile." });
     if ((v.permissionProfile === ":danger-full-access"||v.automationLevel==="full") && v.dangerConfirmation !== true) c.addIssue({ code:z.ZodIssueCode.custom, message:"Danger-full-access requires explicit confirmation." });
@@ -3270,6 +3339,7 @@ app.patch("/api/tasks/claude/:taskId/settings", async (request) => {
   const updated = await db.upsertTask({ ...located,
     requestedModel: body.model === undefined ? located.requestedModel ?? null : body.model === "default" ? null : body.model,
     requestedReasoningEffort: body.reasoningEffort === undefined ? located.requestedReasoningEffort ?? null : body.reasoningEffort === "default" ? null : body.reasoningEffort,
+    requestedServiceTier: body.serviceTier === undefined ? located.requestedServiceTier ?? null : body.serviceTier,
     permissionProfile,
     metadata:{...located.metadata,...(body.workMode?{workMode:body.workMode}:{}),automationLevel:level},
     settingsUpdatedAt: new Date().toISOString(), updatedAt: new Date().toISOString() });
@@ -3367,13 +3437,13 @@ app.post("/api/codex/threads/:threadId/messages", async (request) => {
   const {threadId}=threadParams.parse(request.params); const body=codexMessageBody.parse(request.body);
   await requirePaidCreditConsent(request,["codex"]);
   const stored=await db.getCodexThread(threadId);if(stored&&stored.ownership!=="claudex-workhouse")throw Object.assign(new Error("Use the explicit control handoff for an external Codex session."),{statusCode:409,code:"CONTROL_HANDOFF_REQUIRED"});
-  return idempotent(request,`codex-message:${threadId}`,body,async()=>{
+  return idempotent(request,`codex-message:${threadId}`,body,()=>withThreadTurn("codex",threadId,async()=>{
     const linked=(await db.listThreadTasks("codex",threadId)).filter(task=>task.ownership==="claudex-workhouse").sort((a,b)=>b.updatedAt.localeCompare(a.updatedAt));
     let task:DeckTask;
-    if(linked[0]){const source=await applyPendingTaskLocation(linked[0]),next=source.executionHostId&&executionHostUsesWorker(source.executionHostId)?await remoteTaskCommand(source,"provider.session.resume",{prompt:body.prompt,model:source.requestedModel,reasoningEffort:source.requestedReasoningEffort,serviceTier:source.requestedServiceTier,permissionProfile:source.permissionProfile,workMode:source.metadata?.workMode??"default",automationLevel:automationLevel(source.metadata?.automationLevel,source.permissionProfile)}):await codex.sendMessage(source,workspacePromptForTask(source,body.prompt));task=next.id!==source.id?await db.upsertTask({...next,prompt:body.prompt}):next;}
+    if(linked[0]){const source=await applyPendingTaskLocation(linked[0]),next=source.executionHostId&&executionHostUsesWorker(source.executionHostId)?await remoteTaskCommand(source,"provider.session.resume",{prompt:body.prompt,model:source.requestedModel,reasoningEffort:source.requestedReasoningEffort,serviceTier:source.requestedServiceTier,permissionProfile:source.permissionProfile,workMode:source.metadata?.workMode??"default",automationLevel:automationLevel(source.metadata?.automationLevel,source.permissionProfile)}):await sendTaskMessage(source,body.prompt);task=next.id!==source.id?await db.upsertTask({...next,prompt:body.prompt}):next;}
     else{task=await codex.sendThreadMessage(threadId,body.prompt,body);}
     await audit(request,"codex-message","success",task);return{task};
-  });
+  }));
 });
 app.post("/api/codex/threads/:threadId/fork", async (request) => {
   const {threadId}=threadParams.parse(request.params);
@@ -3466,6 +3536,7 @@ await relayArtifacts.purge();
 try{await collaboration.recover();}catch(error){featureHealth.collaboration.status="degraded";featureHealth.collaboration.recoveryError=error instanceof Error?error.message:String(error);featureHealth.conversation.status="degraded";await db.appendAudit({createdAt:new Date().toISOString(),actor:"system",action:"collaboration-recovery",provider:null,taskId:null,projectId:null,outcome:"degraded",detail:featureHealth.collaboration.recoveryError}).catch(()=>{});}
 void boardAutomation.tick();
 await app.listen({ host: config.host, port: config.port });
+pushManager.start();
 if(managedLocalWorkerRequired){
   try{
     const prepared=await prepareManagedLocalWorker({

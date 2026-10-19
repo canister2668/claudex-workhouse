@@ -34,10 +34,47 @@ describe("Antigravity isolated runtime environment",()=>{
     expect(antigravityHome(config,"vertex")).toBe(path.join(root,"data","provider-auth","antigravity-vertex-home"));
     expect(env.HOME).toBe(path.join(root,"task","antigravity-vertex-home"));expect(env.GOOGLE_CLOUD_PROJECT).toBe("sample-project-123");expect(env.GOOGLE_CLOUD_LOCATION).toBe("us-central1");expect(env.GOOGLE_GENAI_USE_VERTEXAI).toBe("true");expect(env.GOOGLE_APPLICATION_CREDENTIALS).toBe(credentials);
   });
+  it("exposes managed delegation and workspace tools only for the default profile",()=>{
+    const root=fs.mkdtempSync(path.join(process.cwd(),".claudex-gemini-mcp-"));roots.push(root);
+    const config={dataDir:path.join(root,"data")} as any,settings={version:1,backend:"vertex-agent",vertex:{projectId:"sample-project",location:"global",credentialsPath:"/key.json",creditsUrl:""}} as const;
+    const channel={directory:path.join(root,"task"),port:3410,taskId:"antigravity:test",token:"test-only-token"};
+    const env=geminiCliEnvironment(config,settings,channel);
+    const mcp=JSON.parse(fs.readFileSync(env.GEMINI_CLI_SYSTEM_SETTINGS_PATH!,"utf8")).mcpServers["claudex-workhouse"];
+    expect(mcp.includeTools).toEqual(["request_user_input_async","managed_provider_models","managed_provider_task_create","managed_provider_task_get","managed_provider_task_wait","managed_provider_task_resume","workspace_instructions_read","workspace_instructions_update"]);
+    expect(mcp.headers.Authorization).toBe("Bearer test-only-token");
+    const restricted=geminiCliEnvironment(config,settings,channel,"conversation");
+    expect(JSON.parse(fs.readFileSync(restricted.GEMINI_CLI_SYSTEM_SETTINGS_PATH!,"utf8")).mcpServers["claudex-workhouse"].includeTools).toEqual(["request_user_input_async"]);
+  });
+  it("preserves network retry settings without forcing early compression and keeping unrelated preferences",()=>{
+    const root=fs.mkdtempSync(path.join(process.cwd(),".claudex-gemini-policy-"));roots.push(root);
+    const config={dataDir:path.join(root,"data")} as any,settings={version:1,backend:"vertex-agent",vertex:{projectId:"sample",location:"global",credentialsPath:"/credentials.json",creditsUrl:""}} as const;
+    const file=path.join(config.dataDir,"provider-auth","gemini-cli-home",".gemini","settings.json");
+    fs.mkdirSync(path.dirname(file),{recursive:true});
+    for(const [existing,expected] of [[0.5,0.5],[0.05,0.05],[0,0],[-1,-1]]){
+      fs.writeFileSync(file,JSON.stringify({experimental:{dynamicModelConfiguration:true},general:{maxAttempts:10,preferredEditor:"vim"},model:{compressionThreshold:existing,name:"selected-model"}}));
+      geminiCliEnvironment(config,settings);
+      const stored=JSON.parse(fs.readFileSync(file,"utf8"));
+      expect(stored.general).toEqual({maxAttempts:10,preferredEditor:"vim"});
+      expect(stored.model).toEqual({compressionThreshold:expected,name:"selected-model"});
+      const before=fs.statSync(file).mtimeMs;geminiCliEnvironment(config,settings);
+      expect(fs.statSync(file).mtimeMs).toBe(before);
+    }
+  });
+  it("removes the earlier maxAttempts=1 override so transient 429s can back off",()=>{
+    const root=fs.mkdtempSync(path.join(process.env.TMPDIR||"/tmp","gemini-retry-migration-"));roots.push(root);
+    const config={dataDir:path.join(root,"data")} as any;
+    const settings={version:1,backend:"vertex-agent",vertex:{projectId:"sample",location:"global",credentialsPath:"/credentials.json",creditsUrl:""}} as const;
+    const file=path.join(config.dataDir,"provider-auth","gemini-cli-home",".gemini","settings.json");
+    fs.mkdirSync(path.dirname(file),{recursive:true});
+    fs.writeFileSync(file,JSON.stringify({experimental:{dynamicModelConfiguration:true},general:{maxAttempts:1,preferredEditor:"vim"},model:{compressionThreshold:0.1}}));
+    geminiCliEnvironment(config,settings);
+    expect(JSON.parse(fs.readFileSync(file,"utf8")).general).toEqual({preferredEditor:"vim"});
+    expect(JSON.parse(fs.readFileSync(file,"utf8")).model).toEqual({});
+  });
   it("preserves exact Vertex model ids through the Workhouse-owned Gemini CLI settings",()=>{
     const root=fs.mkdtempSync(path.join(process.cwd(),".claudex-gemini-env-"));roots.push(root);const config={dataDir:path.join(root,"data")} as any,settings={version:1,backend:"vertex-agent",vertex:{projectId:"sample-project-123",location:"global",credentialsPath:"/credentials.json",creditsUrl:""}} as const,home=path.join(config.dataDir,"provider-auth","gemini-cli-home"),file=path.join(home,".gemini","settings.json");
     fs.mkdirSync(path.dirname(file),{recursive:true});fs.writeFileSync(file,JSON.stringify({ui:{theme:"dark"},experimental:{otherFlag:true}}));
     const env=geminiCliEnvironment(config,settings),stored=JSON.parse(fs.readFileSync(file,"utf8"));
-    expect(env.HOME).toBe(home);expect(stored).toEqual({ui:{theme:"dark"},experimental:{otherFlag:true,dynamicModelConfiguration:true}});expect(fs.statSync(file).mode&0o777).toBe(0o600);
+    expect(env.HOME).toBe(home);expect(stored).toEqual({ui:{theme:"dark"},experimental:{otherFlag:true,dynamicModelConfiguration:true},general:{},model:{}});expect(fs.statSync(file).mode&0o777).toBe(0o600);
   });
 });

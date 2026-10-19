@@ -1,3 +1,4 @@
+import {readHtmlPreviewImages} from "./html-preview-images.js";
 import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
@@ -319,7 +320,7 @@ export class HostWorkspaceManager {
     const target=await this.localWorkspacePath(workspaceId,fileId);if(!target.stat.isFile())throw Object.assign(new Error("File expected."),{statusCode:400});const sensitive=this.isSensitiveFile(target.relative);
     const boundedOffset=Math.min(Math.max(0,offset),target.stat.size),boundedLimit=Math.min(Math.max(1,limit),128*1024),length=Math.min(boundedLimit,target.stat.size-boundedOffset),buffer=Buffer.alloc(length),fd=fs.openSync(target.real,"r");try{fs.readSync(fd,buffer,0,length,boundedOffset);}finally{fs.closeSync(fd);}const binary=buffer.includes(0);return{relativePath:target.relative,size:target.stat.size,modifiedAt:target.stat.mtime.toISOString(),sensitive,requiresConfirmation:false,binary,content:binary?null:buffer.toString("utf8"),offset:boundedOffset,nextOffset:boundedOffset+length<target.stat.size?boundedOffset+length:null};
   }
-  async readHtmlPreview(workspaceId:string,fileId:string,confirmSensitive=false){
+  async readHtmlPreview(workspaceId:string,fileId:string,confirmSensitive=false,imageReferences:string[]=[]){
     const target=await this.localWorkspacePath(workspaceId,fileId);
     if(!target.stat.isFile())throw Object.assign(new Error("HTML preview requires a regular file."),{statusCode:400,code:"HTML_PREVIEW_FILE_REQUIRED"});
     if(!/\.html?$/i.test(target.relative))throw Object.assign(new Error("HTML preview supports only .html and .htm files."),{statusCode:415,code:"HTML_PREVIEW_EXTENSION_REQUIRED"});
@@ -330,7 +331,7 @@ export class HostWorkspaceManager {
     try{content=new TextDecoder("utf-8",{fatal:true}).decode(value.length>=3&&value[0]===0xef&&value[1]===0xbb&&value[2]===0xbf?value.subarray(3):value);}
     catch{throw Object.assign(new Error("HTML preview requires valid UTF-8 text."),{statusCode:415,code:"HTML_PREVIEW_INVALID_UTF8"});}
     if(content.includes("\0"))throw Object.assign(new Error("Binary files cannot be previewed as HTML."),{statusCode:415,code:"HTML_PREVIEW_BINARY"});
-    return{fileId,relativePath:target.relative,content,byteLength:value.length,modifiedAt:target.stat.mtime.toISOString(),revision:crypto.createHash("sha256").update(value).digest("hex")};
+    return{images:readHtmlPreviewImages(target.workspace.canonicalPath,target.real,imageReferences),fileId,relativePath:target.relative,content,byteLength:value.length,modifiedAt:target.stat.mtime.toISOString(),revision:crypto.createHash("sha256").update(value).digest("hex")};
   }
   async resolveWorkspaceDownload(workspaceId:string,relativePath:string){
     const workspace=await this.requireWorkspace(workspaceId,LOCAL_HOST_ID),requested=relativePath.trim();

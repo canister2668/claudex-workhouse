@@ -1,0 +1,68 @@
+// Gemini CLI 0.55.1, Apache-2.0: exact bundled ID stripping function.
+function stripToolCallIdPrefixes(contents) {
+  return contents.map((content) => ({
+    ...content,
+    parts: (content.parts || []).map((part) => {
+      const newPart = { ...part };
+      if (newPart.functionCall) {
+        const fc = newPart.functionCall;
+        const name3 = fc.name?.trim() || "generic_tool";
+        if (fc.id && fc.id.startsWith(`${name3}__`)) {
+          newPart.functionCall = {
+            name: fc.name,
+            args: fc.args,
+            id: fc.id.substring(name3.length + 2)
+          };
+        }
+      }
+      if (newPart.functionResponse) {
+        const fr = newPart.functionResponse;
+        const name3 = fr.name?.trim() || "generic_tool";
+        if (fr.id && fr.id.startsWith(`${name3}__`)) {
+          newPart.functionResponse = {
+            name: fr.name,
+            response: fr.response,
+            id: fr.id.substring(name3.length + 2)
+          };
+        }
+      }
+      return newPart;
+    })
+  }));
+}
+
+function send(contentsToUse, modelToUse) {
+  const finalContents = stripToolCallIdPrefixes(contentsToUse);
+  return finalContents;
+}
+
+// Exact retry predicate from GeminiChat.streamWithRetries, isolated for tests.
+function shouldRetry(isContentError, isRetryable, signal, emittedOutput = false) {
+  const isRetryableContentError = isContentError;
+  if (isRetryableContentError || isRetryable && !signal.aborted) {
+    return true;
+  }
+  return false;
+}
+
+async function compressFixture(prompt_id, force, model, abortSignal) {
+  const { newHistory, info: info2 } = await this.compressionService.compress(this.getChat(), prompt_id, force, model, this.config, this.hasFailedCompressionAttempt, abortSignal);
+  return {newHistory, info:info2};
+}
+
+async function apiCallFixture(url3, requestInit) {
+    return fetch(url3, requestInit).catch((e2) => {
+      throw new Error(`exception ${e2} sending request`);
+    });
+}
+
+function isRetryableError(error40, retryFetchErrors) {
+ return false;
+}
+
+async function* streamFixture(stream2) {
+ let isConnectionPhase = true;
+ for await (const chunk of stream2) {
+              yield { type: StreamEventType.CHUNK, value: chunk };
+ }
+}

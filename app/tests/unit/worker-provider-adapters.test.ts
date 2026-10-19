@@ -253,6 +253,14 @@ describe("worker launch plans", () => {
     expect(vertex.backend).toBe("vertex-api");
   });
 
+  test("Vertex Agent preserves compact mode instead of launching a resumed prompt",()=>{
+    const {root,home}=installation();
+    const bundle=path.join(root,"runtime","gemini-cli","node_modules","@google","gemini-cli","bundle","gemini.js");
+    fs.mkdirSync(path.dirname(bundle),{recursive:true});fs.writeFileSync(bundle,"// fixture");
+    const plan=resolveLaunchPlan({...base(root,home,"antigravity"),mode:"compact",threadId:"native-thread",prompt:"",antigravityExecution:{version:1,backend:"vertex-agent",vertex:{projectId:"demo-project",location:"global",credentialsPath:"",creditsUrl:""}}});
+    expect(plan.runner).toBe("gemini-cli-worker.js");expect(plan.args[5]).toBe("compact");expect(plan.args.at(-1)).toBe("");
+  });
+
   // A Vertex backend with no project is not a usable configuration, and the
   // shared normalizer falls back to the consumer CLI rather than launching a
   // worker that cannot authenticate.

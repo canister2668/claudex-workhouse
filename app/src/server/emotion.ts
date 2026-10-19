@@ -21,7 +21,7 @@ const v5=(chan:string,kun:string)=>[...V5_CHAN_COSTUMES.map(costume=>chan+costum
 export const PROVIDER_EMOTION_OUTFITS:Record<EmotionProvider,readonly string[]>={
   codex:["Gpt-Codex","Gpt-Sol",...v5("Gpt-Codex-v5","Gpt-Codex-kun"),...v5("Gpt-Sol-v5","Gpt-Sol-kun"),...v5("Astra-code","Astra-code-kun"),...v5("Chat-code","Chat-code-kun")],
   claude:["normal","capy",...v5("Claude-code","Claude-code-kun"),...v5("Fable-code","Fable-code-kun")],
-  antigravity:["Antigravity","Gemma-e4b",...v5("Gemini-code","Gemini-code-kun"),...v5("Gemma-e4b-v5","Gemma-e4b-kun")],
+  antigravity:["Antigravity","Gemma-e4b",...V5_CHAN_COSTUMES.map(costume=>"Argon-code"+costume),...v5("Gemini-code","Gemini-code-kun"),...v5("Gemma-e4b-v5","Gemma-e4b-kun")],
   grok:["Grok",...v5("Grok-code","Grok-code-kun")],
   deepseek:["DeepSeek","Ollama","WhaleGirl",...v5("DeepSeek-code","DeepSeek-code-kun"),...v5("Ollama-code","Ollama-code-kun"),...v5("Whale-code","Whale-code-kun")],
   ollama:["Ollama","DeepSeek","Antigravity","Gemma-e4b","WhaleGirl",...v5("Ollama-code","Ollama-code-kun"),...v5("DeepSeek-code","DeepSeek-code-kun"),...v5("Whale-code","Whale-code-kun"),...v5("Gemini-code","Gemini-code-kun"),...v5("Gemma-e4b-v5","Gemma-e4b-kun")]

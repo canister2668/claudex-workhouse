@@ -1,6 +1,7 @@
 <script lang="ts">
   import {AlertTriangle,ExternalLink,Image,Monitor,MoreHorizontal,RefreshCw,ShieldCheck,Smartphone,SunMoon} from "@lucide/svelte";
   import {onDestroy,onMount,tick} from "svelte";
+  import {htmlPreviewImageReferences,embedHtmlPreviewImages} from "./html-preview-images";
   import {buildHtmlPreview} from "./html-preview-compatibility";
   import type {HtmlPreviewCanvas,HtmlPreviewMode,HtmlPreviewReadResponse,HtmlPreviewResult,HtmlPreviewViewport} from "./html-preview-types";
   import {t} from "./i18n";
@@ -25,7 +26,7 @@
     const cacheKey=key(),cached=cache.get(cacheKey);
     if(cached){result=cached;return;}
     processing=true;await tick();
-    try{const next=buildHtmlPreview(source.content,{mode,allowExternalImages});cache.set(cacheKey,next);result=next;}
+    try{const next=buildHtmlPreview(embedHtmlPreviewImages(source.content,source.images),{mode,allowExternalImages});cache.set(cacheKey,next);result=next;}
     catch(value){error=message(value);result=null;}
     finally{processing=false;}
   }
@@ -33,8 +34,10 @@
     if(file.sensitive&&!confirm($t("htmlPreview.sensitiveConfirm")))return;
     loading=true;error="";
     try{
-      const next=await api(`/api/workspaces/${workspaceId}/files/html-preview`,{method:"POST",body:JSON.stringify({fileId:file.id,confirmSensitive:file.sensitive})}) as HtmlPreviewReadResponse;
-      if(force||source?.revision!==next.revision)cache.clear();
+      let next=await api(`/api/workspaces/${workspaceId}/files/html-preview`,{method:"POST",body:JSON.stringify({fileId:file.id,confirmSensitive:file.sensitive})}) as HtmlPreviewReadResponse;
+      const imageReferences=htmlPreviewImageReferences(next.content);
+      if(imageReferences.length)next=await api(`/api/workspaces/${workspaceId}/files/html-preview`,{method:"POST",body:JSON.stringify({fileId:file.id,confirmSensitive:file.sensitive,imageReferences})}) as HtmlPreviewReadResponse;
+      cache.clear();
       source=next;await transform();
     }catch(value){error=message(value);source=null;result=null;}
     finally{loading=false;}

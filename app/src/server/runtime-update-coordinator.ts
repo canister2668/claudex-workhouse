@@ -1,4 +1,6 @@
-import {applyRuntimeUpdate,checkRuntimeUpdates,isManagedRuntimeStatus,type ManagedRuntimeUpdateStatus,type RuntimeProvider,type RuntimeUpdateStatus} from "./runtime-updates.js";
+import {applyRuntimeUpdate,checkRuntimeUpdates,isUpdatableRuntimeStatus,type RuntimeUpdateStatus,type UpdatableRuntimeProvider,type UpdatableRuntimeUpdateStatus} from "./runtime-updates.js";
+
+type RuntimeProvider=UpdatableRuntimeProvider;
 
 export type RuntimeAutoUpdateSettings={version:1;providers:Record<RuntimeProvider,boolean>};
 type RuntimeUpdateRecord=RuntimeAutoUpdateSettings&{notifications:{available:Record<RuntimeProvider,string|null>;completed:Record<RuntimeProvider,string|null>}};
@@ -7,17 +9,19 @@ export type RuntimeUpdateEvent={
   provider:RuntimeProvider;name:string;current:string|null;latest:string|null;createdAt:string;detail?:string;
 };
 
-export const DEFAULT_RUNTIME_AUTO_UPDATE:RuntimeAutoUpdateSettings={version:1,providers:{codex:false,claude:false}};
-const emptyVersions=():Record<RuntimeProvider,string|null>=>({codex:null,claude:null});
+// Grok defaults on: xAI rejects outdated CLIs outright (HTTP 426), and the
+// CLI's own background updater is disabled for every Workhouse launch.
+export const DEFAULT_RUNTIME_AUTO_UPDATE:RuntimeAutoUpdateSettings={version:1,providers:{codex:false,claude:false,grok:true}};
+const emptyVersions=():Record<RuntimeProvider,string|null>=>({codex:null,claude:null,grok:null});
 
 function normalizeVersions(value:unknown){
   const input=value&&typeof value==="object"?value as Record<string,unknown>:{};
-  return{codex:typeof input.codex==="string"?input.codex:null,claude:typeof input.claude==="string"?input.claude:null};
+  return{codex:typeof input.codex==="string"?input.codex:null,claude:typeof input.claude==="string"?input.claude:null,grok:typeof input.grok==="string"?input.grok:null};
 }
 
 export function normalizeRuntimeAutoUpdate(value:unknown):RuntimeAutoUpdateSettings{
   const input=value&&typeof value==="object"?value as any:{};
-  return{version:1,providers:{codex:input?.providers?.codex===true,claude:input?.providers?.claude===true}};
+  return{version:1,providers:{codex:input?.providers?.codex===true,claude:input?.providers?.claude===true,grok:input?.providers?.grok!==false}};
 }
 
 function normalizeRecord(value:unknown):RuntimeUpdateRecord{
@@ -42,6 +46,8 @@ export class RuntimeUpdateCoordinator{
   private readonly listeners=new Set<(event:RuntimeUpdateEvent)=>void>();
   private readonly history:RuntimeUpdateEvent[]=[];
   private readonly automaticRunning=new Set<RuntimeProvider>();
+  private lastRequired=new Map<RuntimeProvider,number>();
+  private latest:RuntimeUpdateStatus[]|null=null;
   private sequence=0;
   private checkPromise:Promise<RuntimeUpdateStatus[]>|null=null;
   private startupTimer:ReturnType<typeof setTimeout>|null=null;
@@ -55,6 +61,9 @@ export class RuntimeUpdateCoordinator{
     this.startupTimer=setTimeout(()=>{this.startupTimer=null;void this.checkNow().catch(()=>{});},delay);this.startupTimer.unref?.();
     this.interval=setInterval(()=>void this.checkNow().catch(()=>{}),interval);this.interval.unref?.();
   }
+
+  /** The statuses from the most recent check, including background ones. */
+  lastChecked(){return this.latest;}
 
   settings():RuntimeAutoUpdateSettings{return{version:1,providers:{...this.record.providers}};}
 
@@ -76,11 +85,29 @@ export class RuntimeUpdateCoordinator{
     if(this.checkPromise)return this.checkPromise;
     this.checkPromise=(async()=>{
       const statuses=await(this.options.check??checkRuntimeUpdates)(this.options.root,this.options.dataRoot??this.options.root);
+      this.latest=statuses;
       await this.announceAvailable(statuses);
       void this.applyAutomatic(statuses);
       return statuses;
     })().finally(()=>{this.checkPromise=null;});
     return this.checkPromise;
+  }
+
+  /**
+   * Updates a runtime that has proven too old to run (the provider refused it),
+   * regardless of the auto-update toggle: staying on the rejected version can
+   * only fail again. Throttled so a burst of failing tasks starts one update.
+   */
+  async requireUpdate(provider:RuntimeProvider,reason:string){
+    const last=this.lastRequired.get(provider)??0;
+    if(this.automaticRunning.has(provider)||Date.now()-last<10*60_000)return false;
+    this.lastRequired.set(provider,Date.now());
+    const statuses=await this.checkNow().catch(()=>null);
+    const item=statuses?.filter(isUpdatableRuntimeStatus).find(value=>value.provider===provider);
+    if(!item?.canUpdate||item.updateAvailable===false||this.automaticRunning.has(provider))return false;
+    this.automaticRunning.add(provider);
+    try{await this.applyOne(item,reason);}finally{this.automaticRunning.delete(provider);}
+    return true;
   }
 
   close(){
@@ -95,7 +122,7 @@ export class RuntimeUpdateCoordinator{
   }
 
   private async announceAvailable(statuses:RuntimeUpdateStatus[]){
-    const announcements=statuses.filter(isManagedRuntimeStatus).filter(item=>item.updateAvailable===true&&item.latest&&this.record.notifications.available[item.provider]!==item.latest);
+    const announcements=statuses.filter(isUpdatableRuntimeStatus).filter(item=>item.updateAvailable===true&&item.latest&&this.record.notifications.available[item.provider]!==item.latest);
     if(!announcements.length)return;
     for(const item of announcements)this.record.notifications.available[item.provider]=item.latest;
     await this.options.save(this.record);
@@ -103,14 +130,14 @@ export class RuntimeUpdateCoordinator{
   }
 
   private async applyAutomatic(statuses:RuntimeUpdateStatus[]){
-    for(const item of statuses.filter(isManagedRuntimeStatus)){
+    for(const item of statuses.filter(isUpdatableRuntimeStatus)){
       if(!this.record.providers[item.provider]||item.updateAvailable!==true||!item.canUpdate||this.automaticRunning.has(item.provider))continue;
       this.automaticRunning.add(item.provider);
       void this.applyOne(item).finally(()=>this.automaticRunning.delete(item.provider));
     }
   }
 
-  private async applyOne(item:ManagedRuntimeUpdateStatus){
+  private async applyOne(item:UpdatableRuntimeUpdateStatus,reason?:string){
     try{
       const statuses=await(this.options.apply??applyRuntimeUpdate)(this.options.root,item.provider,this.options.dataRoot??this.options.root);
       await this.options.onUpdated?.(item.provider);
@@ -120,7 +147,7 @@ export class RuntimeUpdateCoordinator{
       this.emit({type:"auto_update_completed",provider:item.provider,name:item.name,current:version,latest:version});
     }catch(error){
       if((error as any)?.statusCode===409)return;
-      this.emit({type:"auto_update_failed",provider:item.provider,name:item.name,current:item.current,latest:item.latest,detail:error instanceof Error?error.message.slice(0,300):String(error).slice(0,300)});
+      this.emit({type:"auto_update_failed",provider:item.provider,name:item.name,current:item.current,latest:item.latest,detail:`${reason?`${reason} `:""}${error instanceof Error?error.message:String(error)}`.slice(0,300)});
     }
   }
 }

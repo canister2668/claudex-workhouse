@@ -5,6 +5,7 @@ import{spawnSync}from"node:child_process";
 import { z } from "zod";
 import type { ProjectConfig } from "./types.js";
 import {isAbsoluteHostPath,resolveWorkhouseRoots}from"./platform.js";
+import { grokLauncherFirst } from "./grok-runtime.js";
 
 const{appRoot:APP_ROOT,dataRoot:DATA_ROOT,legacyRoot:ROOT}=resolveWorkhouseRoots();
 const env=(name:string)=>process.env[`CLAUDEX_WORKHOUSE_${name}`];
@@ -62,7 +63,7 @@ export function resolveGrokBinary(configured="grok"):string{
   const versioned=path.join(home,".grok","bin");
   let managed:string|null=null;
   try{
-    managed=fs.readdirSync(versioned).filter(name=>/^grok(?:-[0-9][a-z0-9._-]*)?(?:\.exe)?$/i.test(name)).sort((a,b)=>b.localeCompare(a,undefined,{numeric:true})).map(name=>executable(path.join(versioned,name))).find(Boolean)??null;
+    managed=fs.readdirSync(versioned).filter(name=>/^grok(?:-[0-9][a-z0-9._-]*)?(?:\.exe)?$/i.test(name)).sort(grokLauncherFirst).map(name=>executable(path.join(versioned,name))).find(Boolean)??null;
   }catch{/* Grok has not been installed for this account yet. */}
   return executable(requested)||executable(path.join(DATA_ROOT,"runtime","bin",process.platform==="win32"?"grok.exe":"grok"))||managed||executable("grok")||(path.isAbsolute(requested)?requested:path.resolve(DATA_ROOT,requested||"runtime/bin/grok"));
 }

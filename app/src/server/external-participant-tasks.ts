@@ -5,20 +5,32 @@ import crypto from "node:crypto";
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import { z } from "zod";
 import type { DeckDatabase } from "./db/client.js";
-import type { DeckTask } from "./types.js";
+import type { DeckTask, ProviderId } from "./types.js";
 import { sanitizeSensitiveText } from "./sensitive-data.js";
 
+export const participantProviderSchema=z.enum(["codex","claude","deepseek","ollama","antigravity","grok"]);
 // Execution authorizes the primary workspace, independently of file mounts.
 // Old grants default to null and cannot start or inspect provider work.
-export const executionGrantSchema=z.object({
-  provider:z.enum(["codex","claude"]),
+// Grants stored before multi-provider support name a single `provider`; they
+// load as a one-item list. The first listed provider is the request default.
+export const executionGrantSchema=z.preprocess(value=>{
+  if(!value||typeof value!=="object"||Array.isArray(value)||"providers" in value||!("provider" in value))return value;
+  const {provider,...rest}=value as Record<string,unknown>;return{...rest,providers:[provider]};
+},z.object({
+  providers:z.array(participantProviderSchema).min(1).max(6).refine(items=>new Set(items).size===items.length,"Providers must be unique."),
   automationLevel:z.enum(["auto","read"]).default("auto"),
   maxActiveTasks:z.number().int().min(1).max(4).default(1)
-}).strict();
+}).strict());
 export type ExecutionGrant=z.infer<typeof executionGrantSchema>;
 type TaskGrant={id:string;workspaceId:string;execution:ExecutionGrant|null};
+export type ParticipantModelOption={id:string;displayName:string;reasoningEfforts:string[];defaultReasoningEffort:string|null;serviceTiers:string[]};
+export type ParticipantProviderCatalog={provider:ProviderId;defaultModel:string|null;defaultReasoningEffort:string|null;defaultServiceTier:string|null;models:ParticipantModelOption[]};
+// Omitted fields use the owner's delegation default; null asks for the
+// provider's own default. A selection never raises access.
+export type ParticipantTaskSelection={provider:ProviderId;model?:string|null;reasoningEffort?:string|null;serviceTier?:string|null};
 export type ExternalParticipantExecutor={
-  create(input:{workspaceId:string;prompt:string;title?:string;nativeId:string;execution:ExecutionGrant}):Promise<DeckTask>;
+  create(input:{workspaceId:string;prompt:string;title?:string;nativeId:string;execution:ExecutionGrant;selection:ParticipantTaskSelection}):Promise<DeckTask>;
+  models(providers:ProviderId[]):Promise<ParticipantProviderCatalog[]>;
   refresh(task:DeckTask):Promise<DeckTask>;
   resume(task:DeckTask,prompt:string):Promise<DeckTask>;
 };
@@ -26,7 +38,12 @@ const error=(message:string,statusCode:number,code:string)=>Object.assign(new Er
 const terminal=(task:DeckTask)=>["completed","failed","stopped"].includes(task.status);
 const taskIdSchema=z.string().min(3).max(200).regex(/^[a-zA-Z0-9:._-]+$/);
 const promptSchema=z.string().trim().min(1).max(50_000);
-const createSchema=z.object({prompt:promptSchema,title:z.string().trim().min(1).max(100).optional(),idempotencyKey:z.string().uuid()}).strict();
+const createSchema=z.object({
+  prompt:promptSchema,title:z.string().trim().min(1).max(100).optional(),
+  provider:participantProviderSchema.optional(),model:z.string().trim().min(1).max(120).nullable().optional(),
+  reasoningEffort:z.string().trim().min(1).max(30).nullable().optional(),serviceTier:z.string().trim().min(1).max(50).nullable().optional(),
+  idempotencyKey:z.string().uuid()
+}).strict();
 const resumeSchema=z.object({prompt:promptSchema,idempotencyKey:z.string().uuid()}).strict();
 const safeText=(value:string|null)=>value===null?null:sanitizeSensitiveText(value).slice(0,60_000);
 const snapshot=(task:DeckTask)=>({
@@ -49,7 +66,7 @@ export function registerExternalParticipantTaskRoutes(app:FastifyInstance,input:
     if(!executor)throw error("Task execution is unavailable.",503,"EXTERNAL_EXECUTION_UNAVAILABLE");
     return grant as TaskGrant&{execution:ExecutionGrant};
   };
-  const owns=(task:DeckTask,grant:TaskGrant)=>task.owned&&task.ownership==="claudex-workhouse"&&task.source==="claudex-workhouse"&&task.workspaceId===grant.workspaceId&&task.executionHostId==="local"&&task.provider===grant.execution?.provider&&task.metadata?.externalParticipantGrantId===grant.id;
+  const owns=(task:DeckTask,grant:TaskGrant)=>task.owned&&task.ownership==="claudex-workhouse"&&task.source==="claudex-workhouse"&&task.workspaceId===grant.workspaceId&&task.executionHostId==="local"&&Boolean(grant.execution?.providers.includes(task.provider))&&task.metadata?.externalParticipantGrantId===grant.id;
   const ownedTask=async(id:string,grant:TaskGrant)=>{
     const task=await db.getTask(id);
     if(!task||!owns(task,grant))throw error("Task is outside this participant grant.",404,"EXTERNAL_TASK_NOT_FOUND");
@@ -71,6 +88,21 @@ export function registerExternalParticipantTaskRoutes(app:FastifyInstance,input:
       if(!terminal(task))active++;
     }
     if(active>=grant.execution.maxActiveTasks)throw error("Participant active-task limit reached. Check existing tasks before submitting more work.",409,"EXTERNAL_TASK_LIMIT");
+  };
+  // Validate against the owner's enabled catalog before dispatch. Never
+  // substitute another provider, model, effort or tier for the requested one.
+  const select=async(grant:TaskGrant&{execution:ExecutionGrant},body:z.infer<typeof createSchema>):Promise<ParticipantTaskSelection>=>{
+    const provider=body.provider??grant.execution.providers[0];
+    if(!grant.execution.providers.includes(provider))throw Object.assign(error(`Provider ${provider} is not allowed by this grant. Allowed: ${grant.execution.providers.join(", ")}.`,403,"EXTERNAL_PROVIDER_DENIED"),{allowed:grant.execution.providers});
+    const selection:ParticipantTaskSelection={provider,...(body.model!==undefined?{model:body.model}:{}),...(body.reasoningEffort!==undefined?{reasoningEffort:body.reasoningEffort}:{}),...(body.serviceTier!==undefined?{serviceTier:body.serviceTier}:{})};
+    if(body.model===undefined&&body.reasoningEffort===undefined&&body.serviceTier===undefined)return selection;
+    const catalog=(await executor!.models([provider])).find(item=>item.provider===provider);
+    if(!catalog)throw error(`The ${provider} model catalog is unavailable; no model was selected.`,503,"EXTERNAL_MODEL_CATALOG_UNAVAILABLE");
+    const modelId=body.model??catalog.defaultModel,model=modelId?catalog.models.find(item=>item.id===modelId):undefined;
+    if(modelId&&!model)throw Object.assign(error(`${provider} model ${JSON.stringify(modelId)} is not enabled. Enabled: ${catalog.models.map(item=>item.id).join(", ")||"(none)"}.`,400,"EXTERNAL_MODEL_NOT_ENABLED"),{available:catalog.models.map(item=>item.id)});
+    if(body.reasoningEffort&&!model?.reasoningEfforts.includes(body.reasoningEffort))throw error(`Reasoning effort ${JSON.stringify(body.reasoningEffort)} is not supported by ${modelId??provider}. Supported: ${model?.reasoningEfforts.join(", ")||"(none)"}.`,400,"EXTERNAL_EFFORT_UNSUPPORTED");
+    if(body.serviceTier&&!model?.serviceTiers.includes(body.serviceTier))throw error(`Service tier ${JSON.stringify(body.serviceTier)} is not supported by ${modelId??provider}.`,400,"EXTERNAL_SERVICE_TIER_UNSUPPORTED");
+    return selection;
   };
   const idempotent=async(grant:TaskGrant,operation:string,key:string,body:unknown,run:()=>Promise<DeckTask>)=>{
     const action=`external-task:${grant.id}:${operation}`,requestHash=crypto.createHash("sha256").update(JSON.stringify(body)).digest("hex"),now=new Date().toISOString();
@@ -102,7 +134,12 @@ export function registerExternalParticipantTaskRoutes(app:FastifyInstance,input:
   };
   app.get("/external-participants/v1/capabilities",async request=>{
     const grant=await input.requireGrant(request);
-    return{workspaceId:grant.workspaceId,execution:grant.execution&&executor?grant.execution:null};
+    // `provider` keeps single-provider clients working; it is the request default.
+    return{workspaceId:grant.workspaceId,execution:grant.execution&&executor?{...grant.execution,provider:grant.execution.providers[0]}:null};
+  });
+  app.get("/external-participants/v1/models",{config:{rateLimit:{max:30,timeWindow:"1 minute"}}},async request=>{
+    const grant=await authorize(request);
+    return{providers:await executor!.models(grant.execution.providers),source:"owner-enabled-catalog"};
   });
   app.get("/external-participants/v1/tasks",{config:{rateLimit:{max:30,timeWindow:"1 minute"}}},async request=>{
     const grant=await authorize(request),tasks=(await db.listTasks()).filter(task=>owns(task,grant)).sort((a,b)=>b.createdAt.localeCompare(a.createdAt)).slice(0,50);
@@ -116,10 +153,10 @@ export function registerExternalParticipantTaskRoutes(app:FastifyInstance,input:
   app.post("/external-participants/v1/tasks",{config:{rateLimit:{max:10,timeWindow:"1 minute"}}},async request=>{
     const grant=await authorize(request),body=createSchema.parse(request.body);
     return exclusive(grant,async()=>{await authorize(request);return idempotent(grant,"create",body.idempotencyKey,body,async()=>{
-      await capacity(grant);
+      const selection=await select(grant,body);await capacity(grant);
       const hex=crypto.createHash("sha256").update(`${grant.id}:${body.idempotencyKey}`).digest("hex").slice(0,32);
       const nativeId=`${hex.slice(0,8)}-${hex.slice(8,12)}-4${hex.slice(13,16)}-a${hex.slice(17,20)}-${hex.slice(20)}`;
-      const created=await executor!.create({workspaceId:grant.workspaceId,prompt:body.prompt,title:body.title,nativeId,execution:grant.execution});
+      const created=await executor!.create({workspaceId:grant.workspaceId,prompt:body.prompt,title:body.title,nativeId,execution:grant.execution,selection});
       const task=await db.upsertTask({...created,metadata:{...created.metadata,externalParticipantGrantId:grant.id,externalParticipantRequestId:body.idempotencyKey}});
       await audit(grant,"external-participant-task-create",task);return task;
     });});

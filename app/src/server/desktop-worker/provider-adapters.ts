@@ -23,6 +23,7 @@ import { antigravityBinary, antigravityTaskEnvironment, geminiCliEnvironment } f
 import { resolveGeminiCliEntry } from "../gemini-cli-runtime.js";
 import { normalizeAntigravityExecutionSettings } from "../antigravity-execution-settings.js";
 import { grokTaskEnvironment } from "../grok-task-environment.js";
+import { grokLauncherFirst } from "../grok-runtime.js";
 import { managedCodexBinary, managedCodexRuntimeFault } from "../codex-runtime.js";
 import type { WorkerConfig } from "./config.js";
 
@@ -84,7 +85,7 @@ const executable = (file: string | null | undefined) => {
 
 /**
  * Resolves the Grok CLI the same way the server's `resolveGrokBinary` does:
- * the versioned `~/.grok/bin` directory first, then the installation's managed
+ * the `~/.grok/bin` launcher, then its versioned binaries, then the installation's managed
  * `runtime/bin`. Returning null is what makes the capability report say Grok is
  * not installed instead of letting a launch fail later with ENOENT.
  */
@@ -94,7 +95,7 @@ export function resolveWorkerGrokBinary(paths: ProviderRuntimePaths, platform: N
   try {
     const managed = fs.readdirSync(versioned)
       .filter(entry => new RegExp(`^grok(?:-[0-9][a-z0-9._-]*)?(?:\\.exe)?$`, "i").test(entry))
-      .sort((a, b) => b.localeCompare(a, undefined, { numeric: true }))
+      .sort(grokLauncherFirst)
       .map(entry => path.join(versioned, entry))
       .find(executable);
     if (managed) return managed;
@@ -299,7 +300,7 @@ export function resolveLaunchPlan(input: {
       runner: "gemini-cli-worker.js",
       args: [
         input.runner("gemini-cli-worker.js"), input.stateFile, input.taskId, entry.kind, entry.entry,
-        input.mode === "compact" ? "resume" : input.mode, input.cwd, input.marker,
+        input.mode, input.cwd, input.marker,
         input.profile, input.model, input.workMode, input.sessionId, input.threadId, input.prompt
       ],
       environment: {

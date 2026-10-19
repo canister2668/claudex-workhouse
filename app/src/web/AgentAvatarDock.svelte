@@ -2,8 +2,10 @@
   import { onDestroy, onMount, tick } from "svelte";
   import { flip } from "svelte/animate";
   import { crossfade, fade } from "svelte/transition";
-  import { agentPhase, emptyArrangement, fitActiveRow, formatElapsed, markSeen, nextArrangement, pileOf, pileWidth, type AgentPhase, type ActiveRowFit } from "./agent-arrangement";
+  import { agentPhase, emptyArrangement, fitActiveRow, formatElapsed, markSeen, nextArrangement, outcomeAcknowledged, pileOf, pileWidth, type AgentPhase, type ActiveRowFit } from "./agent-arrangement";
   import EmotionAvatar from "./EmotionAvatar.svelte";
+  import SessionToneControl from "./SessionToneControl.svelte";
+  import type { TonePreset } from "./character-settings";
   import { avatarTaskStreamKey, terminalEventSuperseded, type AgentRecentSession, type AgentRecentStatus } from "./agent-status";
   import { DEFAULT_AVATAR_COLLAPSE_DELAY_MS, type AvatarTrayShape } from "./avatar-notice";
   import { relativeTime, statusLabel } from "./session-ui";
@@ -41,6 +43,8 @@
   export let sessionsError:Record<AvatarProvider,boolean>={codex:false,claude:false,grok:false,antigravity:false,deepseek:false,ollama:false};
   // Task open in the main view; opening a finished agent's task counts as seeing it.
   export let viewingTaskId:string|null=null;
+  export let toneTask:{id:string;provider:string}|null=null;
+  export let onToneFavorites:((provider:AvatarProvider,favorites:TonePreset[])=>void)|null=null;
   export let onSelect:((session:AgentRecentSession)=>void|Promise<void>)|null=null;
   export let onOpen:((provider:AvatarProvider|null)=>void)|null=null;
   export let onStatusChange:((provider:AvatarProvider,taskId:string,status:"completed"|"failed"|"stopped")=>void)|null=null;
@@ -361,9 +365,10 @@
   {@const phase=phases[provider]}
   {@const unseen=arrangement.unseen[provider]}
   {@const name=providerName(provider)}
-  <span class="avatar-ring ring-{phase}" aria-hidden="true"></span>
+  <!-- A seen failure is settled: no red ring, like the neutral face. -->
+  <span class="avatar-ring ring-{outcomeAcknowledged(phase,unseen)?'idle':phase}" aria-hidden="true"></span>
   {#key `${provider}:${status}`}
-    <EmotionAvatar engine={provider} {codexAvatar} onMiniClick={()=>toggle(provider)} miniExpanded={openProvider===provider} miniLabel={$t("avatar.slotLabel",{provider:name,state:stateText(phase,unseen)})} context={{provider,status,sessionId:recent?.threadId,taskId:recent?.taskId}}/>
+    <EmotionAvatar engine={provider} {codexAvatar} onMiniClick={()=>toggle(provider)} miniExpanded={openProvider===provider} miniLabel={$t("avatar.slotLabel",{provider:name,state:stateText(phase,unseen)})} acknowledged={outcomeAcknowledged(phase,unseen)} context={{provider,status,sessionId:recent?.threadId,taskId:recent?.taskId}}/>
   {/key}
   {#if unseen==="done"}<span class="avatar-unseen-dot" aria-hidden="true"></span>{/if}
   {#if pill}
@@ -387,7 +392,7 @@
           <button type="button" class="agent-overflow-chip" aria-label={$t("avatar.moreActive",{count:fit.hidden.length})} title={fit.hidden.map(providerName).join(", ")} onclick={(event)=>toggle(fit.hidden[fit.hidden.length-1],event.currentTarget)}>+{fit.hidden.length}</button>
         {/if}
         {#each fit.visible as provider (provider)}
-          <div class="agent-avatar-slot {provider} status-{displayStatus(provider,recentOf(provider,providerItems),liveStatuses)||'idle'} phase-{phases[provider]}" class:pill={fit.mode==="pill"} title={label(provider,recentOf(provider,providerItems),displayStatus(provider,recentOf(provider,providerItems),liveStatuses))} animate:flip={{duration:motion(180)}} in:receive|global={{key:provider}} out:send|global={{key:provider}}>
+          <div class="agent-avatar-slot {provider} status-{displayStatus(provider,recentOf(provider,providerItems),liveStatuses)||'idle'} phase-{phases[provider]}" class:acknowledged={outcomeAcknowledged(phases[provider],arrangement.unseen[provider])} class:pill={fit.mode==="pill"} title={label(provider,recentOf(provider,providerItems),displayStatus(provider,recentOf(provider,providerItems),liveStatuses))} animate:flip={{duration:motion(180)}} in:receive|global={{key:provider}} out:send|global={{key:provider}}>
             {@render avatarBody(provider,"active",fit.mode==="pill")}
           </div>
         {/each}
@@ -396,7 +401,7 @@
     {#if pile.length}
       <div class="agent-pile" class:as-pills={pileAsPills} role="group" aria-label={$t("avatar.pile")}>
         {#each pile as provider (provider)}
-          <div class="agent-avatar-slot {provider} status-{displayStatus(provider,recentOf(provider,providerItems),liveStatuses)||'idle'} phase-{phases[provider]}" class:unseen={arrangement.unseen[provider]==="done"} class:pill={pileAsPills} title={label(provider,recentOf(provider,providerItems),displayStatus(provider,recentOf(provider,providerItems),liveStatuses))} animate:flip={{duration:motion(180)}} in:receive|global={{key:provider}} out:send|global={{key:provider}}>
+          <div class="agent-avatar-slot {provider} status-{displayStatus(provider,recentOf(provider,providerItems),liveStatuses)||'idle'} phase-{phases[provider]}" class:acknowledged={outcomeAcknowledged(phases[provider],arrangement.unseen[provider])} class:unseen={arrangement.unseen[provider]==="done"} class:pill={pileAsPills} title={label(provider,recentOf(provider,providerItems),displayStatus(provider,recentOf(provider,providerItems),liveStatuses))} animate:flip={{duration:motion(180)}} in:receive|global={{key:provider}} out:send|global={{key:provider}}>
             {@render avatarBody(provider,"pile",pileAsPills)}
           </div>
         {/each}
@@ -435,12 +440,13 @@
         {#if completedSessions.length}
           <div class="recent-session-list">
             {#each completedSessions as session (sessionKey(provider,session))}
-              <button type="button" class="agent-pop-row" onclick={()=>choose(session)}><span class="recent-check">✓</span><span><strong>{session.title}</strong><small>{session.projectId??$t("session.unregisteredProject")} · {relativeTime(session.updatedAt)}</small></span></button>
+              <button type="button" class="agent-pop-row" onclick={()=>choose(session)}><span class="recent-check" aria-hidden="true">{session.status==="completed"?"✓":session.status==="failed"?"!":"−"}</span><span><strong>{session.title}</strong><small>{statusLabel(session.status)} · {session.projectId??$t("session.unregisteredProject")} · {relativeTime(session.updatedAt)}</small></span></button>
             {/each}
           </div>
         {:else if sessionsLoading[provider]}<p role="status">{$t("common.loading")}</p>
         {:else if sessionsError[provider]}<p role="alert">{$t("common.notAvailable")} · <button type="button" onclick={()=>onOpen?.(provider)}>{$t("common.retry")}</button></p>
         {:else}<p class="agent-pop-empty">{$t("avatar.pop.noneRecent")}</p>{/if}
+        {#key provider}<SessionToneControl {provider} taskId={toneTask?.provider===provider?toneTask.id:null} onfavorites={onToneFavorites}/>{/key}
         <details class="agent-pop-profile">
           <summary>{$t("avatar.pop.settings")}</summary>
           <div class="recent-avatar-profile">

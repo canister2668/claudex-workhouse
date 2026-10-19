@@ -10,7 +10,8 @@ async function waitFor(check:()=>boolean){for(let index=0;index<50;index++){if(c
 
 describe("runtime update coordinator",()=>{
   it("normalizes provider toggles safely",()=>{
-    expect(normalizeRuntimeAutoUpdate({providers:{codex:true,claude:"yes"}})).toEqual({version:1,providers:{codex:true,claude:false}});
+    expect(normalizeRuntimeAutoUpdate({providers:{codex:true,claude:"yes"}})).toEqual({version:1,providers:{codex:true,claude:false,grok:true}});
+    expect(normalizeRuntimeAutoUpdate({providers:{codex:false,claude:false,grok:false}}).providers.grok).toBe(false);
     expect(normalizeRuntimeAutoUpdate(null)).toEqual(DEFAULT_RUNTIME_AUTO_UPDATE);
   });
 
@@ -27,6 +28,21 @@ describe("runtime update coordinator",()=>{
     expect(events.map(event=>[event.provider,event.type])).toEqual([["codex","update_available"],["codex","auto_update_completed"]]);
     expect(stored.notifications.available.codex).toBe("1.1.0");
     expect(stored.notifications.completed.codex).toBe("1.1.0");
+    coordinator.close();
+  });
+
+  it("updates a rejected runtime even with auto-update off, once per burst",async()=>{
+    const grok={provider:"grok" as const,name:"Grok CLI",current:"1.0.0",latest:"1.0.50",updateAvailable:true,managed:false,source:"external-cli:internal",checkedAt:new Date().toISOString(),canUpdate:true,checksum:null,management:"external" as const,dependsOn:null,configured:true};
+    const apply=vi.fn(async()=>[{...grok,current:"1.0.50",updateAvailable:false}]);const events:any[]=[];
+    const coordinator=new RuntimeUpdateCoordinator({
+      root:"/tmp/runtime-test",load:async()=>({version:1,providers:{codex:false,claude:false,grok:false}}),save:async()=>{},
+      check:vi.fn(async()=>[grok]),apply,startupDelayMs:60_000,intervalMs:60_000
+    });
+    await coordinator.initialize();coordinator.subscribe(0,event=>events.push(event));
+    expect(await coordinator.requireUpdate("grok","Grok CLI version (1.0.0) is outdated")).toBe(true);
+    expect(await coordinator.requireUpdate("grok","Grok CLI version (1.0.0) is outdated")).toBe(false);
+    expect(apply).toHaveBeenCalledTimes(1);
+    expect(events.map(event=>event.type)).toContain("auto_update_completed");
     coordinator.close();
   });
 });

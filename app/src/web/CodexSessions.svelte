@@ -72,7 +72,7 @@
   export let hosts:Array<{id:string;displayName:string}>=[];
   export let modelOptions:any[]=[];
   export let providerQuota:any=null;
-  export let onDetail:((open:boolean)=>void)|null=null;
+  export let onDetail:((open:boolean,taskId?:string|null)=>void)|null=null;
   export let onOpenTask:((task:any)=>void)|null=null;
   export let onOpenFile:((file:{path:string;pathBase:"workspace"|"task-cwd";sourceTaskId?:string;workspaceId?:string;line?:number;initialEdit?:boolean})=>void)|null=null;
   export let codexAvatar:string="Gpt-Sol";
@@ -87,7 +87,7 @@
       reconcileSelectedStatus()
     ]);
   }
-  $: onDetail?.(Boolean(selected));
+  $: onDetail?.(Boolean(selected),selected?.taskId??null);
   let lastQuery = "";
   let searchTimer:ReturnType<typeof setTimeout>|null=null;
   type Session=Record<string,any>;

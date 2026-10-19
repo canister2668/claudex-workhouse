@@ -84,7 +84,8 @@ model. With a file-only grant, the owner starts subsequent work separately.
 The existing private connection can also submit implementation and test work.
 In **Settings → External participants**, select the Board Workspace and enable
 **Allow dot or another external model to submit execution tasks** before creating
-the grant. Choose Codex or Claude Code and either file/command execution (`auto`)
+the grant. Tick the providers the participant may use (Codex, Claude, DeepSeek,
+Ollama, Gemini, Grok; the first ticked is the default) and either file/command execution (`auto`)
 or read/review (`read`). This is permission to execute in the **whole selected
 workspace**, independently of the narrower file mounts. It does not grant
 execution in other mounted workspaces. Existing grants remain file-only; create
@@ -93,12 +94,24 @@ a new grant explicitly rather than silently upgrading one.
 The owner API's optional `execution` object is:
 
 ```json
-{"provider":"codex","automationLevel":"auto","maxActiveTasks":1}
+{"providers":["codex","claude"],"automationLevel":"auto","maxActiveTasks":1}
 ```
 
-The provider uses the owner's global delegation model, reasoning, and Codex
-service-tier settings. The participant cannot choose a model, change provider,
-change workspace, request full access, or bypass existing paid-credit gates.
+Grants stored with the earlier single `"provider"` field load as a one-item
+`providers` list, and `capabilities` still reports `provider` as the default.
+
+Each `create_task` may name an allowed `provider` and an exact `model`,
+`reasoningEffort`, and `serviceTier` listed by `list_models`
+(`GET /external-participants/v1/models`). That route returns, per allowed
+provider, the owner's enabled models with each model's valid efforts and
+service tiers (Codex speed tiers, Claude `priority` fast mode) and the
+delegation defaults. Omitted fields use the owner's global delegation settings;
+a model other than the delegation model starts from its provider's default
+effort. A provider outside the grant is refused with
+`EXTERNAL_PROVIDER_DENIED`, and an unknown model, effort, or tier with a 400
+listing what is enabled; nothing is silently substituted. The participant
+cannot change workspace, request full access, or bypass existing paid-credit
+gates. Follow-ups keep the task's provider and model.
 Revocation prevents further API access and new turns; already running provider
 tasks remain running and must be managed in Workhouse if they need to stop.
 
@@ -107,13 +120,14 @@ The additional MCP tools are:
 | Tool | Behavior |
 | --- | --- |
 | `get_capabilities` | Read workspace and optional execution grant |
-| `create_task` | Submit a prompt/title and UUID idempotency key |
+| `list_models` | List allowed providers, enabled models, valid efforts and tiers, and defaults |
+| `create_task` | Submit a prompt/title, optional provider/model/effort/tier, and UUID idempotency key |
 | `list_tasks` | List up to 50 recent tasks created by this grant |
 | `get_task` | Refresh status and read a bounded, redacted result |
 | `resume_task` | Submit a follow-up to a terminal task with a confirmed thread |
 
 The corresponding bearer-authenticated routes are `GET capabilities`,
-`GET/POST tasks`, `GET tasks/:taskId`, and `POST tasks/:taskId/messages` under
+`GET models`, `GET/POST tasks`, `GET tasks/:taskId`, and `POST tasks/:taskId/messages` under
 `/external-participants/v1/`. Creation and follow-up bodies contain an
 `idempotencyKey` UUID. Task results expose task/thread/provider/workspace identity,
 status, model, timestamps, and up to 60,000 result characters, but never internal

@@ -10,18 +10,20 @@ import Fastify from "fastify";
 import {registerManagedProviderMcp} from "../../src/server/managed-provider-mcp.js";
 import {phaseForEvent} from "../../src/web/liveness.js";
 import {z} from "zod";
+import {queuedTaskContinuation} from "../../src/server/task-continuation.js";
 
 const roots:string[]=[];
 afterEach(()=>{for(const root of roots.splice(0))fs.rmSync(root,{recursive:true,force:true});});
 function root(){const value=fs.mkdtempSync(path.join(os.tmpdir(),"async-input-"));roots.push(value);return value;}
 describe("asynchronous choice cards",()=>{
   it.each((["codex","claude","deepseek","ollama","antigravity","grok"] as ProviderId[]).flatMap(provider=>["running","completed"].map(status=>({provider,status}))))("delivers $provider answers immediately once from $status through the production HTTP routes",async ({provider,status})=>{
-    const directory=root(),app=Fastify(),task={id:`${provider}:task`,provider,threadId:"thread",owned:true,ownership:"claudex-workhouse",status,title:"Question"};
+    const directory=root(),app=Fastify(),task={id:`${provider}:task`,provider,threadId:"thread",owned:true,ownership:"claudex-workhouse",status,title:"Question",prompt:"Implement the requested repair and verify it"};
     const card=persistAsyncUserInput(directory,task,{id:"call",questions:[{title:"Choose",options:["A","B"]}]});
     const queued=new Map<string,any>(),db={getTask:async(id:string)=>id===task.id?task:null,getSessionMessage:async(id:string)=>queued.get(id),enqueueSessionMessage:async(item:any)=>{expect(queued.has(item.id)).toBe(false);queued.set(item.id,{...item,status:"queued"});return item;}};
     const source=fs.readFileSync(new URL("../../src/server/index.ts",import.meta.url),"utf8"),start=source.indexOf('app.get("/api/user-input"'),end=source.indexOf('app.post("/api/tasks/:provider/:taskId/resync"',start);
     const code=ts.transpileModule(source.slice(start,end),{compilerOptions:{target:ts.ScriptTarget.ES2022}}).outputText;
     const dispatchSource=source.slice(source.indexOf('async function dispatchQueuedMessage('),source.indexOf('let queuePumpBusy=false;'));
+    const sendSource=source.slice(source.indexOf("async function sendTaskMessage("),source.indexOf("async function currentUiLocale("));
     const calls:string[]=[];
     Object.assign(db,{
       claimSessionMessage:async(id:string)=>queued.get(id),
@@ -29,7 +31,7 @@ describe("asynchronous choice cards",()=>{
       upsertTask:async(value:any)=>value,
       appendAudit:async()=>{}
     });
-    vm.runInNewContext(ts.transpileModule(dispatchSource,{compilerOptions:{target:ts.ScriptTarget.ES2022}}).outputText+code,{app,z,db,config:{dataRoot:directory},providerParam:z.enum(["codex","claude","deepseek","ollama","antigravity","grok"]),listAsyncUserInputs,asyncAnswerPrompt,executionHostUsesWorker:()=>false,codex:{listUserInputs:()=>[]},idempotent:async(_request:any,_action:any,_body:any,run:()=>any)=>run(),requirePaidCreditConsent:async()=>{},confirmedPaidCreditProviders:()=>new Set(),queueDispatching:new Set(),latestQueuedThreadTask:async()=>task,activeTaskStatus:(status:string)=>status==="running",assertPaidCreditConsent:async()=>{},applyPendingTaskLocation:async(value:any)=>value,workspacePromptForTask:(_task:any,prompt:string)=>prompt,withoutLegacyWorkspaceApprovalMetadata:()=>({}),publishTaskSnapshot:(value:any)=>value,provider:()=>({stopTask:async()=>{calls.push("stop");return{...task,status:"stopped"};},sendMessage:async(value:any,prompt:string)=>{expect(value.status).toBe(status==="running"?"stopped":"completed");expect(prompt).toBe("Choose\nB");calls.push("resume");return{...value,id:"next",status:"running"};}}),audit:async()=>{}});
+    vm.runInNewContext(ts.transpileModule(sendSource+dispatchSource,{compilerOptions:{target:ts.ScriptTarget.ES2022}}).outputText+code,{app,z,db,queuedTaskContinuation,sessionTones:{dispatch:async(_task:any,prompt:string,send:(prompt:string)=>Promise<any>)=>send(prompt)},config:{dataRoot:directory},providerParam:z.enum(["codex","claude","deepseek","ollama","antigravity","grok"]),listAsyncUserInputs,asyncAnswerPrompt,executionHostUsesWorker:()=>false,codex:{listUserInputs:()=>[]},idempotent:async(_request:any,_action:any,_body:any,run:()=>any)=>run(),requirePaidCreditConsent:async()=>{},confirmedPaidCreditProviders:()=>new Set(),queueDispatching:new Set(),latestQueuedThreadTask:async()=>task,activeTaskStatus:(status:string)=>status==="running",assertPaidCreditConsent:async()=>{},applyPendingTaskLocation:async(value:any)=>value,workspacePromptForTask:(_task:any,prompt:string)=>prompt,withoutLegacyWorkspaceApprovalMetadata:()=>({}),publishTaskSnapshot:(value:any)=>value,provider:()=>({stopTask:async()=>{calls.push("stop");return{...task,status:"stopped"};},sendMessage:async(value:any,prompt:string)=>{expect(value.status).toBe(status==="running"?"stopped":"completed");expect(prompt).toContain("continue the authorized work and verification in the same turn");expect(JSON.parse(prompt.split("\n\n").at(-1)!)).toEqual({originalTask:task.prompt,latestUserInput:"Choose\nB"});calls.push("resume");return{...value,id:"next",status:"running"};}}),audit:async()=>{}});
     try{
       const url=`/api/tasks/${provider}/${encodeURIComponent(task.id)}/user-input/${card.id}`,payload={answers:{question_1:{answers:["B"]}}};
       expect((await app.inject(`/api/user-input?taskId=${encodeURIComponent(task.id)}`)).json().requests).toHaveLength(1);

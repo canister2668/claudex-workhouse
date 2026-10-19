@@ -18,6 +18,16 @@ function fixture(saved:any=DEFAULT_CHARACTER_SETTINGS,states:Partial<Record<Prov
 }
 
 describe("provider avatar settings",()=>{
+  it("updates only favorites and serializes with outfit selection",async()=>{
+    const x=fixture();
+    await Promise.all([x.settings.select("codex","Gpt-Codex"),x.settings.favorites("codex",["secretary","tsundere"])]);
+    const saved=(await x.settings.read()).settings;
+    expect(saved.providers.codex.avatarOutfit).toBe("Gpt-Codex");
+    expect(saved.providers.codex.toneFavorites).toEqual(["secretary","tsundere"]);
+    expect(saved.providers.codex.tonePreset).toBe(DEFAULT_CHARACTER_SETTINGS.providers.codex.tonePreset);
+    expect(saved.providers.claude).toEqual(DEFAULT_CHARACTER_SETTINGS.providers.claude);
+  });
+
   it("stores a dock selection in the character settings source and watcher together",async()=>{
     const x=fixture();
     const result=await x.settings.select("ollama","DeepSeek","now");

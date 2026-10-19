@@ -3,6 +3,8 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { CodexAppServerClient, connectCodexAppServerWithRetry } from "./codex/app-server.js";
+import { codexProviderError, codexTurnError } from "./codex/provider-error.js";
+import { waitForCodexCompaction } from "./codex/compaction.js";
 import { StreamSpool } from "./stream-events.js";
 import { normalizeCodexChange, relativePathInfo } from "./diff.js";
 import { claudexWorkhouseCollaborationInstructions, turnLifecycleEvent } from "./codex-collaboration.js";
@@ -182,7 +184,7 @@ function appendNotification(message: {method:string;params?:any}) {
     const contextUsage=compactedContext(previous,null);write({contextUsage});
     return spool.append({ ...base, type:"context_compaction", content:"Context compacted.",metadata:{...base.metadata,contextUsage} });
   }
-  if (message.method === "error") return spool.append({ ...base, type:p.willRetry ? "tool_progress" : isRoot?"task_failed":"agent_failed", content:p.error?.message ?? "Codex error.", terminal:isRoot&&!p.willRetry, metadata:{...base.metadata,willRetry:Boolean(p.willRetry),agentThreadId:isRoot?undefined:eventThreadId} });
+  if (message.method === "error") return spool.append({ ...base, type:p.willRetry ? "tool_progress" : isRoot?"task_failed":"agent_failed", content:p.error?.message ?? "Codex error.", terminal:isRoot&&!p.willRetry, metadata:{...base.metadata,willRetry:Boolean(p.willRetry),providerError:codexProviderError(p.error),agentThreadId:isRoot?undefined:eventThreadId} });
   return spool.append({ ...base, type:"unknown", content:`Codex notification: ${message.method}`, metadata:{ nativeMethod:message.method, payload:p } });
 }
 
@@ -284,14 +286,19 @@ try {
       if (message.method === "turn/started" && message.params?.threadId === threadId) {
         turnId = message.params.turn?.id ?? turnId; write({ turnId, status: "running",activity:"model_thinking",modelTurnStarted:true });
       }
-      if (mode!=="compact"&&message.method === "turn/completed" && message.params?.threadId === threadId && (!turnId || message.params.turn?.id === turnId)) resolve(message.params.turn);
-      if(mode==="compact"&&message.params?.threadId===threadId&&((message.method==="item/completed"&&message.params?.item?.type==="contextCompaction")||message.method==="thread/compacted"))resolve({status:"completed"});
-      if (message.method === "error" && message.params?.threadId === threadId && !message.params?.willRetry) reject(new Error(message.params.error?.message ?? "Codex turn failed."));
+      if (message.method === "turn/completed" && message.params?.threadId === threadId && (!turnId || message.params.turn?.id === turnId)) {
+        if(mode==="compact"&&message.params.turn?.status!=="completed")reject(codexTurnError(message.params.turn?.error,"Codex context compaction did not complete."));
+        else resolve(message.params.turn);
+      }
+      // An item finishing is not the turn's outcome; the turn may still fail.
+      // Older runtimes send an explicit thread/compacted success notification.
+      if(mode==="compact"&&message.params?.threadId===threadId&&message.method==="thread/compacted")resolve({status:"completed"});
+      if (message.method === "error" && message.params?.threadId === threadId && !message.params?.willRetry) reject(codexTurnError(message.params.error));
     };
   });
   if(mode==="compact"){
     await client.request("thread/compact/start",{threadId},30000);
-    await Promise.race([completion,new Promise((_,reject)=>setTimeout(()=>reject(new Error("Codex context compaction timed out.")),120000))]);
+    await waitForCodexCompaction(completion);
     spool.append({type:"task_completed",content:"Codex context compaction completed.",threadId,terminal:true,metadata:{operation:"context_compaction"}});
     finished=true;write({status:"completed",completedAt:new Date().toISOString(),result:"Context compacted.",error:null});
   } else {
@@ -316,8 +323,9 @@ try {
   const completed=finalTurn?.status === "completed";
   if(completed&&finalAgentMessage&&!finalAgentMessageSpooled){spool.append({type:"message_completed",content:finalAgentMessage.text,threadId,turnId,itemId:finalAgentMessage.id,metadata:{role:"agent",phase:"final_answer",recoveredFromCompletedTurn:true}});finalAgentMessageSpooled=true;}
   finished = true;
-  spool.append({type:completed?"task_completed":"task_failed",content:completed?"Codex turn completed.":finalTurn?.error?.message??"Codex turn failed.",threadId,turnId,terminal:true});
-  write({ status: completed ? "completed" : "failed", activity:completed?"completed":"failed", completedAt: new Date().toISOString(), result: finalAgentMessage?.text??null, finalMessageId:finalAgentMessage?.id??null, error: finalTurn?.error?.message ?? null });
+  const providerError=completed?null:codexProviderError(finalTurn?.error);
+  spool.append({type:completed?"task_completed":"task_failed",content:completed?"Codex turn completed.":finalTurn?.error?.message??"Codex turn failed.",threadId,turnId,terminal:true,metadata:providerError?{providerError}:undefined});
+  write({ status: completed ? "completed" : "failed", activity:completed?"completed":"failed", completedAt: new Date().toISOString(), result: finalAgentMessage?.text??null, finalMessageId:finalAgentMessage?.id??null, error: finalTurn?.error?.message ?? null, providerError });
   updateWorkerEmotion(root,"codex",completed?"done":"disappointed",threadId);
   }
 } catch (error) {
@@ -326,9 +334,9 @@ try {
   if(error instanceof ApprovalLoopError||approvalCircuitBroken){
     write({status:"failed",activity:"approval-loop-detected",completedAt:new Date().toISOString(),error:error instanceof Error?error.message:String(error)});
   }else{
-    const message=error instanceof Error?error.message:String(error),errorCategory=sandboxBootstrapErrorCategory(error);
-    spool.append({type:"task_failed",content:message,threadId,turnId,terminal:true,metadata:errorCategory?{errorCategory}:undefined});
-    write({status:"failed",activity:errorCategory?"sandbox-bootstrap-failed":"failed",completedAt:new Date().toISOString(),error:message,errorCategory});
+    const message=error instanceof Error?error.message:String(error),errorCategory=sandboxBootstrapErrorCategory(error),providerError=(error as {providerError?:unknown})?.providerError;
+    spool.append({type:"task_failed",content:message,threadId,turnId,terminal:true,metadata:{...(errorCategory?{errorCategory}:{}),...(providerError?{providerError}:{})}});
+    write({status:"failed",activity:errorCategory?"sandbox-bootstrap-failed":"failed",completedAt:new Date().toISOString(),error:message,errorCategory,...(providerError?{providerError}:{})});
   }
 } finally {
   approvalAbort.abort();

@@ -24,7 +24,7 @@ const CLASSIC: Record<string, string> = {
 const V5: Record<string, string> = {
   "Claude-code": "Claude Code", "Fable-code": "Fable Code",
   "Gpt-Codex-v5": "Codex", "Gpt-Sol-v5": "Sol", "Astra-code": "Astra Code", "Chat-code": "Chat Code",
-  "Gemini-code": "Gemini Code", "Gemma-e4b-v5": "Gemma E4B",
+  "Argon-code": "Argon Code", "Gemini-code": "Gemini Code", "Gemma-e4b-v5": "Gemma E4B",
   "Grok-code": "Grok Code",
   "DeepSeek-code": "DeepSeek Code", "Ollama-code": "Ollama Code", "Whale-code": "Whale Code"
 };

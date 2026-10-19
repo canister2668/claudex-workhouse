@@ -39,7 +39,7 @@ const PAGE_KEYWORDS: Record<SettingsPageId, string[]> = {
   general: ["language.label", "settings.section.language", "settings.theme", "settings.palette", "settings.skin", "settings.sessionTextSize", "settings.conversationTextSize", "display.avatars", "display.statusBubbles", "display.enterToSend", "display.rememberLast", "display.hidePaths", "character.avatarDisplay"],
   notifications: ["display.completionNotifications", "display.approvalNotifications", "display.userInputNotifications", "display.failureNotifications", "display.hostOfflineNotifications", "display.handoffNotifications", "display.vibration", "display.quietHours"],
   policy: ["execution.defaultAgent", "billing.allowPaidCredits", "delegation.toOtherProvider", "policy.defaultEffort", "policy.defaultAutomation", "automation.level", "model.reasoningEffort"],
-  "provider-claude": ["model.claudeModels", "claudeExecution.switchModelsOnFlag", "auth.connectClaudeSubscription", "character.toneLabel", "runtime.title"],
+  "provider-claude": ["model.claudeModels", "claudeExecution.switchModelsOnFlag", "auth.connectClaudeSubscription", "claudeBilling.useApi", "character.toneLabel", "runtime.title"],
   "provider-codex": ["model.codexModels", "auth.connectCodex", "model.speed", "character.toneLabel", "runtime.title"],
   "provider-antigravity": ["antigravityExecution.backend", "auth.connectAntigravity", "provider.antigravity", "character.toneLabel"],
   "provider-grok": ["auth.connectGrok", "provider.grok", "character.toneLabel"],

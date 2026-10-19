@@ -19,11 +19,14 @@ async function harness(){
   const db=new DeckDatabase(path.resolve("src/server/db/sqlite-worker.py"),path.join(root,"fixture.sqlite"));
   await db.ping();const now=new Date().toISOString();
   await db.upsertProject({id:"test",name:"Test",slug:"test",description:null,defaultProvider:null,createdAt:now,updatedAt:now,archivedAt:null});
-  let archived=false,starts=0,resumes=0;
+  let archived=false,starts=0,resumes=0;const selections:any[]=[];
   const workspaces={requireWorkspace:async(id:string)=>{if(id!=="test")throw Object.assign(new Error("missing"),{statusCode:404});return{id,projectId:"test",hostId:"local",canonicalPath:root,archivedAt:archived?now:null};}} as unknown as HostWorkspaceManager;
   const task=(id:string,threadId:string|null=crypto.randomUUID()):DeckTask=>({id,nativeId:id,provider:"codex",threadId,projectId:"test",title:"Fixture",prompt:"fixture",status:"running",createdAt:now,updatedAt:now,result:null,error:null,log:"fixture",owned:true,pid:null,pgid:null,processStart:null,commandMarker:null,parentThreadId:null,ownership:"claudex-workhouse",source:"claudex-workhouse",executionHostId:"local",workspaceId:"test",permissionProfile:":workspace",metadata:{automationLevel:"auto"}});
   const executor:ExternalParticipantExecutor={
-    create:async input=>{starts++;return{...task(`codex:deck:${input.nativeId}`),provider:input.execution.provider,prompt:input.prompt,title:input.title??"Fixture",metadata:{automationLevel:input.execution.automationLevel}};},
+    create:async input=>{starts++;selections.push(input.selection);return{...task(`${input.selection.provider}:deck:${input.nativeId}`),provider:input.selection.provider,prompt:input.prompt,title:input.title??"Fixture",metadata:{automationLevel:input.execution.automationLevel}};},
+    models:async providers=>providers.map(provider=>provider==="codex"
+      ?{provider,defaultModel:"gpt-fixture",defaultReasoningEffort:"medium",defaultServiceTier:null,models:[{id:"gpt-fixture",displayName:"GPT Fixture",reasoningEfforts:["low","medium","high"],defaultReasoningEffort:"medium",serviceTiers:["priority"]},{id:"gpt-mini",displayName:"GPT Mini",reasoningEfforts:["low"],defaultReasoningEffort:"low",serviceTiers:[]}]}
+      :{provider,defaultModel:`${provider}-model`,defaultReasoningEffort:null,defaultServiceTier:null,models:[{id:`${provider}-model`,displayName:provider,reasoningEfforts:["low","medium","high","xhigh","max"],defaultReasoningEffort:null,serviceTiers:provider==="claude"?["priority"]:[]}]}),
     refresh:async item=>(await db.getTask(item.id))!,
     resume:async(item,prompt)=>{resumes++;return{...item,id:`codex:deck:${crypto.randomUUID()}`,status:"running",prompt,result:null};}
   };
@@ -36,7 +39,7 @@ async function harness(){
     expect(response.statusCode).toBe(200);return{...response.json(),headers:{authorization:`Bearer ${response.json().token}`}};
   };
   const create=(headers:Record<string,string>,prompt="Implement fixture",key=crypto.randomUUID())=>app.inject({method:"POST",url:"/external-participants/v1/tasks",headers,payload:{prompt,idempotencyKey:key}});
-  return{root,db,app,executor,newApp,grant,create,task,counts:()=>({starts,resumes}),archive:()=>archived=true};
+  return{root,db,app,executor,newApp,grant,create,task,selections,counts:()=>({starts,resumes}),archive:()=>archived=true};
 }
 
 describe("external participant provider tasks",()=>{
@@ -92,9 +95,48 @@ describe("external participant provider tasks",()=>{
     expect((await h.create(b.headers)).statusCode).toBe(401);
     const c=await h.grant();h.archive();expect((await h.create(c.headers)).statusCode).toBe(403);expect(h.counts().starts).toBe(0);
   });
-  it("rejects participant-selected workspace, model, provider and full access",async()=>{
+  it("rejects participant-selected workspace, unknown fields and full access",async()=>{
     const h=await harness(),g=await h.grant();
-    for(const extra of [{workspaceId:"other"},{model:"invented"},{provider:"claude"},{automationLevel:"full"}])expect((await h.app.inject({method:"POST",url:"/external-participants/v1/tasks",headers:g.headers,payload:{prompt:"work",idempotencyKey:crypto.randomUUID(),...extra}})).statusCode).toBeGreaterThanOrEqual(400);
+    for(const extra of [{workspaceId:"other"},{automationLevel:"full"},{permissionProfile:":danger-full-access"}])expect((await h.app.inject({method:"POST",url:"/external-participants/v1/tasks",headers:g.headers,payload:{prompt:"work",idempotencyKey:crypto.randomUUID(),...extra}})).statusCode).toBeGreaterThanOrEqual(400);
+    expect(h.counts().starts).toBe(0);
+  });
+  it("migrates single-provider grants and keeps their default",async()=>{
+    const h=await harness(),g=await h.grant();
+    expect(g.grant.execution.providers).toEqual(["codex"]);
+    expect((await h.app.inject({method:"GET",url:"/external-participants/v1/capabilities",headers:g.headers})).json().execution).toMatchObject({provider:"codex",providers:["codex"]});
+    expect((await h.create(g.headers)).statusCode).toBe(200);expect(h.selections[0]).toEqual({provider:"codex"});
+    const stored=(await h.db.getSystemSetting("external-participant.grants.v1"))!,value=stored.value as any;
+    value.grants[0].execution={provider:"claude",automationLevel:"read",maxActiveTasks:1};
+    await h.db.putSystemSetting("external-participant.grants.v1",value,new Date().toISOString());
+    expect((await h.app.inject({method:"GET",url:"/external-participants/v1/capabilities",headers:g.headers})).json().execution).toMatchObject({provider:"claude",providers:["claude"],automationLevel:"read"});
+    expect((await h.app.inject({method:"POST",url:"/api/external-participants/grants",payload:{workspaceId:"test",execution:{providers:["codex","codex"]}}})).statusCode).toBeGreaterThanOrEqual(400);
+  });
+  it("lets a multi-provider grant choose provider, model, effort and tier from the enabled catalog",async()=>{
+    const h=await harness(),g=await h.grant({providers:["codex","claude","deepseek","ollama","antigravity","grok"],automationLevel:"read",maxActiveTasks:4});
+    const models=(await h.app.inject({method:"GET",url:"/external-participants/v1/models",headers:g.headers})).json();
+    expect(models.providers.map((item:any)=>item.provider)).toEqual(["codex","claude","deepseek","ollama","antigravity","grok"]);
+    const send=(extra:Record<string,unknown>)=>h.app.inject({method:"POST",url:"/external-participants/v1/tasks",headers:g.headers,payload:{prompt:"work",idempotencyKey:crypto.randomUUID(),...extra}});
+    expect((await send({provider:"claude",model:"claude-model",reasoningEffort:"max",serviceTier:"priority"})).json().task.provider).toBe("claude");
+    expect(h.selections.at(-1)).toEqual({provider:"claude",model:"claude-model",reasoningEffort:"max",serviceTier:"priority"});
+    expect((await send({provider:"codex",model:"gpt-mini",reasoningEffort:"low"})).statusCode).toBe(200);
+    expect((await send({provider:"grok"})).statusCode).toBe(200);expect(h.selections.at(-1)).toEqual({provider:"grok"});
+    expect((await send({provider:"codex",reasoningEffort:"high"})).statusCode).toBe(200);
+    expect(h.selections.at(-1)).toEqual({provider:"codex",reasoningEffort:"high"});
+    const before=h.counts().starts;
+    for(const [extra,code] of [
+      [{provider:"codex",model:"invented"},"EXTERNAL_MODEL_NOT_ENABLED"],
+      [{provider:"codex",model:"gpt-mini",reasoningEffort:"high"},"EXTERNAL_EFFORT_UNSUPPORTED"],
+      [{provider:"codex",model:"gpt-mini",serviceTier:"priority"},"EXTERNAL_SERVICE_TIER_UNSUPPORTED"],
+      [{provider:"deepseek",serviceTier:"priority"},"EXTERNAL_SERVICE_TIER_UNSUPPORTED"],
+      [{provider:"claude",model:"codex-model"},"EXTERNAL_MODEL_NOT_ENABLED"]
+    ] as const){const response=await send(extra);expect(response.statusCode).toBe(400);expect(response.json().code).toBe(code);}
+    expect(h.counts().starts).toBe(before);
+  });
+  it("refuses providers outside the grant without starting work",async()=>{
+    const h=await harness(),g=await h.grant({providers:["codex"],automationLevel:"auto",maxActiveTasks:1});
+    const response=await h.app.inject({method:"POST",url:"/external-participants/v1/tasks",headers:g.headers,payload:{prompt:"work",provider:"claude",idempotencyKey:crypto.randomUUID()}});
+    expect(response.statusCode).toBe(403);expect(response.json().code).toBe("EXTERNAL_PROVIDER_DENIED");
+    expect((await h.app.inject({method:"GET",url:"/external-participants/v1/models",headers:g.headers})).json().providers.map((item:any)=>item.provider)).toEqual(["codex"]);
     expect(h.counts().starts).toBe(0);
   });
   it("leaves stale unresolved dispatches unrepeated and replays failures",async()=>{
@@ -118,6 +160,7 @@ describe("external participant provider tasks",()=>{
       await client.connect(new StdioClientTransport({command:process.execPath,args:["--import","tsx","src/server/external-participant-mcp.ts"],cwd:process.cwd(),env:{...process.env,CLAUDEX_PARTICIPANT_TOKEN:g.token,CLAUDEX_PARTICIPANT_ORIGIN:origin} as Record<string,string>,stderr:"pipe"}));
       const parse=(result:any)=>JSON.parse(result.content[0].text);
       expect(parse(await client.callTool({name:"get_capabilities",arguments:{}})).execution.provider).toBe("codex");
+      expect(parse(await client.callTool({name:"list_models",arguments:{}})).providers[0].defaultModel).toBe("gpt-fixture");
       const submitted=parse(await client.callTool({name:"create_task",arguments:{prompt:"Implement fixture",idempotencyKey:crypto.randomUUID()}})),source=(await h.db.getTask(submitted.task.taskId))!;
       await h.db.upsertTask({...source,status:"completed",result:"Implemented and tested"});
       expect(parse(await client.callTool({name:"get_task",arguments:{taskId:source.id}})).task.result).toBe("Implemented and tested");

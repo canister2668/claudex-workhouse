@@ -46,7 +46,21 @@ API の認証ヘッダーを直接追加したり、Claude Code の OAuth トー
 運用者が実行環境にすでに設定している認証情報には、Claude Code 自身の認証優先順位が
 適用されます。既存の `ANTHROPIC_API_KEY`、`ANTHROPIC_AUTH_TOKEN`、クラウド Provider
 設定、またはカスタム credential helper がサブスクリプションログインより優先される
-場合があります。Workhouse はこれらの値を生成せず、CLI の優先順位も変更しません。
+場合があります。Workhouse は、下記の API クレジットモードを有効にした場合を除き、
+これらの値を生成せず、CLI の優先順位も変更しません。
+
+所有者は 設定 › Claude › アカウント、または Claude セッション上部のスイッチから
+Claude を API クレジットに切り替えられます。このモードでは保存済みの Console API
+キーを `ANTHROPIC_API_KEY` として Claude ワーカーに渡し、CLI がこれをサブスクリプション
+ログインより優先するため、使用量はその Console 組織(Max・Team の月間 API クレジットが
+使われる組織)に課金されます。キーは `data/config/claude-billing.json`(権限 0600)にのみ
+保存され、このサーバーのすべての Claude セッションの次のリクエストから適用され、リモート
+実行ホストには渡されません。Anthropic にはクレジット残高を返すエンドポイントがないため、
+残りクレジットは設定した月間クレジットから今回の周期の使用額を引いた値です。任意の
+`sk-ant-admin` キーを保存すると、使用額を Admin API のコストレポートから読み取ります。
+Workhouse が自ら行う Anthropic API 呼び出しはこれだけで、Admin キーはタスクに渡しません。
+Admin キーがない場合は、API モードで実行した各タスクについて CLI が報告した
+`total_cost_usd` を合計します。
 
 Codex も同じ Provider 固有の境界に従います。ログインと認証済み呼び出しは、認証情報を
 抽出して OpenAI API を直接呼び出す方式ではなく、公式 Codex app-server ランタイムを
